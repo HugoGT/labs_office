@@ -41,7 +41,7 @@ import {
   type ArtPieceFile,
   type DoorVariant,
 } from '../../src/game/artContract.ts';
-import type { ChairMaterial } from './domain/chairs.ts';
+import { DEFAULT_GAMER_ACCENT, type ChairMaterial } from './domain/chairs.ts';
 import type { DoorMaterial } from './domain/doors.ts';
 import type { PixelBuffer } from '../../src/art/pixelBuffer.ts';
 import type { PlantKind, TreeKind } from './domain/props.ts';
@@ -149,6 +149,9 @@ export function renderPackFiles(): Map<string, Uint8Array> {
         layers: CHAIR_LAYERS,
         anchors: { seat: CHAIR.anchor, ground: CHAIR.ground },
         footprint: CHAIR.footprint,
+        // Only the gamer chair's accent takes a color; the rest keep their materials.
+        colorable: material === 'gamer',
+        defaultColor: material === 'gamer' ? DEFAULT_GAMER_ACCENT : null,
         files: [png(`chair/${material}.png`, 'sheet', 'chair', image)],
       }),
     ),

@@ -143,3 +143,18 @@ test('the gamer chair is the tallest and carries its accent color', () => {
 test('chairs are cached and deterministic', () => {
   assert.equal(chairSprite('wood', 'up'), chairSprite('wood', 'up'));
 });
+
+test('only the gamer chair takes an accent color, and the silhouette does not change with it', () => {
+  const teal = '#2a9d8f';
+  for (const facing of FACINGS) {
+    const red = chairSprite('gamer', facing);
+    const painted = chairSprite('gamer', facing, teal);
+    const alpha = (image: PixelBuffer): number[] => Array.from(image.data).filter((_, index) => index % 4 === 3);
+    for (const layer of ['back', 'front'] as const) assert.deepEqual(alpha(painted[layer]), alpha(red[layer]), `${facing} ${layer}: same silhouette`);
+    assert.notDeepEqual(Array.from(painted.back.data), Array.from(red.back.data), `${facing}: the accent repaints the red parts`);
+    assert.deepEqual([painted.seat, painted.ground], [red.seat, red.ground], `${facing}: same seat and ground points`);
+    for (const material of ['wood', 'metal', 'leather'] as const) {
+      assert.deepEqual(Array.from(chairSprite(material, facing, teal).back.data), Array.from(chairSprite(material, facing).back.data), `${material} ${facing}: no accent to paint`);
+    }
+  }
+});

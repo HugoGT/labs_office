@@ -5,17 +5,18 @@ import { decorPieceInfo, type DecorPieceInfo } from '../game/officeDecor';
 import type { DecorPick } from '../hooks/useDecorEditor';
 import { ArtPreviewCanvas } from './ArtPreviewCanvas';
 import styles from './DecorPalette.module.css';
-import { TileColorInput } from './TileColorInput';
+import { ColorableTile } from './ColorableTile';
 
 /**
  * The palette of the decor editor (#208): every piece the office decor layer
  * places, grouped by kind, each with a thumbnail cut from its sheet (pack and
  * approved uploads, from the same catalog as the other palettes). A tile is
  * its picture, plus the size in tiles of a room table: the name is its
- * tooltip and accessible name, the heading says the kind; a colorable piece carries a color
- * input, chosen before picking because the rail steps aside once a piece is
- * picked. Presentational: the editor owns which entry is picked, the colors
- * and what a click on the map does.
+ * tooltip and accessible name, the heading says the kind; a colorable piece's
+ * tile also carries the color icon, and a click anywhere on it picks the piece
+ * in its current color and opens the color picker, which then changes the
+ * picked piece live. Presentational: the editor owns which entry is picked,
+ * the colors and what a click on the map does.
  */
 
 type DecorCatalogKind = 'chair' | 'desk' | 'table' | 'plant' | 'door';
@@ -72,7 +73,10 @@ export interface DecorPaletteProps {
   /** The color chosen per colorable piece; one without starts in its manifest default. */
   colors?: Readonly<Partial<Record<string, string>>>;
   onPick: (pick: DecorPick) => void;
+  /** A colorable piece's color, live while its picker is dragged; also what its tile reports when clicked (picked, in its current color). */
   onColorChange?: (piece: string, color: string) => void;
+  /** A colorable tile's color picker opened (`true`) or closed: the editor keeps its rail on screen while it is open. */
+  onColorPicking?: (open: boolean) => void;
   disabled?: boolean;
   preview?: ArtPreviewCache;
 }
@@ -111,7 +115,7 @@ function Thumbnail({
   );
 }
 
-export function DecorPalette({ value, catalog, offers = () => true, colors = {}, onPick, onColorChange, disabled = false, preview }: DecorPaletteProps) {
+export function DecorPalette({ value, catalog, offers = () => true, colors = {}, onPick, onColorChange, onColorPicking, disabled = false, preview }: DecorPaletteProps) {
   const pressed = (id: string): boolean => value?.piece === id;
   return (
     <div className={styles.palettes}>
@@ -132,29 +136,41 @@ export function DecorPalette({ value, catalog, offers = () => true, colors = {},
                 const color = colorable ? (colors[option.id] ?? option.defaultColor) : null;
                 // Room tables tell their size apart; the horizontal one, as the catalog states it.
                 const size = kind === 'table' ? decorSizeLabel(pick.info) : null;
+                // A colorable tile picks its piece in the color it has, never toggling it off: its click also opens the picker.
+                const picksColored = colorable && color !== null && onColorChange !== undefined;
+                const entry = (
+                  <button
+                    type="button"
+                    className={styles.entry}
+                    aria-label={option.name}
+                    title={size === null ? option.name : `${option.name} (${size})`}
+                    aria-pressed={pressed(option.id)}
+                    disabled={disabled}
+                    onClick={() => (picksColored ? onColorChange(option.id, color) : onPick(pick))}
+                  >
+                    <Thumbnail option={option} kind={kind} color={color} preview={preview} sized={size !== null} />
+                    {size !== null && <span className={styles.size}>{size}</span>}
+                  </button>
+                );
+                if (!colorable || color === null) {
+                  return (
+                    <div key={option.id} className={styles.cell}>
+                      {entry}
+                    </div>
+                  );
+                }
                 return (
-                  <div key={option.id} className={styles.cell}>
-                    <button
-                      type="button"
-                      className={styles.entry}
-                      aria-label={option.name}
-                      title={size === null ? option.name : `${option.name} (${size})`}
-                      aria-pressed={pressed(option.id)}
-                      disabled={disabled}
-                      onClick={() => onPick(pick)}
-                    >
-                      <Thumbnail option={option} kind={kind} color={color} preview={preview} sized={size !== null} />
-                      {size !== null && <span className={styles.size}>{size}</span>}
-                    </button>
-                    {colorable && color !== null && (
-                      <TileColorInput
-                        label={`Color de ${option.name}`}
-                        value={color}
-                        disabled={disabled}
-                        onChange={(hex) => onColorChange?.(option.id, hex)}
-                      />
-                    )}
-                  </div>
+                  <ColorableTile
+                    key={option.id}
+                    className={styles.cell}
+                    label={`Color de ${option.name}`}
+                    value={color}
+                    disabled={disabled}
+                    onChange={(hex) => onColorChange?.(option.id, hex)}
+                    onPicking={onColorPicking}
+                  >
+                    {entry}
+                  </ColorableTile>
                 );
               })}
             </div>

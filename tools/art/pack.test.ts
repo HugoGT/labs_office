@@ -246,12 +246,13 @@ describe('art pack manifest', () => {
     ]);
   });
 
-  it('marks only the painted desk, the plain floor and the carpet as colorable', () => {
+  it('marks only the gamer chair, the painted desk, the plain floor and the carpet as colorable', () => {
     const colorable = manifest.pieces
-      .filter((piece): piece is ArtDeskPiece | ArtFloorPiece => piece.kind === 'desk' || piece.kind === 'floor')
+      .filter((piece): piece is ArtChairPiece | ArtDeskPiece | ArtFloorPiece => piece.kind === 'chair' || piece.kind === 'desk' || piece.kind === 'floor')
       .filter((piece) => piece.colorable)
       .map((piece) => [piece.id, piece.defaultColor]);
     expect(colorable).toEqual([
+      ['chair-gamer', '#d8433b'],
       ['desk-painted', '#4f9a8a'],
       ['floor-plain', '#b9c3cc'],
       ['floor-carpet', '#5a6f86'],

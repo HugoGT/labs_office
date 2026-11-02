@@ -54,7 +54,34 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
     expect(commands.at(-1)).toMatchObject({ brush: { kind: 'piece', piece: 'chair-gamer', rotation: 0 }, area: null });
 
     act(() => bridge.emit('decorpick', { index: at(40, 40) }));
-    await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(40, 40), item: { piece: 'chair-gamer', rotation: 0 } }]));
+    // The gamer chair takes a color: picked from its tile it is in hand in the color it has, its red by default.
+    await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(40, 40), item: { piece: 'chair-gamer', rotation: 0, color: '#d8433b' } }]));
+  });
+
+  it('a click on a colorable tile keeps the rail while its picker is open and follows the color live; one Escape closes the picker keeping the color, a second puts the piece down', async () => {
+    Object.defineProperty(HTMLInputElement.prototype, 'showPicker', { configurable: true, value: vi.fn() });
+    try {
+      const { commands } = renderSection({ initiallyActive: true });
+
+      await userEvent.click(await screen.findByRole('button', { name: 'Escritorio pintado' }));
+      expect(commands.at(-1)).toMatchObject({ brush: { piece: 'desk-painted', color: '#4f9a8a' }, pickingColor: true });
+
+      fireEvent.input(screen.getByLabelText(/^Color de Escritorio pintado:/), { target: { value: '#c83c3c' } });
+      await vi.waitFor(() => expect(commands.at(-1)).toMatchObject({ brush: { piece: 'desk-painted', color: '#c83c3c' }, pickingColor: true }));
+
+      // The first Escape is the browser's picker's: it closes and sends back the color it opened with, which is not kept.
+      fireEvent.input(screen.getByLabelText(/^Color de Escritorio pintado:/), { target: { value: '#4f9a8a' } });
+      await vi.waitFor(() => expect(commands.at(-1)).not.toHaveProperty('pickingColor'));
+      expect(commands.at(-1)).toMatchObject({ brush: { piece: 'desk-painted', color: '#c83c3c' } });
+      expect(screen.getByLabelText('Color de Escritorio pintado: #c83c3c')).toHaveValue('#c83c3c');
+
+      // The second one reaches the page and puts the piece down, like any Escape does.
+      fireEvent.keyDown(document.body, { key: 'Escape' });
+      await vi.waitFor(() => expect(commands.at(-1)?.brush).toBeNull());
+      expect(screen.getByLabelText('Color de Escritorio pintado: #c83c3c')).toHaveValue('#c83c3c');
+    } finally {
+      Reflect.deleteProperty(HTMLInputElement.prototype, 'showPicker');
+    }
   });
 
   it('explains nothing between its header and «Múltiple», and offers no turn or eraser control of its own (#207, #208)', async () => {

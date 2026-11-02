@@ -100,6 +100,11 @@ export interface DecorEditCommand {
    * `decordelete`).
    */
   selected?: number | null;
+  /**
+   * The browser's color picker of the picked piece's palette tile is open: the right rail stays on screen then (the
+   * picker hangs from it and would close with it), and hides once the picker does. Absent with no piece picked.
+   */
+  pickingColor?: true;
 }
 
 /**

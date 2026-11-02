@@ -234,6 +234,7 @@ export function DecorEditorSection({
           walls.unpick();
           editor.setColor(piece, color);
         }}
+        onColorPicking={editor.setPickingColor}
         disabled={editor.blocked}
         preview={preview}
       />

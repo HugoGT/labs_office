@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { afterEach, describe, expect, it } from 'vitest';
 import { waitForSceneRunning } from '../test/phaserScene';
 import { TERRAIN_LAYER_COUNT, TERRAIN_LAYER_ORIGIN, propPlacement, type ArtChairPiece } from './artContract';
-import { artSheetKey, findPiece } from './artPack';
+import { artSheetKey, findPiece, recoloredSheetKey } from './artPack';
 import { ArtPackLoader } from './artPackLoader';
 import { chairPlacement, deskPlacement, footprintAnchor } from './artPlacement';
 import { TILE, ZONE_LABELS } from './mapData';
@@ -455,6 +455,29 @@ describe('placeChairs', () => {
       { x: back.x, y: back.y, frame: back.frame },
       { x: front.x, y: front.y, frame: front.frame },
     ]);
+  });
+
+  it('draws a painted gamer chair from a recolored copy of its sheet, and a chair without a color as exported', async () => {
+    const TEAL = '#2a9d8f';
+    const drawn = await withArtScene((scene, art) => {
+      placeChairs(scene, [{ index: 5 * W + 3, piece: 'chair-gamer', facing: 'down', color: TEAL }, { index: 7 * W + 9, piece: 'chair-gamer', facing: 'down' }], W, art);
+      const keys = images(scene).map((img) => img.texture.key);
+      return { keys, copyExists: scene.textures.exists(recoloredSheetKey('chair-gamer', 'sheet', TEAL)) };
+    });
+
+    expect(drawn.copyExists).toBe(true);
+    // Two layers per chair: the painted one from the copy, the other from the exported sheet.
+    expect(drawn.keys.filter((key) => key === recoloredSheetKey('chair-gamer', 'sheet', TEAL))).toHaveLength(2);
+    expect(drawn.keys.filter((key) => key === artSheetKey('chair-gamer', 'sheet'))).toHaveLength(2);
+  });
+
+  it('ignores a color on a chair that is not colorable', async () => {
+    const drawn = await withArtScene((scene, art) => {
+      placeChairs(scene, [{ index: 5 * W + 3, piece: 'chair-metal', facing: 'down', color: '#2a9d8f' }], W, art);
+      return images(scene).map((img) => img.texture.key);
+    });
+
+    expect(drawn).toEqual([artSheetKey('chair-metal', 'sheet'), artSheetKey('chair-metal', 'sheet')]);
   });
 
   it('without the pack marks each chair with a placeholder, and draws nothing for no chair', async () => {

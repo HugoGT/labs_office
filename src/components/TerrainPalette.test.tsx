@@ -60,6 +60,31 @@ describe('TerrainPalette', () => {
     expect(onColorChange.mock.calls).toEqual([['carpet', '#c0392b']]);
   });
 
+  it('a click on carpet picks it in its current color and opens the picker, while the other floors only pick', async () => {
+    const showPicker = vi.fn();
+    Object.defineProperty(HTMLInputElement.prototype, 'showPicker', { configurable: true, value: showPicker });
+    try {
+      const onPick = vi.fn();
+      const onColorChange = vi.fn();
+      const onColorPicking = vi.fn();
+      render(
+        <TerrainPalette value={null} onPick={onPick} floors={catalog.floor} preview={noPreview()} colors={{ carpet: '#3c6ac8' }} onColorChange={onColorChange} onColorPicking={onColorPicking} />,
+      );
+
+      await userEvent.click(screen.getByRole('button', { name: 'Moqueta' }));
+      expect(onColorChange.mock.calls).toEqual([['carpet', '#3c6ac8']]);
+      expect(onPick).not.toHaveBeenCalled();
+      expect(showPicker).toHaveBeenCalledTimes(1);
+      expect(onColorPicking).toHaveBeenCalledWith(true);
+
+      await userEvent.click(screen.getByRole('button', { name: 'Baldosa' }));
+      expect(onPick.mock.calls).toEqual([['tile']]);
+      expect(showPicker).toHaveBeenCalledTimes(1);
+    } finally {
+      Reflect.deleteProperty(HTMLInputElement.prototype, 'showPicker');
+    }
+  });
+
   it('shows the chosen carpet color on its picker and thumbnail (#222)', async () => {
     const preview = noPreview();
     render(<TerrainPalette value={null} onPick={() => {}} floors={catalog.floor} preview={preview} colors={{ carpet: '#3c6ac8' }} />);

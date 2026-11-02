@@ -2,6 +2,8 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { PACK_FACINGS } from '../../src/game/artContract.ts';
 import { recolorPixels } from '../../src/game/artColor.ts';
+import { chairSprite, DEFAULT_GAMER_ACCENT } from './domain/chairs.ts';
+import { FACINGS } from '../../src/art/seating.ts';
 import { DEFAULT_TABLE_COLOR, tableSprite } from './domain/tables.ts';
 import { carpetTile, DEFAULT_CARPET_COLOR, DEFAULT_PLAIN_COLOR, plainTile } from './domain/tiles.ts';
 
@@ -62,6 +64,30 @@ test('recoloring the exported painted desk stays within a few levels of the expo
       const result = drift(recolorPixels(exported, DEFAULT_TABLE_COLOR, color), tableSprite('painted', facing, color).image.data);
       assert.ok(result.mean < 2, `${facing} ${color}: mean drift ${result.mean}`);
       assert.ok(result.offShare < 0.04, `${facing} ${color}: ${result.offShare} of the pixels drift`);
+    }
+  }
+});
+
+test('recoloring the exported gamer chair matches the exporter; only dark outline pixels may stray, by a few levels', () => {
+  // The shell's near-black outline sits inside the red ramp's tolerance, so the recolor tints it slightly:
+  // allowed for those pixels alone, never for the shell, base, chrome or the red parts themselves.
+  const OUTLINE_BELOW = 64;
+  for (const facing of FACINGS) {
+    const exported = chairSprite('gamer', facing, DEFAULT_GAMER_ACCENT);
+    for (const color of COLORS) {
+      const painted = chairSprite('gamer', facing, color);
+      for (const layer of ['back', 'front'] as const) {
+        const source = exported[layer].data;
+        const expected = painted[layer].data;
+        const actual = recolorPixels(source, DEFAULT_GAMER_ACCENT, color);
+        for (let i = 0; i < expected.length; i += 4) {
+          if ((source[i + 3] ?? 0) === 0 && (expected[i + 3] ?? 0) === 0) continue;
+          let worst = 0;
+          for (let channel = 0; channel < 4; channel += 1) worst = Math.max(worst, Math.abs((actual[i + channel] ?? 0) - (expected[i + channel] ?? 0)));
+          const outline = Math.max(source[i] ?? 0, source[i + 1] ?? 0, source[i + 2] ?? 0) < OUTLINE_BELOW;
+          assert.ok(worst <= (outline ? 24 : 8), `${facing} ${layer} ${color} pixel ${i / 4}: off by ${worst}${outline ? ' (outline)' : ''}`);
+        }
+      }
     }
   }
 });

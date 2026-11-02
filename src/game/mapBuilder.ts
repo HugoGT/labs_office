@@ -84,11 +84,12 @@ function packSheet<P extends ArtPiece>(
   art: ArtTextures | undefined,
   id: string,
   isKind: (piece: ArtPiece) => piece is P,
+  color: string | null = null,
 ): { piece: P; key: string } | null {
   if (art === undefined || art.manifest === null) return null;
   const piece = findPiece(art.manifest, id);
   if (piece === undefined || !isKind(piece)) return null;
-  const key = art.sheet(piece.id, 'sheet');
+  const key = art.sheet(piece.id, 'sheet', color);
   return key === null ? null : { piece, key };
 }
 
@@ -369,13 +370,14 @@ export const CHAIR_OBJECT_NAME = 'map:chair';
 /**
  * The chairs placed from the terrain editor, each its own pack piece in both
  * layers on the middle of its tile, like `placeSeats`; a grey placeholder
- * while its sheet is missing. Returns what it drew, so the scene can destroy
- * it and draw the chairs again after an edit.
+ * while its sheet is missing. A colorable chair (the gamer's accent) is drawn
+ * from its recolored sheet when it has a color. Returns what it drew, so the
+ * scene can destroy it and draw the chairs again after an edit.
  */
 export function placeChairs(scene: Phaser.Scene, chairs: readonly PlacedChair[], width: number, art?: ArtTextures): Phaser.GameObjects.GameObject[] {
   const drawn: Phaser.GameObjects.GameObject[] = [];
-  for (const { index, piece, facing } of chairs) {
-    const sheet = packSheet(art, piece, isChair);
+  for (const { index, piece, facing, color } of chairs) {
+    const sheet = packSheet(art, piece, isChair, color ?? null);
     const ground = chairGround(width, index);
     if (sheet === null) {
       const tx = Math.floor(ground.x / TILE);

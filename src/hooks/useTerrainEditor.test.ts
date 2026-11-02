@@ -277,6 +277,28 @@ describe('useTerrainEditor', () => {
     const BLUE = '#3c6ac8';
     const carpet = (color?: string): TerrainBrush => ({ kind: 'floor', material: 'carpet', ...(color === undefined ? {} : { color }) });
 
+    it('tells the map while a color picker is open, only with a floor in hand, so the rail it hangs from stays', () => {
+      const { result, commands } = setup();
+      act(() => result.current.enter());
+      act(() => result.current.setPickingColor(true));
+      expect(commands.at(-1)).not.toHaveProperty('pickingColor');
+
+      act(() => result.current.setColor('carpet', RED));
+      expect(commands.at(-1)).toEqual({ brush: carpet(RED), pickingColor: true });
+
+      act(() => result.current.setColor('carpet', BLUE));
+      expect(commands.at(-1)).toEqual({ brush: carpet(BLUE), pickingColor: true });
+
+      act(() => result.current.setPickingColor(false));
+      expect(commands.at(-1)).toEqual({ brush: carpet(BLUE) });
+
+      act(() => result.current.setPickingColor(true));
+      act(() => result.current.exit());
+      act(() => result.current.enter());
+      act(() => result.current.setColor('carpet', RED));
+      expect(commands.at(-1)).toEqual({ brush: carpet(RED) });
+    });
+
     it('picks carpet as soon as its color is chosen, ready to paint; carpet already picked only changes color', () => {
       const { result, commands } = setup();
       act(() => result.current.enter());

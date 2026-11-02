@@ -52,6 +52,11 @@ export interface TerrainEditCommand {
   erasable?: readonly number[];
   /** With the wall eraser: the footprint of every decor piece it takes by a tile under it, outlined whole in red over the post box. */
   erasableDecor?: readonly TileRect[];
+  /**
+   * The browser's color picker of the picked floor's palette tile is open: the right rail stays on screen then (the
+   * picker hangs from it and would close with it), and hides once the picker does. Absent with no brush picked.
+   */
+  pickingColor?: true;
 }
 
 /** The outlines "Editar terreno" draws (#216): every desk and room, so a block or a wall is not painted blind. */

@@ -192,7 +192,13 @@ function hasDrawingFields(piece: Record<string, unknown>, kind: ArtPieceKind): b
     case 'character':
       return isRecord(piece.anchors) && isPoint(piece.anchors.walk) && isPoint(piece.anchors.seated);
     case 'chair':
-      return isRecord(piece.anchors) && isPoint(piece.anchors.seat) && isPoint(piece.anchors.ground);
+      // The color pair is optional on a chair: one uploaded before chairs had colors has neither field.
+      return (
+        isRecord(piece.anchors) &&
+        isPoint(piece.anchors.seat) &&
+        isPoint(piece.anchors.ground) &&
+        (piece.colorable === undefined ? piece.defaultColor === undefined : isColorModel(piece))
+      );
     case 'desk': {
       const facings = piece.facings;
       if (!isPoint(piece.anchor) || !isRecord(facings) || !isColorModel(piece)) return false;
@@ -307,7 +313,8 @@ export interface Recolor {
  * there, and anything else is a row this client should not tint.
  */
 export function recolorFor(piece: ArtPiece, color: string | null): Recolor | null {
-  if ((piece.kind !== 'desk' && piece.kind !== 'floor') || !piece.colorable || piece.defaultColor === null) return null;
+  if ((piece.kind !== 'desk' && piece.kind !== 'floor' && piece.kind !== 'chair') || piece.colorable !== true) return null;
+  if (piece.defaultColor === null || piece.defaultColor === undefined) return null;
   if (color === null) return null;
   const to = color.toLowerCase();
   if (!COLOR_PATTERN.test(to) || to === piece.defaultColor.toLowerCase()) return null;

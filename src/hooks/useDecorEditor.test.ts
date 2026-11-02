@@ -220,6 +220,32 @@ describe('useDecorEditor', () => {
     await act(async () => calls[1]!.resolve());
   });
 
+  it('tells the map while a color picker is open, only with a piece in hand, so the rail it hangs from stays', () => {
+    const { result, commands } = setup({});
+    act(() => result.current.enter());
+    act(() => result.current.setPickingColor(true));
+    // Nothing in hand: nothing hides the rail, so nothing needs to hold it.
+    expect(commands.at(-1)).not.toHaveProperty('pickingColor');
+
+    act(() => result.current.setColor('desk-painted', '#c83c3c'));
+    expect(commands.at(-1)).toMatchObject({ pickingColor: true, brush: { piece: 'desk-painted', color: '#c83c3c' } });
+
+    // The color changes live under the open picker, and the flag stays.
+    act(() => result.current.setColor('desk-painted', '#3c5ac8'));
+    expect(commands.at(-1)).toMatchObject({ pickingColor: true, brush: { color: '#3c5ac8' } });
+
+    act(() => result.current.setPickingColor(false));
+    expect(commands.at(-1)).not.toHaveProperty('pickingColor');
+    expect(commands.at(-1)?.brush).toMatchObject({ color: '#3c5ac8' });
+
+    // Leaving the editor forgets an open picker.
+    act(() => result.current.setPickingColor(true));
+    act(() => result.current.exit());
+    act(() => result.current.enter());
+    act(() => result.current.setColor('desk-painted', '#c83c3c'));
+    expect(commands.at(-1)).not.toHaveProperty('pickingColor');
+  });
+
   it('remembers the color chosen for a piece across a reload, per scope, without touching the server', () => {
     const { decor, calls } = deferredPort();
     const first = setup({ decor });

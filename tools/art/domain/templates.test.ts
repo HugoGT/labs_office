@@ -228,13 +228,18 @@ describe('art templates', () => {
     );
     const checker = new Set([TEMPLATE_COLORS.checkerLight, TEMPLATE_COLORS.checkerDark].map((color) => JSON.stringify(color)));
     let drawable = 0;
+    const unexpected: string[] = [];
     for (let y = 0; y < template.height; y += 1) {
       for (let x = 0; x < template.width; x += 1) {
         const pixel = JSON.stringify(template.getPixel(x, y));
-        expect(guides.has(pixel) || checker.has(pixel), `(${x}, ${y}) ${pixel}`).toBe(true);
-        if (checker.has(pixel)) drawable += 1;
+        const isChecker = checker.has(pixel);
+        if (!isChecker && !guides.has(pixel)) unexpected.push(`(${x}, ${y}) ${pixel}`);
+        if (isChecker) drawable += 1;
       }
     }
+    // One assertion for the whole sheet: an expect() per pixel cost ~1.6 s on the 512x1024 door sheet
+    // (524288 calls), enough for a loaded CI runner to hit the 5 s test timeout.
+    expect(unexpected.slice(0, 10), `${unexpected.length} pixels are neither a guide nor the checker`).toEqual([]);
     expect(drawable / (template.width * template.height)).toBeGreaterThan(0.6);
     for (const color of [TEMPLATE_COLORS.checkerLight, TEMPLATE_COLORS.checkerDark]) expect(color.a).toBeGreaterThan(0);
     for (const color of [TEMPLATE_COLORS.checkerLight, TEMPLATE_COLORS.checkerDark]) expect(color.a).toBeLessThan(255);

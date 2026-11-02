@@ -1795,6 +1795,27 @@ describe('OfficeShell: instalar la app (#13)', () => {
   });
 });
 
+describe('OfficeShell: right rail while a color picker is open', () => {
+  it('keeps the HUD the picker hangs from while a piece or a floor is picked, and hides it once the picker closes', () => {
+    render(<OfficeShell onLeaveOffice={vi.fn()} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    const sidebar = () => screen.getByRole('complementary', { name: 'Personas', hidden: true });
+    const chair = { kind: 'piece', piece: 'chair-gamer', info: { kind: 'chair', footprint: { w: 1, h: 1 }, colorable: true }, rotation: 0, color: '#2a9d8f' } as const;
+    const carpet = { kind: 'floor', material: 'carpet', color: '#2a9d8f' } as const;
+
+    act(() => bridge.emitCommand('decoredit', { brush: chair, area: null, pickingColor: true }));
+    expect(sidebar()).toBeVisible();
+    act(() => bridge.emitCommand('decoredit', { brush: chair, area: null }));
+    expect(sidebar()).not.toBeVisible();
+    act(() => bridge.emitCommand('decoredit', null));
+
+    act(() => bridge.emitCommand('terrainedit', { brush: carpet, pickingColor: true }));
+    expect(sidebar()).toBeVisible();
+    act(() => bridge.emitCommand('terrainedit', { brush: carpet }));
+    expect(sidebar()).not.toBeVisible();
+  });
+});
+
 describe('OfficeShell: right rail while painting terrain', () => {
   it('hides the right-hand HUD while a terrain brush is picked, and shows it again once it is not', () => {
     render(<OfficeShell onLeaveOffice={vi.fn()} />);

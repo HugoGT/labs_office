@@ -19,7 +19,7 @@ import { createCollisionAdminClient } from '../dashboard/collisionAdminClient';
 import type { CollisionAdminPort } from '../dashboard/collisionAdminPort';
 import { ART_PACK_MANIFEST_URL, artUploadsManifestUrl } from '../game/artPack';
 import { resolveLivekitConfig } from '../game/livekitEndpoint';
-import { decorEditHidesRail, terrainEditHoldsMap } from '../game/editorMapHold';
+import { decorEditHidesRail, terrainEditHidesRail } from '../game/editorMapHold';
 import { TILE, type SpaceArea } from '../game/mapData';
 import { createOfficeDecorClient } from '../game/officeDecorClient';
 import type { DecorTileRect } from '../game/officeDecor';
@@ -279,7 +279,7 @@ export function OfficeShell({
    */
   const [terrainHolds, setTerrainHolds] = useState(false);
   const [decorHidesRail, setDecorHidesRail] = useState(false);
-  useEffect(() => bridge.onCommand('terrainedit', (command) => setTerrainHolds(terrainEditHoldsMap(command))), [bridge]);
+  useEffect(() => bridge.onCommand('terrainedit', (command) => setTerrainHolds(terrainEditHidesRail(command))), [bridge]);
   useEffect(() => bridge.onCommand('decoredit', (command) => setDecorHidesRail(decorEditHidesRail(command))), [bridge]);
   const hudHidden = terrainHolds || decorHidesRail;
   /**

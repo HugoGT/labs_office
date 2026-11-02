@@ -83,12 +83,18 @@ describe('officeDecor: pieces', () => {
     expect(decorRotationFor('chair', 270)).toBe(270);
   });
 
-  it('marks a colorable desk table colorable, and nothing else', () => {
+  it('marks a colorable desk table and a colorable chair colorable, and nothing else', () => {
     expect(decorPieceInfo({ kind: 'desk', colorable: true })).toEqual({ kind: 'desk', footprint: { w: 3, h: 1 }, colorable: true });
     expect(decorPieceInfo({ kind: 'desk', colorable: false })?.colorable).toBeUndefined();
-    expect(decorPieceInfo({ kind: 'chair', colorable: true })?.colorable).toBeUndefined();
+    expect(decorPieceInfo({ kind: 'chair', colorable: true })).toEqual({ kind: 'chair', footprint: { w: 1, h: 1 }, colorable: true });
+    expect(decorPieceInfo({ kind: 'chair', colorable: false })?.colorable).toBeUndefined();
+    expect(decorPieceInfo({ kind: 'chair' })?.colorable).toBeUndefined();
+    // A plant or a room table has no color of its own, whatever a row says.
+    expect(decorPieceInfo({ kind: 'plant', footprint: { w: 1, h: 1 }, colorable: true })?.colorable).toBeUndefined();
     const manifest = JSON.parse(exportedManifest) as { pieces: { id: string; kind: string; colorable?: boolean }[] };
     expect(decorPieceInfo(manifest.pieces.find((piece) => piece.id === 'desk-painted')!)?.colorable).toBe(true);
+    expect(decorPieceInfo(manifest.pieces.find((piece) => piece.id === 'chair-gamer')!)?.colorable).toBe(true);
+    expect(decorPieceInfo(manifest.pieces.find((piece) => piece.id === 'chair-wood')!)?.colorable).toBeUndefined();
   });
 
   it('takes a color only as a strict lower-case #rrggbb', () => {
@@ -173,6 +179,22 @@ describe('officeDecor: seats', () => {
       { index: at(4, 5), piece: 'chair-wood', facing: 'down' },
       { index: at(6, 5), piece: 'chair-upload-0123456789abcdef', facing: 'right' },
     ]);
+  });
+});
+
+describe('officeDecor: painted seats', () => {
+  it('a painted chair keeps its color on its seat, and an unpainted one carries none', () => {
+    const items: DecorItem[] = [
+      { index: at(4, 5), piece: 'chair-gamer', rotation: 0, color: '#2a9d8f' },
+      { index: at(6, 5), piece: 'chair-gamer', rotation: 90 },
+    ];
+
+    const seats = decorChairs(items);
+    expect(seats).toEqual([
+      { index: at(4, 5), piece: 'chair-gamer', facing: 'down', color: '#2a9d8f' },
+      { index: at(6, 5), piece: 'chair-gamer', facing: 'right' },
+    ]);
+    expect('color' in seats[1]!).toBe(false);
   });
 });
 

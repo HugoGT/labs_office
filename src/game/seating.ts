@@ -174,6 +174,8 @@ export interface PlacedChair {
   readonly index: number;
   readonly piece: string;
   readonly facing: SeatFacing;
+  /** The accent a colorable chair is painted in; absent, it is drawn as exported. */
+  readonly color?: string;
 }
 
 /** Tile column and row of a placed chair. */

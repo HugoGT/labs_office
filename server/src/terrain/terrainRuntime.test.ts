@@ -508,6 +508,7 @@ describe('createTerrainRuntime decor', () => {
   const CATALOG = [
     { id: 'chair-wood', kind: 'chair', retired: false },
     { id: 'chair-metal', kind: 'chair', retired: false },
+    { id: 'chair-gamer', kind: 'chair', colorable: true, retired: false },
     { id: 'desk-wood', kind: 'desk', retired: false },
     { id: 'desk-painted', kind: 'desk', colorable: true, retired: false },
     { id: 'plant-ficus', kind: 'plant', footprint: { w: 1, h: 1 }, retired: false },
@@ -631,6 +632,19 @@ describe('createTerrainRuntime decor', () => {
     // Without a color it draws in its manifest default.
     await runtime.setDecor([{ index: FREE, item: { piece: 'desk-painted', rotation: 0 } }], null);
     expect(runtime.decor()).toEqual([{ index: FREE, piece: 'desk-painted', rotation: 0 }]);
+  });
+
+  it('paints the gamer chair in its own color, saved with it, and takes a color from no other chair', async () => {
+    const store = createMemoryTerrain();
+    const runtime = runtimeWith(store);
+    await runtime.load();
+
+    await runtime.setDecor([{ index: FREE, item: { piece: 'chair-gamer', rotation: 0, color: '#2a9d8f' } }], null);
+    expect(runtime.decor()).toEqual([{ index: FREE, piece: 'chair-gamer', rotation: 0, color: '#2a9d8f' }]);
+    expect(await store.loadDecor()).toEqual(runtime.decor());
+
+    await expect(runtime.setDecor([{ index: FREE + 2, item: { piece: 'chair-metal', rotation: 0, color: '#2a9d8f' } }], null)).rejects.toThrow('this piece takes no color');
+    expect(runtime.decor()).toEqual([{ index: FREE, piece: 'chair-gamer', rotation: 0, color: '#2a9d8f' }]);
   });
 
   it('keeps an already placed retired piece and lets it be removed', async () => {

@@ -43,7 +43,7 @@ import { lockedBehindDoor, lockedDoorAhead, lockedSpaceEntered } from './spaceLo
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT } from './hudLayout';
 import { MinimapLayer } from './MinimapLayer';
-import { collisionEditHoldsMap, decorEditHidesRail, decorEditHoldsMap, layoutEditHoldsMap, terrainEditHoldsMap } from './editorMapHold';
+import { collisionEditHoldsMap, decorEditHidesRail, decorEditHoldsMap, layoutEditHoldsMap, terrainEditHidesRail, terrainEditHoldsMap } from './editorMapHold';
 import { DecorEditLayer } from './DecorEditLayer';
 import { isEditableElementFocused } from './inputFocusGuard';
 import { isLayoutPickName, LayoutEditLayer } from './LayoutEditLayer';
@@ -456,6 +456,8 @@ export class OfficeScene extends Phaser.Scene {
   private mapHeld = false;
   private layoutHolds = false;
   private terrainHolds = false;
+  /** A terrain brush picked: the minimap steps aside like the rail, unless a color picker hangs from the rail. */
+  private terrainHidesRail = false;
   private collisionHolds = false;
   private decorHolds = false;
   /** A decor piece picked: the minimap steps aside like the rail; a mere selection keeps both. */
@@ -540,7 +542,7 @@ export class OfficeScene extends Phaser.Scene {
     this.layoutEditing = this.layoutCommandActive || this.terrainEditing || this.collisionEditing || this.decorEditing;
     this.mapHeld = this.layoutHolds || this.terrainHolds || this.collisionHolds || this.decorHolds;
     // A hidden camera takes no pointer, so the map under the minimap can be edited too.
-    this.minimapCamera?.setVisible(!this.terrainHolds && !this.decorHidesRail);
+    this.minimapCamera?.setVisible(!this.terrainHidesRail && !this.decorHidesRail);
     if (this.mapHeld && !wasHeld) this.resetWalking();
   }
 
@@ -813,6 +815,7 @@ export class OfficeScene extends Phaser.Scene {
       const opening = command !== null && !this.terrainEditing;
       this.terrainEditing = command !== null;
       this.terrainHolds = terrainEditHoldsMap(command);
+      this.terrainHidesRail = terrainEditHidesRail(command);
       // The DOM rail hides with it (`OfficeShell`), and `syncEditing` hides the minimap.
       this.syncEditing();
       this.ignoreOutlinesInMinimap();
@@ -2116,7 +2119,7 @@ export class OfficeScene extends Phaser.Scene {
     // A contributed chair approved after this page loaded is not in the boot preload: ask for it (a no-op once
     // loaded) and redraw when it lands, while `placeChairs` shows its placeholder.
     this.artSheet({ materialId: item.piece, color: null }, 'chair', this.redrawDecor);
-    return placeChairs(this, [{ index: chair.index, piece: item.piece, facing: chair.facing }], this.layout.width, this.art);
+    return placeChairs(this, [{ index: chair.index, piece: item.piece, facing: chair.facing, ...(chair.color === undefined ? {} : { color: chair.color }) }], this.layout.width, this.art);
   }
 
   /** Redraws the tilemap from the live blocks, or from the editor's pending paints while it has some. */

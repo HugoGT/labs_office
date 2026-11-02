@@ -98,6 +98,13 @@ describe('artPieceFields', () => {
     expect(fields('tileset-terrain')).toMatchObject({ kind: 'tileset', material: null, colorable: false });
     expect(fields('character-p01-burgundy-suit').material).toBeNull();
   });
+  it('stores the gamer chair as colorable in its red accent, and the other chairs as not', () => {
+    const fields = (id: string) => artPieceFields(MANIFEST.pieces.find((piece) => piece.id === id)!);
+    expect(fields('chair-gamer')).toMatchObject({ kind: 'chair', material: 'gamer', colorable: true, defaultColor: '#d8433b' });
+    expect(fields('chair-wood')).toMatchObject({ kind: 'chair', colorable: false, defaultColor: null });
+    // A chair stored before chairs had colors has no pair at all.
+    expect(artPieceFields({ ...MANIFEST.pieces.find((piece) => piece.id === 'chair-wood')!, colorable: undefined, defaultColor: undefined } as never)).toMatchObject({ colorable: false, defaultColor: null });
+  });
 });
 
 describe('normalizeArtPack', () => {
@@ -148,6 +155,21 @@ describe('normalizeArtPack', () => {
     const wood = clone();
     wood.pieces.find((piece) => piece.id === 'desk-wood')!.defaultColor = '#123456';
     expect(() => normalizeArtPack(wood)).toThrow(InvalidArtPackError);
+  });
+
+  it('lets a chair carry the color pair, valid, or none at all', () => {
+    const legacy = clone();
+    delete legacy.pieces.find((piece) => piece.id === 'chair-wood')!.colorable;
+    delete legacy.pieces.find((piece) => piece.id === 'chair-wood')!.defaultColor;
+    expect(() => normalizeArtPack(legacy)).not.toThrow();
+
+    const badColor = clone();
+    badColor.pieces.find((piece) => piece.id === 'chair-gamer')!.defaultColor = 'red';
+    expect(() => normalizeArtPack(badColor)).toThrow(InvalidArtPackError);
+
+    const colorWithoutFlag = clone();
+    colorWithoutFlag.pieces.find((piece) => piece.id === 'chair-wood')!.defaultColor = '#123456';
+    expect(() => normalizeArtPack(colorWithoutFlag)).toThrow(InvalidArtPackError);
   });
 
   it('requires each default to be a piece of its kind in the same pack', () => {

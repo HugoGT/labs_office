@@ -111,7 +111,11 @@ describe('DecorPalette', () => {
     const input = screen.getByLabelText(/^Color de Escritorio pintado:/);
     expect(input).toHaveAttribute('type', 'color');
     expect(input).toHaveAttribute('aria-label', 'Color de Escritorio pintado: #4f9a8a');
-    expect(screen.getAllByLabelText(/^Color de/)).toHaveLength(1);
+    // Only the painted desk and the gamer chair (its red accent) take a color; every other tile has none.
+    expect(screen.getAllByLabelText(/^Color de/).map((color) => color.getAttribute('aria-label')).sort()).toEqual([
+      'Color de Escritorio pintado: #4f9a8a',
+      'Color de Silla gamer: #d8433b',
+    ]);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     fireEvent.change(input, { target: { value: '#C83C3C' } });
     expect(onColorChange).toHaveBeenCalledWith('desk-painted', '#c83c3c');
@@ -120,6 +124,37 @@ describe('DecorPalette', () => {
     rerender(<DecorPalette value={null} catalog={catalog} colors={{ 'desk-painted': '#c83c3c' }} onPick={() => {}} onColorChange={onColorChange} preview={preview} />);
     expect(screen.getByLabelText('Color de Escritorio pintado: #c83c3c')).toHaveValue('#c83c3c');
     await waitFor(() => expect(preview.sheet).toHaveBeenCalledWith(painted, '#c83c3c'));
+  });
+
+  it('a click on a colorable tile puts it in hand in its current color and opens the picker, instead of toggling it', async () => {
+    const showPicker = vi.fn();
+    Object.defineProperty(HTMLInputElement.prototype, 'showPicker', { configurable: true, value: showPicker });
+    try {
+      const onPick = vi.fn();
+      const onColorChange = vi.fn();
+      const onColorPicking = vi.fn();
+      render(
+        <DecorPalette value={null} catalog={catalog} colors={{ 'desk-painted': '#c83c3c' }} onPick={onPick} onColorChange={onColorChange} onColorPicking={onColorPicking} preview={noPreview()} />,
+      );
+
+      // Its picked color, or its manifest default (a chair has one now, like the painted desk).
+      await userEvent.click(screen.getByRole('button', { name: 'Escritorio pintado' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Silla gamer' }));
+      expect(onColorChange.mock.calls).toEqual([
+        ['desk-painted', '#c83c3c'],
+        ['chair-gamer', '#d8433b'],
+      ]);
+      expect(onPick).not.toHaveBeenCalled();
+      expect(showPicker).toHaveBeenCalledTimes(2);
+      expect(onColorPicking).toHaveBeenCalledWith(true);
+
+      // A tile that takes no color only picks, as ever.
+      await userEvent.click(screen.getByRole('button', { name: 'Silla de madera' }));
+      expect(onPick).toHaveBeenCalledTimes(1);
+      expect(showPicker).toHaveBeenCalledTimes(2);
+    } finally {
+      Reflect.deleteProperty(HTMLInputElement.prototype, 'showPicker');
+    }
   });
 
   it('offers only what fits a desk when asked: desk tables, never a room table (#116)', () => {
