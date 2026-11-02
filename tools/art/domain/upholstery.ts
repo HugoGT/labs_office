@@ -9,7 +9,7 @@
  */
 import { makeRamp, mixRgba, type Ramp } from './color.ts';
 import { DEPTH_SCALE, floorSpans, type Box, type FurnitureModel, type Layer, type Part, type Span, type SurfacePoint } from './furnitureModel.ts';
-import type { Rgba } from '../../../src/art/pixelBuffer.ts';
+import { rgba, type Rgba } from '../../../src/art/pixelBuffer.ts';
 import { SEAT_HEIGHT, type Facing } from '../../../src/art/seating.ts';
 
 /** Half the seat size; the seat spans -SEAT_HALF..SEAT_HALF on both floor axes. */
@@ -82,11 +82,18 @@ const SCROLLS: Readonly<Record<number, readonly string[]>> = {
   7: ['.#####.', '#.....#', '#.###.#', '#.#..#.', '#..##..', '.###...'],
 };
 
-/** The front of a roll curls in from its outer side; on the sitter's right (+1) that is the left of the screen. */
-function scroll(side: 1 | -1, ramp: Ramp): (point: SurfacePoint, color: Rgba) => Rgba {
+const CUT = rgba(0, 0, 0, 0);
+
+/**
+ * The front of a roll curls in from its outer side; on the sitter's right (+1) that is the left of the screen. Seen
+ * from the front, its top gives up the pixel at its outer far corner, past the one `rounded` already cuts, so the roll
+ * reads round over the spiral (from behind, `rounded` alone already slopes that corner).
+ */
+function scroll(side: 1 | -1, facing: Facing, ramp: Ramp): (point: SurfacePoint, color: Rgba) => Rgba {
   return (point, color) => {
-    if (point.face !== 'forward') return color;
     const fromOuter = side > 0 ? point.col : point.width - 1 - point.col;
+    if (point.face === 'top') return facing === 'down' && point.row === 1 && fromOuter === 0 ? CUT : color;
+    if (point.face !== 'forward') return color;
     return SCROLLS[point.width]?.[point.row]?.[fromOuter] === '#' ? ramp.deep : color;
   };
 }
@@ -220,7 +227,7 @@ export function upholsteredModel(kind: UpholsteryStyle, seats: number, facing: F
       boxes: [
         // From behind the post is the body's own back, in its tone, so it does not read as a leg.
         { u: s.armU, v, y: [s.body[0], ARM_TOP - ROLL_HEIGHT], ramp: s.ramp, side: 'base', rounded: softBase, shade: (point, c) => (point.face === 'backward' ? s.ramp.shadow : c) },
-        { u: s.armU, v: onSide([half - armWidth, half + ROLL_OUT]), y: [ARM_TOP - ROLL_HEIGHT, ARM_TOP], ramp: s.ramp, top: 'light', side: 'base', rounded: true, shade: scroll(side, s.ramp) },
+        { u: s.armU, v: onSide([half - armWidth, half + ROLL_OUT]), y: [ARM_TOP - ROLL_HEIGHT, ARM_TOP], ramp: s.ramp, top: 'light', side: 'base', rounded: true, shade: scroll(side, facing, s.ramp) },
       ],
     };
   };

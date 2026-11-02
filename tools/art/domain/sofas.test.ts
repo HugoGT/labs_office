@@ -401,3 +401,21 @@ test('a sofa keeps walkers out of the floor under its backrest, as the shared co
     }
   }
 });
+
+test('seen from the front, a fabric roll rounds its outer top corner, its outer column one pixel over the next', () => {
+  for (const { name, material, sprite } of UPHOLSTERED) {
+    if (material !== 'fabric') continue;
+    const { back, front, ground } = sprite('down');
+    const image = composite({ back, front });
+    const roll = rowSpan(image, ground.y - 9)!;
+    // The first row of upholstery down a column, past the ink.
+    const topOf = (x: number): number => {
+      let y = 0;
+      while (y < image.height && (image.alphaAt(x, y) !== 255 || luma(image.getPixel(x, y)) < 120)) y += 1;
+      return y;
+    };
+    for (const [outer, step] of [[roll[0] + 1, 1], [roll[1] - 1, -1]] as const) {
+      assert.equal(topOf(outer + step) - topOf(outer), 1, `${name}: the column at ${outer} starts at ${topOf(outer)}, the next at ${topOf(outer + step)}`);
+    }
+  }
+});
