@@ -11,7 +11,7 @@ The executable source of truth is `src/game/artContract.ts` (`ART_CONTRACT_VERSI
   - **Anchor**: the pixel that lands on the world point, such as the feet, the seat or the floor under a desk.
 - Files are 8-bit RGBA PNGs (`png-rgba8`), non-interlaced. Each file holds a fixed grid of frames, and the grid depends on the kind. The grid is the contract.
 - Partial alpha is allowed. The pack uses it on purpose for contact shadows (alpha 78) and glass (110 to 220).
-- A character's contact shadow sits under its feet, except in the seated frames (sit-down frames 4-5 and the seated idle frames 6-7), where the pelvis rests on the seat: there it runs from the back of the pelvis forward to the knees, as wide as the hips, on a plane halfway between the seat (22, 42) and the floor, so it shows just below the thighs and never behind the sitter's back.
+- A character's contact shadow sits under its feet, except in the seated frames (sit-down frames 4-5 and the seated idle frames 6-7), where the pelvis rests on the seat: there it runs from the back of the pelvis forward to the knees, as wide as the hips, on a plane 2 pixels above halfway between the seat (22, 42) and the floor, so it hugs the underside of the thighs and never behind the sitter's back.
 - Each file can use at most 128 distinct non-transparent RGBA values (`MAX_COLORS_PER_IMAGE`). The busiest character sheet has about 75, so 128 leaves room for new art. Photos, gradients and smoothed upscales still fail, because they reach hundreds of values. The terrain tileset gathers eight materials, so its cap applies to each material band (`colorBandRows`), not to the whole file.
 - Sprite frames must not carry a background: the four corner pixels of every frame are transparent. Floors must be fully opaque.
 

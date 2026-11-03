@@ -101,11 +101,12 @@ export interface SeatedShadow {
 }
 
 /**
- * Height of the plane a seated shadow lies on: halfway between the floor and the seat surface.
- * On the seat itself the thighs hide it; on the floor it would leave the body and, under a
- * sofa, land on the sofa's own front. Halfway it shows just below the thighs and buttocks.
+ * Height of the plane a seated shadow lies on: 2 screen pixels above halfway between the floor
+ * and the seat surface. On the seat itself the thighs hide it; on the floor it would leave the
+ * body and, under a sofa, land on the sofa's own front. Just above halfway it hugs the thighs
+ * and buttocks.
  */
-export const SEATED_SHADOW_Y = SEAT_SURFACE_Y / 2;
+export const SEATED_SHADOW_Y = SEAT_SURFACE_Y / 2 + 2 / Math.cos(CAMERA_PITCH);
 
 const DEG = Math.PI / 180;
 const LEFT = 1;

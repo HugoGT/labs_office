@@ -303,6 +303,19 @@ test('seen from the side, the seated shadow starts at the back of the pelvis and
   }
 });
 
+test('seen from the side, the seated shadow lies 2 rows below the seat point', () => {
+  // Side views show no depth on screen, so the shadow's row is the height of its plane alone.
+  for (const { character } of sample) {
+    for (const facing of ['left', 'right'] as const) {
+      for (let column = 0; column < SIT_FRAME_COUNT; column += 1) {
+        if (!isSeated(column)) continue;
+        const centerY = mean(shadowMask(character, facing, column).map((pixel) => pixel.y + 0.5));
+        assert.ok(Math.abs(centerY - (SIT_ANCHOR_Y + 2)) <= 0.25, `${character.id} ${facing} ${column}: shadow centered at row ${centerY}`);
+      }
+    }
+  }
+});
+
 test('seen from the front or the back, the seated shadow lies ahead of the seat point in depth', () => {
   // The same footprint ahead of the seat shows lower on screen facing down (toward the viewer)
   // than facing up (away from the viewer); centered on the seat it would show at the same row.
