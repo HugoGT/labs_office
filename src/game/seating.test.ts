@@ -5,6 +5,7 @@ import { decorChairFacing } from './officeDecor';
 import { rotationForFacing } from './pieceCollisions';
 import {
   CHAIR_PIECES,
+  SOFA_PIECES,
   chairGround,
   chairSeatId,
   chairSeatTiles,
@@ -159,6 +160,11 @@ describe('seating: placed chairs', () => {
   it('names exactly the chair pieces of the art pack', () => {
     const pack = JSON.parse(exportedManifest) as { pieces: { id: string; kind: string }[] };
     expect([...CHAIR_PIECES].sort()).toEqual(pack.pieces.filter((piece) => piece.kind === 'chair').map((piece) => piece.id).sort());
+  });
+
+  it('names exactly the sofa pieces of the art pack', () => {
+    const pack = JSON.parse(exportedManifest) as { pieces: { id: string; kind: string }[] };
+    expect([...SOFA_PIECES].sort()).toEqual(pack.pieces.filter((piece) => piece.kind === 'sofa').map((piece) => piece.id).sort());
   });
 
   it('stands on its tile: the ground point is the tile middle and the reach is that one tile', () => {

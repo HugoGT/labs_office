@@ -7,9 +7,9 @@
  *
  * A piece nobody edited keeps its default: the whole footprint for a layout
  * prop or a decor room table (exactly the tiles a layout prop blocked before
- * this editor), the floor under its top for a decor desk table, nothing for
- * decor plants and chairs. An edited piece with an empty list is
- * walk-through.
+ * this editor), the floor under its top for a decor desk table, the floor
+ * under its backrest for a decor sofa, nothing for decor plants and chairs.
+ * An edited piece with an empty list is walk-through.
  *
  * The client collides its Arcade body with these rectangles and the room
  * refuses a `move` whose body center falls inside one, the same pairing as
@@ -37,9 +37,9 @@ export const COLLISION_COORD_LIMIT = 512;
 export const COLLISION_BODY_CENTER_OFFSET = AVATAR_BODY_CENTER_OFFSET;
 
 /** Pieces that stand in the world. Walls and hedges stay tile based; bridges are decks. */
-export const EDITABLE_PIECE_KINDS = ['tree', 'plant', 'table', 'desk', 'chair'] as const;
+export const EDITABLE_PIECE_KINDS = ['tree', 'plant', 'table', 'desk', 'chair', 'sofa'] as const;
 export type EditablePieceKind = (typeof EDITABLE_PIECE_KINDS)[number];
-const PIECE_ID = /^(tree|plant|table|desk|chair)-[a-z0-9]+(?:-[a-z0-9]+)*$/;
+const PIECE_ID = /^(tree|plant|table|desk|chair|sofa)-[a-z0-9]+(?:-[a-z0-9]+)*$/;
 const MAX_PIECE_ID_LENGTH = 100;
 
 export interface CollisionPoint {
@@ -235,6 +235,42 @@ export function layoutPropInstances(props: readonly CollisionLayoutProp[]): Coll
   return instances;
 }
 
+// The sofa backrest as tools/art/domain/upholstery.ts draws it (`backrestFloor`, pinned by a test there): the
+// model's u from the backrest's rear to the face a sitter leans on, the sofa's half width, and the floor depth scale.
+const SOFA_BACK_U = [-10, -5] as const;
+const SOFA_DEPTH_SCALE = 0.6;
+
+function roundSymmetric(value: number): number {
+  return Math.sign(value) * Math.round(Math.abs(value));
+}
+
+/** A model span along the floor depth, on screen (`depthSpan` of furnitureModel.ts). */
+function depthSpan(a: number, b: number): readonly [number, number] {
+  const from = roundSymmetric(a * SOFA_DEPTH_SCALE);
+  return [from, Math.max(roundSymmetric(b * SOFA_DEPTH_SCALE), from + 1)];
+}
+
+/**
+ * The floor under the backrest of a sofa of `seats` places turned `facing`, in
+ * world pixels from the middle of its footprint: a strip along the sofa
+ * behind its seats, so nobody walks through the back while the seats stay
+ * open to sit on. A two-seat sofa is one pixel wider, for its middle seam.
+ */
+export function sofaBackrestRect(seats: number, facing: CollisionFacing): CollisionRect {
+  const half = seats * 16 - 5;
+  const right = half + (seats % 2 === 0 ? 1 : 0);
+  const sideways = facing === 'left' || facing === 'right';
+  // Turned sideways the sofa runs along the floor depth, so its model is drawn longer by 1 / SOFA_DEPTH_SCALE there.
+  const v = sideways ? [Math.round(-half / SOFA_DEPTH_SCALE), Math.round(right / SOFA_DEPTH_SCALE)] : [-half, right];
+  const [u0, u1] = SOFA_BACK_U;
+  const spans: { x: readonly [number, number]; y: readonly [number, number] } =
+    facing === 'down' ? { x: [-v[1]!, -v[0]!], y: depthSpan(u0, u1) }
+    : facing === 'up' ? { x: [v[0]!, v[1]!], y: depthSpan(-u1, -u0) }
+    : facing === 'right' ? { x: [u0, u1], y: depthSpan(v[0]!, v[1]!) }
+    : { x: [-u1, -u0], y: depthSpan(-v[1]!, -v[0]!) };
+  return { x: plain(spans.x[0]), y: plain(spans.y[0]), w: spans.x[1] - spans.x[0], h: spans.y[1] - spans.y[0] };
+}
+
 /** Instances of the base map chairs, on their ground point (`placeSeats` in mapBuilder.ts). */
 export function seatInstances(
   seats: readonly { readonly tx: number; readonly ty: number; readonly facing: CollisionFacing }[],
@@ -271,8 +307,10 @@ export function staticCollisionInstances(
  * stands on the bottom middle of its footprint like a Tiled prop, the plant
  * walk-through and the table solid by default; a vertical room table (90)
  * stands on its swapped footprint, its rectangles turned a quarter about its
- * center. A piece the caller cannot resolve places nothing, and neither
- * does a door (#223), which opens a wall rather than blocking.
+ * center. A sofa stands on the middle of its footprint like a chair on its
+ * tile, turned by its facing, its backrest solid by default (`sofaBackrestRect`)
+ * and picked anywhere on it. A piece the caller cannot resolve places nothing, and neither does a
+ * door (#223), which opens a wall rather than blocking.
  */
 export function officeDecorInstances(
   items: readonly DecorItem[],
@@ -290,6 +328,19 @@ export function officeDecorInstances(
     const ty = Math.floor(item.index / width);
     if (info.kind === 'chair') {
       instances.push(...seatInstances([{ tx, ty, facing: decorChairFacing(item.rotation) }], item.piece));
+      continue;
+    }
+    if (info.kind === 'sofa') {
+      const facing = decorChairFacing(item.rotation);
+      instances.push({
+        piece: item.piece,
+        pivot: { x: (rect.x + rect.w / 2) * COLLISION_TILE, y: (rect.y + rect.h / 2) * COLLISION_TILE },
+        rotation: rotationForFacing(facing),
+        scale: UNIT,
+        offset: ORIGIN,
+        defaults: [sofaBackrestRect(Math.max(info.footprint.w, info.footprint.h), facing)],
+        pickBox,
+      });
       continue;
     }
     if (info.kind === 'desk') {

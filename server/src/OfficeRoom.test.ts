@@ -2307,6 +2307,76 @@ describe('OfficeRoom: decor chairs', () => {
   });
 });
 
+/**
+ * A sofa of the decor layer seats one person per tile (`decorSeats`): each
+ * tile is a seat of its own, `chair-<tile>` like a chair's.
+ */
+describe('OfficeRoom: decor sofas', () => {
+  const tile = (tx: number, ty: number) => ty * BASE_LAYOUT.width + tx;
+  // A three-seat sofa facing down on tiles (21..23, 23), anchored on the middle one.
+  const SOFA = tile(22, 23);
+  // On the tile itself, where a decor chair's neighbour stands too: a sofa never blocks by default.
+  const on = (tx: number) => ({ x: tx * TILE + 16, y: 23 * TILE + 5, facing: 'down' });
+
+  beforeEach(async () => {
+    await server.shutdown();
+    server = createOfficeServer({ terrain: createMemoryTerrain([], [], [{ index: SOFA, piece: 'sofa-leather-3', rotation: 0 }]) });
+    endpoint = `ws://localhost:${await server.listen(0)}`;
+  });
+
+  async function moveTo(room: Awaited<ReturnType<typeof join>>, position: { x: number; y: number; facing: string }) {
+    room.send('move', position);
+    await waitFor(() => room.state.players.get(room.sessionId)?.x === position.x);
+  }
+
+  it('seats a group on it, one person per tile, all facing the way the sofa does; a taken seat stays taken', async () => {
+    const ana = await join('Ana');
+    const beto = await join('Beto');
+    const caro = await join('Caro');
+    await waitFor(() => caro.state.players.size === 3);
+    await moveTo(ana, on(21));
+    await moveTo(beto, on(23));
+    await moveTo(caro, on(22));
+
+    ana.send('sit', { seat: chairSeatId(tile(21, 23)) });
+    beto.send('sit', { seat: chairSeatId(tile(23, 23)) });
+    await waitFor(() => caro.state.players.get(ana.sessionId)?.seat === chairSeatId(tile(21, 23)));
+    await waitFor(() => caro.state.players.get(beto.sessionId)?.seat === chairSeatId(tile(23, 23)));
+    caro.send('sit', { seat: chairSeatId(tile(23, 23)) });
+    caro.send('sit', { seat: chairSeatId(tile(22, 23)) });
+
+    await waitFor(() => caro.state.players.get(caro.sessionId)?.seat === chairSeatId(tile(22, 23)));
+    expect([ana, beto, caro].map((room) => caro.state.players.get(room.sessionId)?.facing)).toEqual(['down', 'down', 'down']);
+    expect(caro.state.players.get(beto.sessionId)?.seat).toBe(chairSeatId(tile(23, 23)));
+    // A tile next to the sofa is no seat.
+    caro.send('sit', { seat: chairSeatId(tile(24, 23)) });
+    caro.send('status', { status: 'y' });
+    await waitFor(() => caro.state.players.get(caro.sessionId)?.status === 'y');
+    expect(caro.state.players.get(caro.sessionId)?.seat).toBe(chairSeatId(tile(22, 23)));
+  });
+
+  it('turns whoever still sits on it when it turns, stands up whoever it left, and everyone when it goes', async () => {
+    const ana = await join('Ana');
+    const beto = await join('Beto');
+    await waitFor(() => beto.state.players.size === 2);
+    await moveTo(ana, on(21));
+    await moveTo(beto, on(22));
+    ana.send('sit', { seat: chairSeatId(tile(21, 23)) });
+    beto.send('sit', { seat: chairSeatId(tile(22, 23)) });
+    await waitFor(() => beto.state.players.get(ana.sessionId)?.seat === chairSeatId(tile(21, 23)));
+    await waitFor(() => beto.state.players.get(beto.sessionId)?.seat === chairSeatId(tile(22, 23)));
+
+    // Turned sideways on the same anchor it covers (22, 22..24): Ana's tile is no longer a seat.
+    await server.terrain.setDecor([{ index: SOFA, item: { piece: 'sofa-leather-3', rotation: 90 } }], null);
+    await waitFor(() => beto.state.players.get(ana.sessionId)?.seat === '');
+    await waitFor(() => beto.state.players.get(beto.sessionId)?.facing === 'right');
+    expect(beto.state.players.get(beto.sessionId)?.seat).toBe(chairSeatId(tile(22, 23)));
+
+    await server.terrain.setDecor([{ index: SOFA, item: null }], null);
+    await waitFor(() => beto.state.players.get(beto.sessionId)?.seat === '');
+  });
+});
+
 describe('OfficeRoom: no desk seats (Editar espacios)', () => {
   const BETO: VerifiedIdentity = { uid: 'uid-beto', email: 'beto@example.com', name: 'Beto Ruiz' };
   const ANA_ID = '11111111-1111-4111-8111-111111111111';

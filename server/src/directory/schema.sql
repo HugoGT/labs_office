@@ -328,7 +328,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS users_display_name_unique ON users (
 -- backfill writes ids that only exist here once the pack is registered.
 CREATE TABLE IF NOT EXISTS art_pieces (
   id text PRIMARY KEY,
-  kind text NOT NULL CHECK (kind IN ('character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door')),
+  kind text NOT NULL CHECK (kind IN ('character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door', 'sofa')),
   name text NOT NULL,
   -- NULL for characters and the terrain tileset; every other kind has one.
   material text,
@@ -345,9 +345,9 @@ CREATE TABLE IF NOT EXISTS art_pieces (
 );
 -- Art contract 2 added the terrain tileset and the map props. CREATE TABLE IF
 -- NOT EXISTS keeps the CHECK of a table created before, so it is replaced;
--- the door (#223) came later the same way.
+-- the door (#223) and the sofa came later the same way.
 ALTER TABLE art_pieces DROP CONSTRAINT IF EXISTS art_pieces_kind_check;
-ALTER TABLE art_pieces ADD CONSTRAINT art_pieces_kind_check CHECK (kind IN ('character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door'));
+ALTER TABLE art_pieces ADD CONSTRAINT art_pieces_kind_check CHECK (kind IN ('character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door', 'sofa'));
 
 -- Admin uploads (#121) live in the same catalog, so every choice resolves
 -- them the same way. `source` is what keeps a pack registration from
@@ -475,13 +475,13 @@ ALTER TABLE terrain_walls ADD CONSTRAINT terrain_walls_piece_id_check CHECK (pie
 -- grid move below never touches it.
 CREATE TABLE IF NOT EXISTS terrain_chairs (
   tile_index integer PRIMARY KEY CHECK (tile_index >= 0),
-  piece_id text NOT NULL CHECK (piece_id IN ('chair-wood', 'chair-metal', 'chair-leather', 'chair-gamer')),
+  piece_id text NOT NULL CHECK (piece_id IN ('chair-wood', 'chair-metal', 'chair-leather', 'chair-gamer', 'chair-office', 'chair-task', 'chair-fabric')),
   facing text NOT NULL CHECK (facing IN ('up', 'down', 'left', 'right')),
   updated_by uuid REFERENCES users(id),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE terrain_chairs DROP CONSTRAINT IF EXISTS terrain_chairs_piece_id_check;
-ALTER TABLE terrain_chairs ADD CONSTRAINT terrain_chairs_piece_id_check CHECK (piece_id IN ('chair-wood', 'chair-metal', 'chair-leather', 'chair-gamer'));
+ALTER TABLE terrain_chairs ADD CONSTRAINT terrain_chairs_piece_id_check CHECK (piece_id IN ('chair-wood', 'chair-metal', 'chair-leather', 'chair-gamer', 'chair-office', 'chair-task', 'chair-fabric'));
 
 -- Collision areas per art piece (collision editor). One row per piece an
 -- admin edited: a JSON list of rectangles in art pixels from the piece's

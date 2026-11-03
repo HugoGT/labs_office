@@ -7,6 +7,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   decorBrushTarget,
+  decorColorKey,
   decorOutlines,
   decorPickAt,
   decorPlacementAllowed,
@@ -67,10 +68,25 @@ describe('decorSizeLabel', () => {
   });
 });
 
+describe('decorColorKey', () => {
+  it('gives a sofa the color of the armchair of its upholstery, and every other piece its own', () => {
+    expect(decorColorKey('sofa-fabric-2')).toBe('chair-fabric');
+    expect(decorColorKey('sofa-fabric-3')).toBe('chair-fabric');
+    expect(decorColorKey('chair-fabric')).toBe('chair-fabric');
+    expect(decorColorKey('chair-gamer')).toBe('chair-gamer');
+    expect(decorColorKey('desk-painted')).toBe('desk-painted');
+  });
+});
+
 describe('fitsDeskArea', () => {
   it('never offers a door to a desk (#223): only an admin opens walls', () => {
     expect(fitsDeskArea({ kind: 'door', footprint: { w: 2, h: 1 } })).toBe(false);
     expect(fitsDeskArea({ kind: 'door', footprint: { w: 4, h: 1 } })).toBe(false);
+  });
+
+  it('never offers a sofa to a desk, even one that fits: sofas furnish the office', () => {
+    expect(fitsDeskArea({ kind: 'sofa', footprint: { w: 2, h: 1 } })).toBe(false);
+    expect(fitsDeskArea({ kind: 'sofa', footprint: { w: 3, h: 1 }, colorable: true })).toBe(false);
   });
 
   it('takes chairs, desk tables and 1x1 plants, never a room table (#116): a desk holds desk tables only', () => {

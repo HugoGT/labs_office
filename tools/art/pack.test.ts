@@ -15,6 +15,7 @@ import {
   HEDGE,
   PACK_FACINGS,
   PLANT,
+  SOFA,
   TABLE,
   TERRAIN_DECALS,
   TERRAIN_MATERIALS,
@@ -31,6 +32,7 @@ import {
   type ArtFloorPiece,
   type ArtPackManifest,
   type ArtPropPiece,
+  type ArtSofaPiece,
   type ArtTilesetPiece,
   type RgbaImage,
 } from '../../src/game/artContract.ts';
@@ -131,8 +133,8 @@ describe('art pack manifest', () => {
 
   it('registers the characters, furniture, floors, walls, the terrain tileset and the map props', () => {
     const count = (kind: string): number => manifest.pieces.filter((piece) => piece.kind === kind).length;
-    const kinds = ['character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door'];
-    expect(kinds.map(count)).toEqual([18, 4, 4, 9, 4, 1, 2, 1, 1, 1, 3, 2]);
+    const kinds = ['character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door', 'sofa'];
+    expect(kinds.map(count)).toEqual([18, 7, 4, 9, 4, 1, 2, 1, 1, 1, 3, 2, 4]);
   });
 
   it('uses stable ids derived from the generators, unique and prefixed by kind', () => {
@@ -246,13 +248,32 @@ describe('art pack manifest', () => {
     ]);
   });
 
-  it('marks only the gamer chair, the painted desk, the plain floor and the carpet as colorable', () => {
+  it('registers leather and fabric sofas of two and three seats, one tile per seat, the fabric ones colorable', () => {
+    const sofas = manifest.pieces.filter((piece): piece is ArtSofaPiece => piece.kind === 'sofa');
+    expect(sofas.map((sofa) => [sofa.id, sofa.name, sofa.material, sofa.seats, sofa.colorable, sofa.defaultColor])).toEqual([
+      ['sofa-leather-2', 'Sofá de cuero (2 plazas)', 'leather', 2, false, null],
+      ['sofa-leather-3', 'Sofá de cuero (3 plazas)', 'leather', 3, false, null],
+      ['sofa-fabric-2', 'Sofá tapizado (2 plazas)', 'fabric', 2, true, '#c4ab8c'],
+      ['sofa-fabric-3', 'Sofá tapizado (3 plazas)', 'fabric', 3, true, '#c4ab8c'],
+    ]);
+    for (const sofa of sofas) {
+      expect(sofa.footprint, sofa.id).toEqual({ w: sofa.seats, h: 1 });
+      expect(sofa.anchor, sofa.id).toEqual(SOFA.anchor);
+      expect([sofa.facings, sofa.layers], sofa.id).toEqual([PACK_FACINGS, ['back', 'front']]);
+      expect(sofa.files.map((file) => [file.path, file.role, file.imageKind, file.width, file.height]), sofa.id).toEqual([
+        [`sofa/${sofa.material}-${sofa.seats}.png`, 'sheet', 'sofa', 384, 224],
+      ]);
+    }
+  });
+
+  it('marks only the gamer chair, the fabric armchair, the painted desk, the plain floor and the carpet as colorable', () => {
     const colorable = manifest.pieces
       .filter((piece): piece is ArtChairPiece | ArtDeskPiece | ArtFloorPiece => piece.kind === 'chair' || piece.kind === 'desk' || piece.kind === 'floor')
       .filter((piece) => piece.colorable)
       .map((piece) => [piece.id, piece.defaultColor]);
     expect(colorable).toEqual([
       ['chair-gamer', '#d8433b'],
+      ['chair-fabric', '#c4ab8c'],
       ['desk-painted', '#4f9a8a'],
       ['floor-plain', '#b9c3cc'],
       ['floor-carpet', '#5a6f86'],

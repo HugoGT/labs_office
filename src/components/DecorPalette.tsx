@@ -1,6 +1,6 @@
-import { chairPreviewFrames, previewFrame, type MaterialCatalog, type MaterialOption } from '../game/artMaterials';
+import { chairPreviewFrames, previewFrame, sofaPreviewFrames, type MaterialCatalog, type MaterialOption } from '../game/artMaterials';
 import type { ArtPreviewCache } from '../game/artPreview';
-import { decorSizeLabel, type DecorBrush } from '../game/decorEditor';
+import { decorColorKey, decorSizeLabel, type DecorBrush } from '../game/decorEditor';
 import { decorPieceInfo, type DecorPieceInfo } from '../game/officeDecor';
 import type { DecorPick } from '../hooks/useDecorEditor';
 import { ArtPreviewCanvas } from './ArtPreviewCanvas';
@@ -11,7 +11,7 @@ import { ColorableTile } from './ColorableTile';
  * The palette of the decor editor (#208): every piece the office decor layer
  * places, grouped by kind, each with a thumbnail cut from its sheet (pack and
  * approved uploads, from the same catalog as the other palettes). A tile is
- * its picture, plus the size in tiles of a room table: the name is its
+ * its picture, plus the size in tiles of a room table or a sofa: the name is its
  * tooltip and accessible name, the heading says the kind; a colorable piece's
  * tile also carries the color icon, and a click anywhere on it picks the piece
  * in its current color and opens the color picker, which then changes the
@@ -19,17 +19,21 @@ import { ColorableTile } from './ColorableTile';
  * the colors and what a click on the map does.
  */
 
-type DecorCatalogKind = 'chair' | 'desk' | 'table' | 'plant' | 'door';
+type DecorCatalogKind = 'chair' | 'sofa' | 'desk' | 'table' | 'plant' | 'door';
 
-/** The groups in palette order, named for the person picking. */
-const GROUPS: readonly { kind: DecorCatalogKind; label: string }[] = [
-  { kind: 'chair', label: 'Sillas' },
-  { kind: 'desk', label: 'Mesas de escritorio' },
-  { kind: 'table', label: 'Mesas de sala' },
-  { kind: 'plant', label: 'Plantas' },
+/** The groups in palette order, named for the person picking, each with the catalog kinds it lists in order. */
+const GROUPS: readonly { kinds: readonly DecorCatalogKind[]; label: string }[] = [
+  { kinds: ['chair'], label: 'Sillas' },
+  { kinds: ['desk'], label: 'Mesas de escritorio' },
+  // A room's furniture together. Only the office scope offers it (`fitsDeskArea` leaves both out).
+  { kinds: ['table', 'sofa'], label: 'Muebles de sala' },
+  { kinds: ['plant'], label: 'Plantas' },
   // #223: only the office scope offers them (the desk scope's `fitsDeskArea` leaves doors out).
-  { kind: 'door', label: 'Puertas' },
+  { kinds: ['door'], label: 'Puertas' },
 ];
+
+/** The kinds whose tile also writes their size in tiles, which tells pieces of one look apart. */
+const SIZED: ReadonlySet<DecorCatalogKind> = new Set(['table', 'sofa']);
 
 /** The thumbnail box, in pixels. */
 const THUMBNAIL_PX = 48;
@@ -40,7 +44,7 @@ const THUMBNAIL_PX = 48;
  * reads as big as it can.
  */
 function shrinkFor(kind: DecorCatalogKind, frame: { readonly width: number; readonly height: number }): number {
-  if (kind === 'desk') return 2;
+  if (kind === 'desk' || kind === 'sofa') return 2;
   if (kind === 'table') return Math.max(1, Math.ceil(Math.max(frame.width, frame.height) / THUMBNAIL_PX));
   return 1;
 }
@@ -54,10 +58,12 @@ export function decorPickOf(option: MaterialOption): DecorPick | null {
 /** How the catalog sizes a piece of the layer, by id: what the scene's manifest would say. */
 export function catalogDecorInfo(catalog: MaterialCatalog | null): (piece: string) => DecorPieceInfo | null {
   const known = new Map<string, DecorPieceInfo>();
-  for (const { kind } of GROUPS) {
-    for (const option of catalog?.[kind] ?? []) {
-      const pick = decorPickOf(option);
-      if (pick !== null) known.set(pick.id, pick.info);
+  for (const { kinds } of GROUPS) {
+    for (const kind of kinds) {
+      for (const option of catalog?.[kind] ?? []) {
+        const pick = decorPickOf(option);
+        if (pick !== null) known.set(pick.id, pick.info);
+      }
     }
   }
   return (piece) => known.get(piece) ?? null;
@@ -70,7 +76,7 @@ export interface DecorPaletteProps {
   catalog: MaterialCatalog | null;
   /** Which pieces to offer (the desk scope: what fits a desk); every one by default. */
   offers?: (info: DecorPieceInfo) => boolean;
-  /** The color chosen per colorable piece; one without starts in its manifest default. */
+  /** The color chosen per colorable piece, keyed by `decorColorKey` (a fabric sofa reads its armchair's); one without starts in its manifest default. */
   colors?: Readonly<Partial<Record<string, string>>>;
   onPick: (pick: DecorPick) => void;
   /** A colorable piece's color, live while its picker is dragged; also what its tile reports when clicked (picked, in its current color). */
@@ -95,8 +101,8 @@ function Thumbnail({
   sized: boolean;
   preview?: ArtPreviewCache;
 }) {
-  // A chair reads whole only with both of its layers, back first.
-  const frames = kind === 'chair' ? chairPreviewFrames() : [previewFrame(option)];
+  // A chair or a sofa reads whole only with both of its layers, back first.
+  const frames = kind === 'chair' ? chairPreviewFrames() : kind === 'sofa' ? sofaPreviewFrames() : [previewFrame(option)];
   return (
     <span className={sized ? `${styles.thumbnail} ${styles.sized}` : styles.thumbnail} aria-hidden="true">
       {frames.map((frame) => (
@@ -119,23 +125,25 @@ export function DecorPalette({ value, catalog, offers = () => true, colors = {},
   const pressed = (id: string): boolean => value?.piece === id;
   return (
     <div className={styles.palettes}>
-      {GROUPS.map(({ kind, label }) => {
-        const entries = (catalog?.[kind] ?? []).flatMap((option) => {
-          // A retired upload still draws where it was placed (#264), but is not offered.
-          if (option.retired) return [];
-          const pick = decorPickOf(option);
-          return pick !== null && offers(pick.info) ? [{ option, pick }] : [];
-        });
+      {GROUPS.map(({ kinds, label }) => {
+        const entries = kinds.flatMap((kind) =>
+          (catalog?.[kind] ?? []).flatMap((option) => {
+            // A retired upload still draws where it was placed (#264), but is not offered.
+            if (option.retired) return [];
+            const pick = decorPickOf(option);
+            return pick !== null && offers(pick.info) ? [{ kind, option, pick }] : [];
+          }),
+        );
         if (entries.length === 0) return null;
         return (
-          <div key={kind} className={styles.group}>
+          <div key={label} className={styles.group}>
             <h4 className={styles.subtitle}>{label}</h4>
             <div className={styles.palette} role="group" aria-label={label}>
-              {entries.map(({ option, pick }) => {
+              {entries.map(({ kind, option, pick }) => {
                 const colorable = pick.info.colorable === true && option.defaultColor !== null;
-                const color = colorable ? (colors[option.id] ?? option.defaultColor) : null;
-                // Room tables tell their size apart; the horizontal one, as the catalog states it.
-                const size = kind === 'table' ? decorSizeLabel(pick.info) : null;
+                const color = colorable ? (colors[decorColorKey(option.id)] ?? option.defaultColor) : null;
+                // Room tables and sofas tell their size apart; the horizontal one, as the catalog states it.
+                const size = SIZED.has(kind) ? decorSizeLabel(pick.info) : null;
                 // A colorable tile picks its piece in the color it has, never toggling it off: its click also opens the picker.
                 const picksColored = colorable && color !== null && onColorChange !== undefined;
                 const entry = (

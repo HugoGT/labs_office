@@ -15,6 +15,7 @@ import {
   FLOOR_MOTIF_SIZE,
   HEDGE,
   PACK_FACINGS,
+  SOFA,
   TABLE,
   TABLE_FACINGS,
   TERRAIN_DECALS,
@@ -44,6 +45,7 @@ import {
 } from '../../src/game/artContract.ts';
 import { ANCHOR_X, ANCHOR_Y, FRAME_HEIGHT, FRAME_WIDTH } from '../../src/art/camera.ts';
 import { chairSprite, CHAIR_MATERIALS } from './domain/chairs.ts';
+import { SOFA_MATERIALS, SOFA_SEATS, sofaSprite } from './domain/sofas.ts';
 import { BASE_CHARACTERS } from '../../src/art/characters.ts';
 import { DIRECTIONS } from '../../src/art/directions.ts';
 import { PixelBuffer } from '../../src/art/pixelBuffer.ts';
@@ -71,6 +73,7 @@ import {
   floorSheet,
   hedgeSheet,
   plantSheet,
+  sofaSheet,
   tableSheet,
   terrainLayerImage,
   terrainTilesetSheet,
@@ -134,6 +137,25 @@ describe('chair sheet', () => {
         const frontY = CHAIR.frame.height + y;
         expect(pixels(crop(sheet, x, frontY, sprite.front.width, sprite.front.height)), `${material} ${facing} front`).toEqual(pixels(sprite.front));
         expect(sprite.ground.y - sprite.seat.y).toBe(SEAT_HEIGHT);
+      }
+    }
+  });
+});
+
+describe('sofa sheet', () => {
+  it('puts each facing in its column, back layer on row 0 and front on row 1, the floor under the middle on the contract anchor', () => {
+    for (const material of SOFA_MATERIALS) {
+      for (const seats of SOFA_SEATS) {
+        const name = `${material}-${seats}`;
+        const sheet = sofaSheet(material, seats);
+        expect(validateArtImage('sofa', sheet), name).toEqual([]);
+        for (const facing of PACK_FACINGS) {
+          const sprite = sofaSprite(material, seats, facing);
+          const x = facingColumn(facing) * SOFA.frame.width + SOFA.anchor.x - sprite.ground.x;
+          const y = SOFA.anchor.y - sprite.ground.y;
+          expect(pixels(crop(sheet, x, y, sprite.back.width, sprite.back.height)), `${name} ${facing} back`).toEqual(pixels(sprite.back));
+          expect(pixels(crop(sheet, x, SOFA.frame.height + y, sprite.front.width, sprite.front.height)), `${name} ${facing} front`).toEqual(pixels(sprite.front));
+        }
       }
     }
   });

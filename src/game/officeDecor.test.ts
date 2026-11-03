@@ -18,6 +18,8 @@ import {
   isDecorRotation,
   decorRotationFor,
   decorRotationsOf,
+  decorSeats,
+  isDecorSofaPiece,
   isDecorColor,
   isRotatable,
   nextDecorRotation,
@@ -353,5 +355,65 @@ describe('officeDecor: doors (#223, #233)', () => {
     expect(decorFootprint({ index: at(4, 6), rotation: 90 }, DESK, WIDTH)).toEqual({ x: 4, y: 5, w: 1, h: 3 });
     expect(decorFootprint({ index: at(4, 6), rotation: 0 }, PLANT, WIDTH)).toEqual({ x: 4, y: 6, w: 1, h: 1 });
     expect(decorFootprint({ index: at(10, 10), rotation: 0 }, MEETING, WIDTH)).toEqual({ x: 7, y: 8, w: 7, h: 5 });
+  });
+});
+
+describe('officeDecor: sofas', () => {
+  const SOFA_2: DecorPieceInfo = { kind: 'sofa', footprint: { w: 2, h: 1 } };
+  const SOFA_3: DecorPieceInfo = { kind: 'sofa', footprint: { w: 3, h: 1 } };
+
+  it('knows a sofa by its manifest entry or by its id alone: one tile per seat, the fabric ones colorable', () => {
+    const manifest = JSON.parse(exportedManifest) as { pieces: { id: string; kind: string; footprint?: { w: number; h: number }; colorable?: boolean }[] };
+    const byId = new Map(manifest.pieces.map((piece) => [piece.id, piece]));
+    expect(decorPieceInfo(byId.get('sofa-leather-2')!)).toEqual(SOFA_2);
+    expect(decorPieceInfo(byId.get('sofa-leather-3')!)).toEqual(SOFA_3);
+    expect(decorPieceInfo(byId.get('sofa-fabric-2')!)).toEqual({ ...SOFA_2, colorable: true });
+    expect(decorPieceInfo(byId.get('sofa-fabric-3')!)).toEqual({ ...SOFA_3, colorable: true });
+    expect(decorInfoFromPieceId('sofa-leather-2')).toEqual(SOFA_2);
+    expect(decorInfoFromPieceId('sofa-fabric-3')).toEqual(SOFA_3);
+    expect(decorInfoFromPieceId('sofa-upload-0123456789abcdef')).toBeNull();
+    expect(isDecorSofaPiece('sofa-fabric-2')).toBe(true);
+    expect(isDecorSofaPiece('chair-fabric')).toBe(false);
+  });
+
+  it('turns four ways like a chair', () => {
+    expect(isRotatable('sofa')).toBe(true);
+    expect(decorRotationsOf('sofa')).toEqual([0, 90, 180, 270]);
+    expect(decorRotationFor('sofa', 270)).toBe(270);
+    expect(nextDecorRotation(0, 1, 'sofa')).toBe(270);
+  });
+
+  it('lies along a row facing up or down and along a column facing left or right, centered on its anchor like a room table', () => {
+    for (const rotation of [0, 180] as const) {
+      expect(decorFootprint({ index: at(10, 10), rotation }, SOFA_2, WIDTH)).toEqual({ x: 9, y: 10, w: 2, h: 1 });
+      expect(decorFootprint({ index: at(10, 10), rotation }, SOFA_3, WIDTH)).toEqual({ x: 9, y: 10, w: 3, h: 1 });
+    }
+    for (const rotation of [90, 270] as const) {
+      expect(decorFootprint({ index: at(10, 10), rotation }, SOFA_2, WIDTH)).toEqual({ x: 10, y: 9, w: 1, h: 2 });
+      expect(decorFootprint({ index: at(10, 10), rotation }, SOFA_3, WIDTH)).toEqual({ x: 10, y: 9, w: 1, h: 3 });
+    }
+    // The same anchor tile the 2x1 oval room table takes.
+    expect(decorFootprint({ index: at(10, 10), rotation: 0 }, { kind: 'table', footprint: { w: 2, h: 1 } }, WIDTH)).toEqual({ x: 9, y: 10, w: 2, h: 1 });
+  });
+
+  it('is a seat on every tile, each facing the way the sofa faces; a chair stays one seat on its tile', () => {
+    const items: DecorItem[] = [
+      { index: at(4, 5), piece: 'chair-wood', rotation: 90 },
+      { index: at(10, 10), piece: 'sofa-fabric-3', rotation: 0, color: '#2a9d8f' },
+      { index: at(15, 10), piece: 'sofa-leather-2', rotation: 270 },
+      { index: at(8, 5), piece: 'plant-ficus', rotation: 0 },
+      { index: at(2, 2), piece: 'desk-wood', rotation: 0 },
+    ];
+
+    expect(decorSeats(items, WIDTH)).toEqual([
+      { index: at(4, 5), piece: 'chair-wood', facing: 'right' },
+      { index: at(9, 10), piece: 'sofa-fabric-3', facing: 'down', color: '#2a9d8f' },
+      { index: at(10, 10), piece: 'sofa-fabric-3', facing: 'down', color: '#2a9d8f' },
+      { index: at(11, 10), piece: 'sofa-fabric-3', facing: 'down', color: '#2a9d8f' },
+      { index: at(15, 9), piece: 'sofa-leather-2', facing: 'left' },
+      { index: at(15, 10), piece: 'sofa-leather-2', facing: 'left' },
+    ]);
+    // The chairs alone, as `decorChairs` draws them, are what they were.
+    expect(decorChairs(items)).toEqual([{ index: at(4, 5), piece: 'chair-wood', facing: 'right' }]);
   });
 });

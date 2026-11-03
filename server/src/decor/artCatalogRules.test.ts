@@ -107,6 +107,15 @@ describe('artPieceFields', () => {
   });
 });
 
+describe('artPieceFields: sofas', () => {
+  it('stores the fabric sofas as colorable in their beige, and the leather ones as not', () => {
+    const fields = (id: string) => artPieceFields(MANIFEST.pieces.find((piece) => piece.id === id)!);
+    expect(fields('sofa-fabric-2')).toMatchObject({ kind: 'sofa', material: 'fabric', colorable: true, defaultColor: '#c4ab8c' });
+    expect(fields('sofa-fabric-3')).toMatchObject({ kind: 'sofa', material: 'fabric', colorable: true, defaultColor: '#c4ab8c' });
+    expect(fields('sofa-leather-3')).toMatchObject({ kind: 'sofa', material: 'leather', colorable: false, defaultColor: null });
+  });
+});
+
 describe('normalizeArtPack', () => {
   it('accepts the exported manifest as is', () => {
     expect(normalizeArtPack(MANIFEST)).toEqual(MANIFEST);
@@ -169,6 +178,16 @@ describe('normalizeArtPack', () => {
 
     const colorWithoutFlag = clone();
     colorWithoutFlag.pieces.find((piece) => piece.id === 'chair-wood')!.defaultColor = '#123456';
+    expect(() => normalizeArtPack(colorWithoutFlag)).toThrow(InvalidArtPackError);
+  });
+
+  it('holds a sofa to the same color pair as a chair', () => {
+    const badColor = clone();
+    badColor.pieces.find((piece) => piece.id === 'sofa-fabric-2')!.defaultColor = 'beige';
+    expect(() => normalizeArtPack(badColor)).toThrow(InvalidArtPackError);
+
+    const colorWithoutFlag = clone();
+    colorWithoutFlag.pieces.find((piece) => piece.id === 'sofa-leather-2')!.defaultColor = '#123456';
     expect(() => normalizeArtPack(colorWithoutFlag)).toThrow(InvalidArtPackError);
   });
 
@@ -322,7 +341,7 @@ describe('normalizeStoredAppearance', () => {
 describe('packDecorAsset', () => {
   it('offers every pack chair as a one-tile desk decor asset under its Spanish name', () => {
     const chairs = MANIFEST.pieces.filter((piece) => piece.kind === 'chair');
-    expect(chairs.map((piece) => piece.id).sort()).toEqual(['chair-gamer', 'chair-leather', 'chair-metal', 'chair-wood']);
+    expect(chairs.map((piece) => piece.id).sort()).toEqual(['chair-fabric', 'chair-gamer', 'chair-leather', 'chair-metal', 'chair-office', 'chair-task', 'chair-wood']);
     for (const chair of chairs) {
       expect(packDecorAsset(chair)).toEqual({
         name: chair.name,

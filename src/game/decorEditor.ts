@@ -75,6 +75,15 @@ export function decorSizeLabel(info: DecorPieceInfo): string {
 }
 
 /**
+ * Which remembered palette color a piece takes: a sofa `sofa-<material>-<seats>` shares the one of its armchair
+ * `chair-<material>`, so the fabric armchair and both fabric sofas come in the same color; any other piece keeps its own.
+ */
+export function decorColorKey(piece: string): string {
+  const sofa = /^sofa-(.+)-\d+$/.exec(piece);
+  return sofa === null ? piece : `chair-${sofa[1]}`;
+}
+
+/**
  * What the decor editor asks the map to show while it is open. `null` (the
  * whole command) closes it. The preview is drawn for this person only and is
  * never sat on or collided with: the room decides once each edit lands.
@@ -142,9 +151,10 @@ const DESK_SIDE = 3;
  * Whether a piece fits a 3x3 desk in some rotation, so the desk scope offers
  * it. Never a door (#223): it opens a wall, which only an admin edits. Never
  * a room table either (#116), even one that fits: a desk holds desk tables.
+ * Nor a sofa: it furnishes the office, a desk seats one at its table.
  */
 export function fitsDeskArea(info: DecorPieceInfo): boolean {
-  if (info.kind === 'door' || info.kind === 'table') return false;
+  if (info.kind === 'door' || info.kind === 'table' || info.kind === 'sofa') return false;
   return info.footprint.w <= DESK_SIDE && info.footprint.h <= DESK_SIDE;
 }
 

@@ -9,19 +9,23 @@
  * scene. Import-free on purpose, like `pieceCollisions.ts`: the server loads
  * it with Node type stripping, so callers resolve a piece through their art
  * catalog (the server's `art_pieces`, the client's manifest) and pass its
- * `DecorPieceInfo` in. The one import is the art contract's `doorSpanOf`, a
- * pure function of a piece id, for the doors the id alone describes.
+ * `DecorPieceInfo` in. The one imports are the art contract's `doorSpanOf`
+ * and `sofaSeatsOf`, pure functions of a piece id, for the doors and sofas the
+ * id alone describes.
  */
 
-import { doorSpanOf } from './artContract.ts';
+import { doorSpanOf, sofaSeatsOf } from './artContract.ts';
 
 /** 0 is the pack's default down drawing and the rotation turns it clockwise: 90 right, 180 up, 270 left. */
 export type DecorRotation = 0 | 90 | 180 | 270;
 export const DECOR_ROTATIONS: readonly DecorRotation[] = [0, 90, 180, 270];
 
-/** The art piece kinds the decor layer places; a door (#223) stands on a wall's grid line (`officeDoors.ts`). */
-export type DecorKind = 'chair' | 'desk' | 'plant' | 'table' | 'door';
-export const DECOR_KINDS: readonly DecorKind[] = ['chair', 'desk', 'plant', 'table', 'door'];
+/**
+ * The art piece kinds the decor layer places; a door (#223) stands on a wall's
+ * grid line (`officeDoors.ts`), and a sofa seats one person per tile.
+ */
+export type DecorKind = 'chair' | 'desk' | 'plant' | 'table' | 'door' | 'sofa';
+export const DECOR_KINDS: readonly DecorKind[] = ['chair', 'desk', 'plant', 'table', 'door', 'sofa'];
 
 /** The most items one request may set, like the placed chairs before them. */
 export const MAX_DECOR_EDITS = 500;
@@ -145,26 +149,30 @@ export function decorPieceInfo(piece: {
   readonly colorable?: boolean;
 }): DecorPieceInfo | null {
   if (!isDecorKind(piece.kind)) return null;
+  // Only desk tables, chairs and sofas take a color in the art contract (`colorable` of `ArtDeskPiece`, `ArtChairPiece` and `ArtSofaPiece`).
+  const colorable = (piece.kind === 'desk' || piece.kind === 'chair' || piece.kind === 'sofa') && piece.colorable === true ? { colorable: true as const } : {};
   const fixed = FIXED_FOOTPRINTS[piece.kind];
-  // Only desk tables and the gamer chair are colorable in the art contract (`colorable` of `ArtDeskPiece` and `ArtChairPiece`).
-  if (fixed !== undefined) {
-    return { kind: piece.kind, footprint: fixed, ...((piece.kind === 'desk' || piece.kind === 'chair') && piece.colorable === true ? { colorable: true as const } : {}) };
-  }
+  if (fixed !== undefined) return { kind: piece.kind, footprint: fixed, ...colorable };
   const footprint = piece.footprint;
   if (footprint === undefined || !Number.isInteger(footprint.w) || !Number.isInteger(footprint.h) || footprint.w < 1 || footprint.h < 1) return null;
-  return { kind: piece.kind, footprint: { w: footprint.w, h: footprint.h } };
+  return { kind: piece.kind, footprint: { w: footprint.w, h: footprint.h }, ...colorable };
 }
 
 /**
  * What the id alone says when no catalog knows the piece: chairs, desk
- * tables have a fixed footprint, a door's span is in its id (`doorSpanOf`) and
- * plants take one tile; a room table's footprint only its catalog entry has,
- * so it is `null`.
+ * tables have a fixed footprint, a door's span is in its id (`doorSpanOf`), so
+ * are a sofa's seats (`sofaSeatsOf`), and plants take one tile; a room
+ * table's footprint only its catalog entry has, so it is `null`. Whether a
+ * sofa takes a color is its catalog's to say.
  */
 export function decorInfoFromPieceId(piece: string): DecorPieceInfo | null {
   const kind = piece.slice(0, piece.indexOf('-'));
   if (kind === 'chair' || kind === 'desk') return decorPieceInfo({ kind });
   if (kind === 'door') return decorPieceInfo({ kind, footprint: { w: doorSpanOf(piece), h: 1 } });
+  if (kind === 'sofa') {
+    const seats = sofaSeatsOf(piece);
+    return seats === null ? null : decorPieceInfo({ kind, footprint: { w: seats, h: 1 } });
+  }
   if (kind === 'plant') return decorPieceInfo({ kind, footprint: { w: 1, h: 1 } });
   return null;
 }
@@ -177,7 +185,9 @@ export function decorInfoFromPieceId(piece: string): DecorPieceInfo | null {
  * table turned vertical (90) on its footprint swapped. A door (#223) stands
  * on the line that starts at an edge of its anchor tile, the top one for 0
  * and 180 and the left one for 90 and 270, runs its span (`footprint.w`) along
- * it, and covers the tile on each side of it. An unknown
+ * it, and covers the tile on each side of it. A sofa is centered like a room
+ * table, along a row facing down or up (0, 180) and along a column turned
+ * sideways (90, 270). An unknown
  * piece (`null`) keeps its anchor tile alone, so stored rows are never lost.
  */
 export function decorFootprint(item: DecorPlacement, info: DecorPieceInfo | null, width: number): DecorTileRect {
@@ -193,7 +203,8 @@ export function decorFootprint(item: DecorPlacement, info: DecorPieceInfo | null
     const horizontal = item.rotation === 0 || item.rotation === 180;
     return horizontal ? { x: tx - 1, y: ty, w: 3, h: 1 } : { x: tx, y: ty - 1, w: 1, h: 3 };
   }
-  const vertical = info.kind === 'table' && decorRotationFor('table', item.rotation) === 90;
+  const vertical =
+    (info.kind === 'table' && decorRotationFor('table', item.rotation) === 90) || (info.kind === 'sofa' && (item.rotation === 90 || item.rotation === 270));
   const w = vertical ? info.footprint.h : info.footprint.w;
   const h = vertical ? info.footprint.w : info.footprint.h;
   return { x: tx - Math.floor(w / 2), y: ty - Math.floor(h / 2), w, h };
@@ -285,7 +296,37 @@ export function isDecorChairPiece(piece: string): boolean {
   return piece.startsWith('chair-');
 }
 
-/** The seats of the layer: every chair, by its anchor tile, facing its rotation. */
+/** Whether a piece of the layer is a sofa: one seat per tile of its footprint. */
+export function isDecorSofaPiece(piece: string): boolean {
+  return piece.startsWith('sofa-');
+}
+
+/** A seat of the layer, by the tile it stands on (`chair-<index>` on the wire, `chairSeatId`). */
+export interface DecorSeat {
+  readonly index: number;
+  readonly piece: string;
+  readonly facing: DecorFacing;
+  readonly color?: string;
+}
+
+/**
+ * Every seat of the layer, in item order: a chair on its anchor tile, and a
+ * sofa on each tile of its footprint (sized by its id, `decorInfoFromPieceId`,
+ * so the room and every client agree without a catalog), all facing the way
+ * the piece faces. The seats run across a sofa, so several people sit on it,
+ * one per tile.
+ */
+export function decorSeats(items: readonly DecorItem[], width: number): DecorSeat[] {
+  return items.flatMap(({ index, piece, rotation, color }) => {
+    const seat = { piece, facing: decorChairFacing(rotation), ...(color === undefined ? {} : { color }) };
+    if (isDecorChairPiece(piece)) return [{ index, ...seat }];
+    if (!isDecorSofaPiece(piece)) return [];
+    const info = decorInfoFromPieceId(piece);
+    return info === null ? [] : decorTiles({ index, rotation }, info, width).map((tile) => ({ index: tile, ...seat }));
+  });
+}
+
+/** The chairs of the layer, by their anchor tile, facing their rotation: what `placeChairs` draws. */
 export function decorChairs(items: readonly DecorItem[]): { index: number; piece: string; facing: DecorFacing; color?: string }[] {
   return items.flatMap(({ index, piece, rotation, color }) =>
     isDecorChairPiece(piece) ? [{ index, piece, facing: decorChairFacing(rotation), ...(color === undefined ? {} : { color }) }] : [],

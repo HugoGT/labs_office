@@ -20,12 +20,14 @@ import {
   type ArtDeskPiece,
   type ArtPiece,
   type ArtPropPiece,
+  type ArtSofaPiece,
+  type ArtFacing,
   type Point,
   type TerrainMaterial,
 } from './artContract';
 import { findPiece } from './artPack';
 import type { ArtTextures } from './artPackLoader';
-import { chairPlacement, deskPlacement, footprintAnchor, type SpritePlacement } from './artPlacement';
+import { chairPlacement, deskPlacement, footprintAnchor, sofaPlacement, type SpritePlacement } from './artPlacement';
 import { chairLayerDepth, worldAssetDepth } from './depthLayers';
 import { TILE, ZONE_LABELS } from './mapData';
 import { LAYOUT_MATERIALS, type LayoutProp, type OfficeLayout, type TerrainColors, type TerrainSnapshot, type WallGrid } from './officeLayout';
@@ -95,6 +97,7 @@ function packSheet<P extends ArtPiece>(
 
 const isDesk = (piece: ArtPiece): piece is ArtDeskPiece => piece.kind === 'desk';
 const isChair = (piece: ArtPiece): piece is ArtChairPiece => piece.kind === 'chair';
+const isSofa = (piece: ArtPiece): piece is ArtSofaPiece => piece.kind === 'sofa';
 const isProp = (piece: ArtPiece): piece is ArtPropPiece =>
   piece.kind === 'tree' || piece.kind === 'plant' || piece.kind === 'bridge' || piece.kind === 'hedge' || piece.kind === 'table';
 const isAny = (_piece: ArtPiece): _piece is ArtPiece => true;
@@ -388,6 +391,37 @@ export function placeChairs(scene: Phaser.Scene, chairs: readonly PlacedChair[],
     drawn.push(...putChair(scene, sheet.key, chairPlacement(sheet.piece, facing, ground)));
   }
   for (const object of drawn) object.setName(CHAIR_OBJECT_NAME);
+  return drawn;
+}
+
+/** Name of every object `placeSofa` draws, so tests and tools can find the placed sofas on the map. */
+export const SOFA_OBJECT_NAME = 'map:sofa';
+
+/** A sofa of the decor layer: its piece, the way it faces, its color and the tiles it covers. */
+export interface PlacedSofa {
+  readonly piece: string;
+  readonly facing: ArtFacing;
+  /** The color a colorable sofa is painted in; absent, it is drawn as exported. */
+  readonly color?: string;
+  /** Its footprint in tiles (`decorFootprint`), turned the way it faces. */
+  readonly footprint: { readonly x: number; readonly y: number; readonly w: number; readonly h: number };
+}
+
+/**
+ * A sofa in both layers over its footprint, like a row of chairs drawn once:
+ * the back layer under every sitter, the front one over every sitter
+ * (`sofaPlacement`), its recolored sheet when it has a color; a grey
+ * placeholder over the footprint while its sheet is missing. Returns what it
+ * drew, so the scene can destroy it and draw it again after an edit.
+ */
+export function placeSofa(scene: Phaser.Scene, sofa: PlacedSofa, art?: ArtTextures): Phaser.GameObjects.GameObject[] {
+  const { x, y, w, h } = sofa.footprint;
+  const sheet = packSheet(art, sofa.piece, isSofa, sofa.color ?? null);
+  const drawn: Phaser.GameObjects.GameObject[] =
+    sheet === null
+      ? [placeholder(scene, x * TILE + 8, y * TILE + 8, w * TILE - 16, h * TILE - 16, PLACEHOLDER_COLOR, worldAssetDepth((y + h) * TILE))]
+      : putChair(scene, sheet.key, sofaPlacement(sheet.piece, sofa.facing, { x: x * TILE, y: y * TILE, w: w * TILE, h: h * TILE }));
+  for (const object of drawn) object.setName(SOFA_OBJECT_NAME);
   return drawn;
 }
 

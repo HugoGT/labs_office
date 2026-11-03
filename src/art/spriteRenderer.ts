@@ -4,13 +4,14 @@
  * 2. cel shading into a hue-shifted ramp (plus cast shadows from a second ray),
  * 3. contour lines where a nearer part overlaps a farther one,
  * 4. crisp decals (eyes, badge, lanyard...) stamped where their anchor is visible,
- * 5. a dark outline around the silhouette and a soft contact shadow under the feet.
+ * 5. a dark outline around the silhouette and a soft contact shadow under the feet, or under the
+ *    seated body, from the back of the pelvis to the knees (Scene.shadow).
  */
 import { CAMERA_PITCH, LIGHT_DIRECTION, WALK_FRAME, type FrameGeometry } from './camera.ts';
 import { hexToRgba, mixRgba, TONES, type Ramp, type Tone } from '../game/artColor.ts';
 import { add, dot, emptyHit, scale, sub, v3, type Primitive, type Vec3 } from './geometry.ts';
 import { PixelBuffer, rgba } from './pixelBuffer.ts';
-import type { MaterialKey, Scene } from './rig.ts';
+import type { MaterialKey, Scene, SeatedShadow } from './rig.ts';
 
 const FAR = 200;
 const CONTOUR_DEPTH = 2.4;
@@ -235,9 +236,32 @@ export function renderScene(scene: Scene, ramps: Ramps, yaw: number, frame: Fram
   figure.addOutline((neighbor) => mixRgba(neighbor, OUTLINE_INK, 0.78));
 
   const image = new PixelBuffer(width, height);
-  drawContactShadow(image, frame);
+  if (scene.shadow) drawSeatedShadow(image, camera, scene.shadow);
+  else drawContactShadow(image, frame);
   image.blit(figure, 0, 0);
   return image;
+}
+
+/**
+ * Stamps the seated ellipse where it lies on its horizontal plane: each pixel is traced back to
+ * that plane and kept if its point falls inside. Lifted half a pixel, like the standing shadow,
+ * so a point on the plane's front edge still darkens the row it projects onto.
+ */
+function drawSeatedShadow(image: PixelBuffer, camera: Camera, shadow: SeatedShadow): void {
+  const { center, halfLength, halfWidth } = shadow;
+  const reach = Math.hypot(halfLength, halfWidth);
+  const middle = { x: projectX(camera, center), y: projectY(camera, center) - 0.5 };
+  for (let y = Math.floor(middle.y - reach); y <= Math.ceil(middle.y + reach); y += 1) {
+    for (let x = Math.floor(middle.x - reach); x <= Math.ceil(middle.x + reach); x += 1) {
+      // Screen offsets from the projected center, undone into plane coordinates: screen x is
+      // the world x, screen y the world depth foreshortened by the pitch.
+      const sx = x + 0.5 - middle.x;
+      const depth = (y + 0.5 - middle.y) / Math.sin(CAMERA_PITCH);
+      const u = (sx * camera.cosYaw - depth * camera.sinYaw) / halfWidth;
+      const w = (sx * camera.sinYaw + depth * camera.cosYaw) / halfLength;
+      if (u * u + w * w <= 1) image.setPixel(x, y, SHADOW_COLOR);
+    }
+  }
 }
 
 function drawContactShadow(image: PixelBuffer, frame: FrameGeometry): void {

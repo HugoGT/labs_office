@@ -42,7 +42,22 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
     expect(onRequestActive).toHaveBeenCalledTimes(1);
     expect(onEditingChange).toHaveBeenLastCalledWith(true);
     expect(await screen.findByRole('group', { name: 'Sillas' })).toBeInTheDocument();
-    expect(screen.getByRole('group', { name: 'Mesas de sala' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Muebles de sala' })).toBeInTheDocument();
+  });
+
+  it('places a picked sofa over its seats on the clicked tile, says what it places, and a fabric one in its color', async () => {
+    const decor: OfficeDecorPort = { setDecor: vi.fn(async () => undefined) };
+    const { bridge, commands } = renderSection({ decor, initiallyActive: true });
+
+    await userEvent.click(await screen.findByRole('button', { name: 'Sofá de cuero (3 plazas)' }));
+    expect(screen.getByText('Poniendo Sofá de cuero (3 plazas)')).toBeInTheDocument();
+    expect(commands.at(-1)).toMatchObject({ brush: { kind: 'piece', piece: 'sofa-leather-3', info: { kind: 'sofa', footprint: { w: 3, h: 1 } }, rotation: 0 }, area: null });
+    act(() => bridge.emit('decorpick', { index: at(40, 40) }));
+    await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(40, 40), item: { piece: 'sofa-leather-3', rotation: 0 } }]));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Sofá tapizado (2 plazas)' }));
+    act(() => bridge.emit('decorpick', { index: at(44, 40) }));
+    await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(44, 40), item: { piece: 'sofa-fabric-2', rotation: 0, color: '#c4ab8c' } }]));
   });
 
   it('opens directly from the sidebar, places the picked piece on the clicked tile and says what it places', async () => {
@@ -396,7 +411,7 @@ describe('DecorEditorSection: Decoración for one desk', () => {
     expect(screen.getByRole('button', { name: 'Salir' })).toBeInTheDocument();
     // A desk holds desk tables, never a room table, not even the 2x1 oval one (#116).
     expect(screen.getByRole('group', { name: 'Mesas de escritorio' })).toBeInTheDocument();
-    expect(screen.queryByRole('group', { name: 'Mesas de sala' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Muebles de sala' })).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: /Múltiple/ })).not.toBeInTheDocument();
     expect(commands.at(-1)).toEqual({ brush: null, area: DESK, outlines: [DESK_OUTLINE] });
   });

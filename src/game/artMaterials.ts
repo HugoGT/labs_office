@@ -13,7 +13,7 @@
  * manifest and are offered after the pack's, each sheet next to its manifest.
  *
  * The wall pieces ride along for the terrain editor's wall palette, and the
- * chairs, desks, plants, room tables and doors (#223) for the decor palette
+ * chairs, sofas, desks, plants, room tables and doors (#223) for the decor palette
  * (#208), which cut their thumbnails the same way; no creation form offers
  * those.
  */
@@ -22,6 +22,7 @@ import {
   ART_IMAGE_SPECS,
   ART_TILE,
   DOOR,
+  SOFA,
   facingColumn,
   wallFrameIndex,
   type ArtChairPiece,
@@ -29,6 +30,7 @@ import {
   type ArtDoorPiece,
   type ArtFloorPiece,
   type ArtPlantPiece,
+  type ArtSofaPiece,
   type ArtTablePiece,
   type ArtWallPiece,
 } from './artContract';
@@ -39,7 +41,7 @@ const SHEET_ROLE = 'sheet';
 
 export interface MaterialOption {
   readonly id: string;
-  readonly kind: 'desk' | 'floor' | 'wall' | 'chair' | 'plant' | 'table' | 'door';
+  readonly kind: 'desk' | 'floor' | 'wall' | 'chair' | 'sofa' | 'plant' | 'table' | 'door';
   /** Spanish name from the manifest. */
   readonly name: string;
   readonly colorable: boolean;
@@ -52,7 +54,7 @@ export interface MaterialOption {
   readonly retired: boolean;
 }
 
-type CatalogPiece = ArtDeskPiece | ArtFloorPiece | ArtWallPiece | ArtChairPiece | ArtPlantPiece | ArtTablePiece | ArtDoorPiece;
+type CatalogPiece = ArtDeskPiece | ArtFloorPiece | ArtWallPiece | ArtChairPiece | ArtSofaPiece | ArtPlantPiece | ArtTablePiece | ArtDoorPiece;
 
 export interface MaterialCatalog {
   readonly desk: readonly MaterialOption[];
@@ -61,6 +63,8 @@ export interface MaterialCatalog {
   readonly wall: readonly MaterialOption[];
   /** The chair pieces, for the decor palette (colorable only for the gamer chair's accent). */
   readonly chair: readonly MaterialOption[];
+  /** The sofas, for the decor palette (colorable only for the fabric ones). */
+  readonly sofa: readonly MaterialOption[];
   /** The plants (pack and uploads), for the decor palette (never colorable). */
   readonly plant: readonly MaterialOption[];
   /** The room tables, for the decor palette (never colorable). */
@@ -75,6 +79,11 @@ function manifestFolder(manifestUrl: string): string {
   return manifestUrl.slice(0, manifestUrl.lastIndexOf('/') + 1);
 }
 
+/** The kinds that may take a color of their own (`recolorFor`). */
+function tinted(piece: CatalogPiece): piece is ArtDeskPiece | ArtFloorPiece | ArtChairPiece | ArtSofaPiece {
+  return piece.kind === 'desk' || piece.kind === 'floor' || piece.kind === 'chair' || piece.kind === 'sofa';
+}
+
 function optionOf(piece: CatalogPiece, folder: string): MaterialOption | null {
   const sheet = piece.files.find((file) => file.role === SHEET_ROLE && file.imageKind === piece.kind);
   if (sheet === undefined) return null;
@@ -82,8 +91,8 @@ function optionOf(piece: CatalogPiece, folder: string): MaterialOption | null {
     id: piece.id,
     kind: piece.kind,
     name: piece.name,
-    colorable: piece.kind === 'desk' || piece.kind === 'floor' || piece.kind === 'chair' ? piece.colorable === true : false,
-    defaultColor: piece.kind === 'desk' || piece.kind === 'floor' || piece.kind === 'chair' ? (piece.defaultColor ?? null) : null,
+    colorable: tinted(piece) ? piece.colorable === true : false,
+    defaultColor: tinted(piece) ? (piece.defaultColor ?? null) : null,
     sheetUrl: `${folder}${sheet.path}`,
     piece,
     retired: isRetiredArtPiece(piece),
@@ -113,17 +122,17 @@ export function materialCatalogFrom(raw: unknown, manifestUrl: string, uploads?:
     { manifest: uploads === undefined ? null : parseArtPackManifest(uploads.raw), url: uploads?.url ?? manifestUrl },
   ]);
   if (joined === null) return null;
-  const options: Record<MaterialOption['kind'], MaterialOption[]> = { desk: [], floor: [], wall: [], chair: [], plant: [], table: [], door: [] };
+  const options: Record<MaterialOption['kind'], MaterialOption[]> = { desk: [], floor: [], wall: [], chair: [], sofa: [], plant: [], table: [], door: [] };
   for (const piece of joined.manifest.pieces) {
     if (!(piece.kind in options)) continue;
     const option = optionOf(piece as CatalogPiece, manifestFolder(joined.sourceOf(piece.id) ?? manifestUrl));
     if (option !== null) options[option.kind].push(option);
   }
-  const { desk, floor, wall, chair, plant, table, door } = options;
+  const { desk, floor, wall, chair, sofa, plant, table, door } = options;
   const deskDefault = defaultOf(desk, manifest.defaults.desk);
   const floorDefault = defaultOf(floor, manifest.defaults.floor);
   if (deskDefault === null || floorDefault === null) return null;
-  return { desk, floor, wall, chair, plant, table, door, defaults: { desk: deskDefault, floor: floorDefault } };
+  return { desk, floor, wall, chair, sofa, plant, table, door, defaults: { desk: deskDefault, floor: floorDefault } };
 }
 
 /** What a form holds right after picking `option`: a colorable material starts in its default color. */
@@ -163,6 +172,7 @@ const DOOR_PREVIEW_HEIGHT = 24;
 
 export function previewFrame(option: MaterialOption): PreviewFrame {
   if (option.kind === 'chair') return chairPreviewFrames()[0];
+  if (option.kind === 'sofa') return sofaPreviewFrames()[0];
   // Frame 0: turned 0, hinged at its start, closed (`doorFrameIndex`).
   if (option.kind === 'door' && option.piece.kind === 'door') {
     const width = DOOR.variants[option.piece.variant].span * ART_TILE;
@@ -205,6 +215,25 @@ export function chairPreviewFrames(): readonly [PreviewFrame, PreviewFrame] {
   return [
     { x, y: 0, width: frame.width, height: frame.height },
     { x, y: frame.height, width: frame.width, height: frame.height },
+  ];
+}
+
+/** Rows of a sofa's down-facing cell its preview keeps: the backrest above the floor under its middle, its feet below it. */
+const SOFA_PREVIEW_ABOVE = 30;
+const SOFA_PREVIEW_BELOW = 8;
+
+/**
+ * The two layers of a sofa facing down, like a chair's: the part of the cell
+ * a sofa covers, full width so a three-seat one fits, back row then front row.
+ */
+export function sofaPreviewFrames(): readonly [PreviewFrame, PreviewFrame] {
+  const { frame, anchor } = SOFA;
+  const x = frame.width * facingColumn('down');
+  const y = anchor.y - SOFA_PREVIEW_ABOVE;
+  const height = SOFA_PREVIEW_ABOVE + SOFA_PREVIEW_BELOW;
+  return [
+    { x, y, width: frame.width, height },
+    { x, y: frame.height + y, width: frame.width, height },
   ];
 }
 

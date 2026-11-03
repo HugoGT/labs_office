@@ -515,6 +515,8 @@ describe('createTerrainRuntime decor', () => {
     { id: 'table-meeting', kind: 'table', footprint: { w: 7, h: 5 }, retired: false },
     { id: 'plant-gone', kind: 'plant', footprint: { w: 1, h: 1 }, retired: true },
     { id: 'tree-oak', kind: 'tree', footprint: { w: 1, h: 1 }, retired: false },
+    { id: 'sofa-leather-3', kind: 'sofa', footprint: { w: 3, h: 1 }, colorable: false, retired: false },
+    { id: 'sofa-fabric-2', kind: 'sofa', footprint: { w: 2, h: 1 }, colorable: true, retired: false },
   ];
   const decorPieces = async () => CATALOG;
   const runtimeWith = (store = createMemoryTerrain(), pieces = vi.fn(decorPieces)) =>
@@ -647,6 +649,22 @@ describe('createTerrainRuntime decor', () => {
     expect(runtime.decor()).toEqual([{ index: FREE, piece: 'chair-gamer', rotation: 0, color: '#2a9d8f' }]);
   });
 
+  it('places a sofa over a tile per seat, turned four ways, painting only the fabric one', async () => {
+    const store = createMemoryTerrain();
+    const runtime = runtimeWith(store);
+    await runtime.load();
+
+    await runtime.setDecor([{ index: FREE, item: { piece: 'sofa-fabric-2', rotation: 270, color: '#2a9d8f' } }], null);
+    expect(runtime.decor()).toEqual([{ index: FREE, piece: 'sofa-fabric-2', rotation: 270, color: '#2a9d8f' }]);
+    expect(await store.loadDecor()).toEqual(runtime.decor());
+    // Sideways it covers (67, 21..22): a chair on its other tile overlaps it.
+    await expect(runtime.setDecor([{ index: at(67, 21), item: WOOD_DOWN }], null)).rejects.toThrow();
+
+    await expect(runtime.setDecor([{ index: at(67, 26), item: { piece: 'sofa-leather-3', rotation: 0, color: '#2a9d8f' } }], null)).rejects.toThrow('this piece takes no color');
+    await runtime.setDecor([{ index: at(67, 26), item: { piece: 'sofa-leather-3', rotation: 180 } }], null);
+    expect(runtime.decor()).toHaveLength(2);
+  });
+
   it('keeps an already placed retired piece and lets it be removed', async () => {
     const store = createMemoryTerrain([], [], [{ index: FREE, piece: 'plant-gone', rotation: 0 }]);
     const runtime = runtimeWith(store);
@@ -691,6 +709,17 @@ describe('createTerrainRuntime decor', () => {
       { index: outside, ...WOOD_DOWN },
       { index: at(DESK.x + 1, DESK.y + 2), piece: 'desk-wood', rotation: 0 },
     ]);
+  });
+
+  it('places no sofa from a desk, even one that fits it: sofas furnish the office', async () => {
+    const runtime = runtimeWith();
+    await runtime.load();
+
+    await expect(runtime.setDecor([{ index: at(DESK.x + 1, DESK.y + 2), item: { piece: 'sofa-leather-3', rotation: 0 } }], 'user-1', DESK)).rejects.toThrow('a sofa is not for a desk');
+    expect(runtime.decor()).toEqual([]);
+    // The office scope places it on the same tiles.
+    await runtime.setDecor([{ index: at(DESK.x + 1, DESK.y + 2), item: { piece: 'sofa-leather-3', rotation: 0 } }], null);
+    expect(runtime.decor()).toEqual([{ index: at(DESK.x + 1, DESK.y + 2), piece: 'sofa-leather-3', rotation: 0 }]);
   });
 
   describe('desk rules', () => {

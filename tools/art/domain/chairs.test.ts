@@ -24,7 +24,7 @@ function opaqueRows(image: PixelBuffer, from: number, to: number): number {
 }
 
 test('every chair, facing and layer fits in a SEAT_BLOCK box, shadow and outline included', () => {
-  assert.equal(ALL.length, 16);
+  assert.equal(ALL.length, CHAIR_MATERIALS.length * 4);
   for (const { material, facing, sprite } of ALL) {
     const name = `${material} ${facing}`;
     assert.ok(sprite.back.width <= SEAT_BLOCK && sprite.back.height <= SEAT_BLOCK, `${name}: ${sprite.back.width}x${sprite.back.height}`);
@@ -59,14 +59,14 @@ test('the backrest goes behind a sitter facing the viewer and in front of one fa
 
 test('armrests over the sitter legs are in front only on the near side of a side view', () => {
   for (const facing of ['left', 'right'] as const) {
-    for (const material of ['leather', 'gamer'] as const) {
+    for (const material of ['leather', 'gamer', 'office', 'fabric'] as const) {
       const sprite = chairSprite(material, facing);
       assert.ok(sprite.front.countOpaque() > 10, `${material} ${facing}: near armrest in front`);
       assert.ok(opaqueRows(sprite.front, 0, sprite.seat.y - 8) === 0, `${material} ${facing}: the front layer stays low`);
     }
   }
   for (const facing of FACINGS) {
-    for (const material of ['wood', 'metal'] as const) {
+    for (const material of ['wood', 'metal', 'task'] as const) {
       if (facing !== 'up') assert.equal(chairSprite(material, facing).front.countOpaque(), 0, `${material} ${facing}: no arms, nothing in front`);
     }
   }
@@ -74,7 +74,7 @@ test('armrests over the sitter legs are in front only on the near side of a side
 
 test('left and right face opposite ways and every chair is its own drawing', () => {
   const keys = new Set(ALL.map(({ sprite }) => [sprite.back.data.join(), sprite.front.data.join()].join('|')));
-  assert.equal(keys.size, 16);
+  assert.equal(keys.size, CHAIR_MATERIALS.length * 4);
   for (const material of CHAIR_MATERIALS) {
     const right = chairSprite(material, 'right');
     const left = chairSprite(material, 'left');
@@ -144,17 +144,19 @@ test('chairs are cached and deterministic', () => {
   assert.equal(chairSprite('wood', 'up'), chairSprite('wood', 'up'));
 });
 
-test('only the gamer chair takes an accent color, and the silhouette does not change with it', () => {
+test('only the gamer chair and the fabric armchair take a color, and the silhouette does not change with it', () => {
   const teal = '#2a9d8f';
   for (const facing of FACINGS) {
-    const red = chairSprite('gamer', facing);
-    const painted = chairSprite('gamer', facing, teal);
-    const alpha = (image: PixelBuffer): number[] => Array.from(image.data).filter((_, index) => index % 4 === 3);
-    for (const layer of ['back', 'front'] as const) assert.deepEqual(alpha(painted[layer]), alpha(red[layer]), `${facing} ${layer}: same silhouette`);
-    assert.notDeepEqual(Array.from(painted.back.data), Array.from(red.back.data), `${facing}: the accent repaints the red parts`);
-    assert.deepEqual([painted.seat, painted.ground], [red.seat, red.ground], `${facing}: same seat and ground points`);
-    for (const material of ['wood', 'metal', 'leather'] as const) {
-      assert.deepEqual(Array.from(chairSprite(material, facing, teal).back.data), Array.from(chairSprite(material, facing).back.data), `${material} ${facing}: no accent to paint`);
+    for (const material of ['gamer', 'fabric'] as const) {
+      const exported = chairSprite(material, facing);
+      const painted = chairSprite(material, facing, teal);
+      const alpha = (image: PixelBuffer): number[] => Array.from(image.data).filter((_, index) => index % 4 === 3);
+      for (const layer of ['back', 'front'] as const) assert.deepEqual(alpha(painted[layer]), alpha(exported[layer]), `${material} ${facing} ${layer}: same silhouette`);
+      assert.notDeepEqual(Array.from(painted.back.data), Array.from(exported.back.data), `${material} ${facing}: the color repaints it`);
+      assert.deepEqual([painted.seat, painted.ground], [exported.seat, exported.ground], `${material} ${facing}: same seat and ground points`);
+    }
+    for (const material of ['wood', 'metal', 'leather', 'office', 'task'] as const) {
+      assert.deepEqual(Array.from(chairSprite(material, facing, teal).back.data), Array.from(chairSprite(material, facing).back.data), `${material} ${facing}: no color to paint`);
     }
   }
 });

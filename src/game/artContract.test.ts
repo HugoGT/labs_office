@@ -27,6 +27,8 @@ import {
   MAX_COLORS_PER_IMAGE,
   PACK_FACINGS,
   PLANT,
+  SOFA,
+  sofaSeatsOf,
   TABLE,
   TABLE_FACINGS,
   tableFrameIndex,
@@ -163,6 +165,32 @@ describe('art contract constants', () => {
     expect(CHAIR_LAYERS).toEqual(['back', 'front']);
     expect(chair.anchor).toEqual({ x: 18, y: 22 });
     expect(chair.ground).toEqual({ x: 18, y: 31 });
+  });
+
+  it('lays sofas out like chairs, facings by layers, the floor under the middle of the sofa on one anchor', () => {
+    expect(ART_IMAGE_KINDS).toContain('sofa');
+    expect(ART_PIECE_KINDS).toContain('sofa');
+    const sofa = ART_IMAGE_SPECS.sofa;
+    expect(sofa).toBe(SOFA);
+    expect(sofa.columns).toBe(PACK_FACINGS.length);
+    expect(sofa.columnOrder).toEqual(PACK_FACINGS);
+    expect(sofa.rows).toBe(CHAIR_LAYERS.length);
+    expect(sofa.rowOrder).toEqual(CHAIR_LAYERS);
+    expect(sofa.maxSeats).toBe(3);
+    // A three-seat sofa spans three tiles across, or down when it is turned sideways.
+    expect(sofa.frame.width).toBeGreaterThanOrEqual(sofa.maxSeats * ART_TILE);
+    expect(sofa.frame.height).toBeGreaterThanOrEqual(sofa.maxSeats * ART_TILE);
+    expect(sofa.alpha).toBe('partial');
+    expect(sofa.transparentCorners).toBe(true);
+  });
+
+  it('reads the seats of a sofa from its id, and none from an id that states no seat count it knows', () => {
+    expect(sofaSeatsOf('sofa-leather-2')).toBe(2);
+    expect(sofaSeatsOf('sofa-fabric-3')).toBe(3);
+    expect(sofaSeatsOf('sofa-fabric-1')).toBeNull();
+    expect(sofaSeatsOf('sofa-fabric-4')).toBeNull();
+    expect(sofaSeatsOf('sofa-upload-0123456789abcdef')).toBeNull();
+    expect(sofaSeatsOf('chair-leather')).toBeNull();
   });
 
   it('allows the partial alpha and the color count the pack actually uses', () => {
@@ -703,7 +731,7 @@ describe('terrain dual grid over void', () => {
 
 describe('map props', () => {
   it('registers a piece kind for the tileset and each prop, with a fixed frame per image kind', () => {
-    expect(ART_PIECE_KINDS).toEqual(['character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door']);
+    expect(ART_PIECE_KINDS).toEqual(['character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door', 'sofa']);
     expect(TREE.frame).toEqual({ width: 64, height: 96 });
     expect(PLANT.frame).toEqual({ width: 32, height: 48 });
     expect(sheetSize(BRIDGE)).toEqual({ width: 256, height: 128 });

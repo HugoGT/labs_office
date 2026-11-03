@@ -186,8 +186,8 @@ export function normalizeArtPack(raw: unknown): ArtPackManifest {
         : piece.colorable === false && piece.defaultColor === null;
       if (!valid) throw new InvalidArtPackError(`art piece ${id} has an invalid colorable/defaultColor pair`);
     }
-    // A chair may carry the pair (the gamer chair's accent), and if it does it must be a valid one.
-    if (kind === 'chair' && (piece.colorable !== undefined || piece.defaultColor !== undefined)) {
+    // A chair or a sofa may carry the pair (the gamer chair's accent, the fabric ones), and if it does it must be a valid one.
+    if ((kind === 'chair' || kind === 'sofa') && (piece.colorable !== undefined || piece.defaultColor !== undefined)) {
       const valid = piece.colorable === true
         ? typeof piece.defaultColor === 'string' && COLOR.test(piece.defaultColor)
         : piece.colorable === false && piece.defaultColor === null;
@@ -222,7 +222,7 @@ export interface ArtPieceFields {
 }
 
 export function artPieceFields(piece: ArtPiece): ArtPieceFields {
-  const tinted = piece.kind === 'desk' || piece.kind === 'floor' || piece.kind === 'chair' ? piece : null;
+  const tinted = piece.kind === 'desk' || piece.kind === 'floor' || piece.kind === 'chair' || piece.kind === 'sofa' ? piece : null;
   return {
     id: piece.id,
     kind: piece.kind,

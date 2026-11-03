@@ -1,10 +1,11 @@
 import Phaser from 'phaser';
 import { afterEach, describe, expect, it } from 'vitest';
 import { waitForSceneRunning } from '../test/phaserScene';
-import { TERRAIN_LAYER_COUNT, TERRAIN_LAYER_ORIGIN, propPlacement, type ArtChairPiece } from './artContract';
+import { TERRAIN_LAYER_COUNT, TERRAIN_LAYER_ORIGIN, propPlacement, type ArtChairPiece, type ArtSofaPiece } from './artContract';
 import { artSheetKey, findPiece, recoloredSheetKey } from './artPack';
 import { ArtPackLoader } from './artPackLoader';
-import { chairPlacement, deskPlacement, footprintAnchor } from './artPlacement';
+import { chairPlacement, deskPlacement, footprintAnchor, sofaPlacement } from './artPlacement';
+import { chairLayerDepth, seatedAvatarDepth } from './depthLayers';
 import { TILE, ZONE_LABELS } from './mapData';
 import {
   CHAIR_OBJECT_NAME,
@@ -12,6 +13,8 @@ import {
   placeChairs,
   placeLayout,
   placeSeats,
+  placeSofa,
+  SOFA_OBJECT_NAME,
   placeWalls,
   placeZoneLabels,
   renderTerrain,
@@ -487,6 +490,56 @@ describe('placeChairs', () => {
     ]);
 
     expect(counts).toEqual([1, 0]);
+  });
+});
+
+describe('placeSofa', () => {
+  it('draws a sofa from its pack piece in both layers over its footprint, every sitter of it sorting between them', async () => {
+    const footprint = { x: 10, y: 4, w: 1, h: 3 };
+    const drawn = await withArtScene((scene, art) => {
+      const objects = placeSofa(scene, { piece: 'sofa-leather-3', facing: 'left', footprint }, art);
+      return {
+        named: objects.every((object) => object.name === SOFA_OBJECT_NAME),
+        piece: findPiece(art.manifest!, 'sofa-leather-3') as ArtSofaPiece,
+        sprites: images(scene).map((img) => ({ key: img.texture.key, x: img.x, y: img.y, frame: Number(img.frame.name), depth: img.depth })),
+      };
+    });
+
+    expect(drawn.named).toBe(true);
+    const { back, front } = sofaPlacement(drawn.piece, 'left', { x: 10 * TILE, y: 4 * TILE, w: TILE, h: 3 * TILE });
+    expect(drawn.sprites).toEqual([
+      { key: artSheetKey('sofa-leather-3', 'sheet'), x: back.x, y: back.y, frame: back.frame, depth: chairLayerDepth(back.depthY, 'back') },
+      { key: artSheetKey('sofa-leather-3', 'sheet'), x: front.x, y: front.y, frame: front.frame, depth: chairLayerDepth(front.depthY, 'front') },
+    ]);
+    // Each seat is grounded on its own tile's middle: the top, middle and bottom sitters all land between the layers.
+    for (const ty of [4, 5, 6]) {
+      const sitter = seatedAvatarDepth((ty + 0.5) * TILE);
+      expect(sitter).toBeGreaterThan(drawn.sprites[0]!.depth);
+      expect(sitter).toBeLessThan(drawn.sprites[1]!.depth);
+    }
+  });
+
+  it('draws a painted fabric sofa from a recolored copy of its sheet, and ignores a color on a leather one', async () => {
+    const TEAL = '#2a9d8f';
+    const keys = await withArtScene((scene, art) => {
+      placeSofa(scene, { piece: 'sofa-fabric-2', facing: 'down', color: TEAL, footprint: { x: 3, y: 5, w: 2, h: 1 } }, art);
+      placeSofa(scene, { piece: 'sofa-leather-2', facing: 'down', color: TEAL, footprint: { x: 3, y: 8, w: 2, h: 1 } }, art);
+      return images(scene).map((img) => img.texture.key);
+    });
+
+    expect(keys).toEqual([
+      recoloredSheetKey('sofa-fabric-2', 'sheet', TEAL),
+      recoloredSheetKey('sofa-fabric-2', 'sheet', TEAL),
+      artSheetKey('sofa-leather-2', 'sheet'),
+      artSheetKey('sofa-leather-2', 'sheet'),
+    ]);
+  });
+
+  it('without the pack covers the footprint with one placeholder', async () => {
+    const placeholders = await withScene((scene, art) => placeSofa(scene, { piece: 'sofa-leather-2', facing: 'down', footprint: { x: 3, y: 5, w: 2, h: 1 } }, art));
+
+    expect(placeholders).toHaveLength(1);
+    expect(placeholders[0]).toMatchObject({ x: 4 * TILE, width: 2 * TILE - 16, height: TILE - 16 });
   });
 });
 

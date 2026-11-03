@@ -43,6 +43,7 @@ export interface SurfacePoint {
   readonly height: number;
 }
 
+/** Recolors a pixel of a face; a transparent result leaves the pixel out of the box. */
 export type Shader = (point: SurfacePoint, color: Rgba) => Rgba;
 
 /** Axis-aligned box in model space, half-open spans with whole-pixel ends. */
@@ -206,6 +207,8 @@ function rasterBox(box: Box, o: Orientation, into: Map<number, Pixel & { x: numb
       const { u, v } = modelPoint(o, x + 0.5, (z + 0.5) / DEPTH_SCALE);
       const point = { face: 'top' as const, u, v, y: y1, col: x - x0, row: z - z0, width, height: z1 - z0 };
       if (box.shade) color = box.shade(point, color);
+      // A shader leaves a pixel out by turning it transparent: what is behind shows, and the outline follows.
+      if (color.a === 0) continue;
       plot(x, z - y1, color, z + 0.5 + y1);
     }
   }
@@ -219,6 +222,7 @@ function rasterBox(box: Box, o: Orientation, into: Map<number, Pixel & { x: numb
       let color = toned(shaded ? mixRgba(sideColor, ramp.deep, 0.4) : sideColor, box.alpha);
       const point = { face, ...modelPoint(o, x + 0.5, edge * o.zSign), y: y + 0.5, col: x - x0, row: y1 - 1 - y, width, height: y1 - y0 };
       if (box.shade) color = box.shade(point, color);
+      if (color.a === 0) continue;
       plot(x, z1 - 1 - y, color, z1 + y + 0.5);
     }
   }

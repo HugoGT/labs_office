@@ -15,6 +15,7 @@ import {
   DOOR_VARIANTS,
   HEDGE,
   PACK_FACINGS,
+  SOFA,
   TABLE,
   TABLE_FACINGS,
   TERRAIN_DECALS,
@@ -49,6 +50,7 @@ import {
   type WallPiece,
 } from '../../src/game/artContract.ts';
 import { CHAIR_MATERIALS, chairSprite, type ChairMaterial } from './domain/chairs.ts';
+import { SOFA_MATERIALS, SOFA_SEATS, sofaSprite, type SofaMaterial, type SofaSeats } from './domain/sofas.ts';
 import { BASE_CHARACTERS, type CharacterSpec } from '../../src/art/characters.ts';
 import { PixelBuffer } from '../../src/art/pixelBuffer.ts';
 import { DOOR_MATERIALS, doorSprite, type DoorMaterial } from './domain/doors.ts';
@@ -81,6 +83,23 @@ export function chairSheet(material: ChairMaterial): PixelBuffer {
     const y = CHAIR.anchor.y - sprite.seat.y;
     place(sheet, sprite.back, x, y);
     place(sheet, sprite.front, x, CHAIR.frame.height + y);
+  }
+  return sheet;
+}
+
+/**
+ * Laid out like a chair sheet (a column per facing, `back` on row 0 and `front` on row 1), the
+ * floor under the middle of the sofa on SOFA.anchor in every cell, so its seats land a tile apart
+ * around it.
+ */
+export function sofaSheet(material: SofaMaterial, seats: SofaSeats): PixelBuffer {
+  const sheet = blankSheet(SOFA);
+  for (const facing of PACK_FACINGS) {
+    const sprite = sofaSprite(material, seats, facing);
+    const x = facingColumn(facing) * SOFA.frame.width + SOFA.anchor.x - sprite.ground.x;
+    const y = SOFA.anchor.y - sprite.ground.y;
+    place(sheet, sprite.back, x, y);
+    place(sheet, sprite.front, x, SOFA.frame.height + y);
   }
   return sheet;
 }
@@ -246,6 +265,7 @@ export function doorSheet(material: DoorMaterial, variant: DoorVariant): PixelBu
 export interface PackSheets {
   readonly characters: readonly { readonly spec: CharacterSpec; readonly walk: PixelBuffer; readonly seated: PixelBuffer }[];
   readonly chairs: readonly { readonly material: ChairMaterial; readonly image: PixelBuffer }[];
+  readonly sofas: readonly { readonly material: SofaMaterial; readonly seats: SofaSeats; readonly image: PixelBuffer }[];
   readonly desks: readonly { readonly material: TableMaterial; readonly sheet: DeskSheet }[];
   readonly floors: readonly { readonly terrain: Terrain; readonly image: PixelBuffer }[];
   readonly walls: readonly { readonly material: WallMaterial; readonly image: PixelBuffer }[];
@@ -265,6 +285,7 @@ export function buildPackSheets(): PackSheets {
       return { spec, walk, seated };
     }),
     chairs: CHAIR_MATERIALS.map((material) => ({ material, image: chairSheet(material) })),
+    sofas: SOFA_MATERIALS.flatMap((material) => SOFA_SEATS.map((seats) => ({ material, seats, image: sofaSheet(material, seats) }))),
     desks: TABLE_MATERIALS.map((material) => ({ material, sheet: deskSheet(material) })),
     floors: TERRAINS.map((terrain) => ({ terrain, image: floorSheet(terrain) })),
     walls: WALL_MATERIALS.map((material) => ({ material, image: wallSheet(material) })),
