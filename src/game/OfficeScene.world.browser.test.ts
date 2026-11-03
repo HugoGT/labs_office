@@ -21,6 +21,7 @@ import type { OfficeDesk } from './desksPort';
 import { createOfficeBridge, type OfficeEventMap } from './officeBridge';
 import { PLAYER_TEXTURE } from './textures';
 import { decorObjectName, type OfficeSceneOptions } from './OfficeScene';
+import { decorKey } from './officeDecor';
 import type { AutoWalkState } from './autoWalk';
 import { regionBounds } from './cameraBounds';
 import { zoomView, type ZoomStore, type ZoomView } from './mapZoom';
@@ -1263,7 +1264,7 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
     expect(views.at(-1)).toEqual(zoomView(3));
   });
 
-  it('with a chair picked in the decor editor the wheel turns it and does not zoom; with a plant it zooms again (#207)', async () => {
+  it('with a chair picked in the decor editor the wheel turns it and does not zoom; with a tree it zooms again (#207)', async () => {
     const { scene, bridge, views } = await zoomScene();
     const turns: number[] = [];
     bridge.on('decorrotate', ({ step }) => turns.push(step));
@@ -1274,14 +1275,15 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
       }));
     };
     const chair = { kind: 'chair', footprint: { w: 1, h: 1 } } as const;
-    const plant = { kind: 'plant', footprint: { w: 1, h: 1 } } as const;
+    // A tree never turns (a plant mirrors since #121).
+    const tree = { kind: 'tree', footprint: { w: 1, h: 1 } } as const;
 
     bridge.emitCommand('decoredit', { brush: { kind: 'piece', piece: 'chair-wood', info: chair, rotation: 0 }, area: null });
     spin();
     expect(turns).toEqual([-1]);
     expect(views).toEqual([zoomView(2)]);
 
-    bridge.emitCommand('decoredit', { brush: { kind: 'piece', piece: 'plant-bonsai', info: plant, rotation: 0 }, area: null });
+    bridge.emitCommand('decoredit', { brush: { kind: 'piece', piece: 'tree-oak', info: tree, rotation: 0 }, area: null });
     spin();
     expect(turns).toEqual([-1]);
     expect(views.at(-1)).toEqual(zoomView(3));
@@ -1443,6 +1445,31 @@ describe('OfficeScene: the office decor layer (#208)', () => {
       const onTable = scene.children.getByName(decorObjectName(at(42, 39), 'top')) as Phaser.GameObjects.Image | null;
       expect({ x: onTable?.x, y: onTable?.y, depth: onTable?.depth }).toEqual({ x: 42.5 * TILE - 16, y: 40 * TILE - 15 - 46, depth: onTopDepth(43 * TILE) });
     }, LOOP_WAIT);
+  });
+
+  it('selects a piece on top of a desk table by its lifted art, the desk by its front, and mirrors a plant turned 180 (#121)', async () => {
+    const { scene, bridge, handlers } = await bootConnected();
+    const selected: (number | null)[] = [];
+    bridge.on('decorselect', ({ index }) => selected.push(index));
+    handlers.onDecor!([
+      { index: at(30, 20), piece: 'desk-wood', rotation: 180 },
+      { index: at(30, 20), piece: 'plant-bonsai', rotation: 180 },
+    ]);
+    const top = (): Phaser.GameObjects.Image | null => scene.children.getByName(decorObjectName(at(30, 20), 'top')) as Phaser.GameObjects.Image | null;
+    await vi.waitFor(() => expect(top()?.texture.key).toBe(artSheetKey('plant-bonsai', 'sheet')), LOOP_WAIT);
+    expect(top()!.flipX).toBe(true);
+    bridge.emitCommand('decoredit', { brush: null, area: null });
+    const click = (worldX: number, worldY: number): void => {
+      const pointer = { worldX, worldY, button: 0, camera: scene.cameras.main, getDistance: () => 0 } as unknown as Phaser.Input.Pointer;
+      scene.input.emit('pointerdown', pointer, []);
+      scene.input.emit('pointerup', pointer, []);
+    };
+
+    // The bonsai's crown shows over the tile above the desk's row; the desk's front is low in its own row.
+    click(30.5 * TILE, 20 * TILE - 4);
+    click(30.5 * TILE, 21 * TILE - 2);
+
+    expect(selected).toEqual([decorKey(at(30, 20), 'top'), at(30, 20)]);
   });
 
   it('draws a vertical room table (90) in its sheet\'s second frame on the bottom middle of its swapped footprint', async () => {

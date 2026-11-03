@@ -65,14 +65,17 @@ export class SelectionButtons {
     return this.shownZoom;
   }
 
-  /** Puts the buttons under `rect`, side by side and centered on it, or over it at the map's bottom edge. */
-  show(rect: SelectionRect, mapHeight: number): void {
+  /**
+   * Puts the buttons under `rect`, side by side and centered on it, or over it at the map's bottom edge;
+   * `liftY` world pixels up or down with it, for a piece drawn off its footprint (a top piece, #121).
+   */
+  show(rect: SelectionRect, mapHeight: number, liftY = 0): void {
     const zoom = this.scene.cameras.main.zoom || 1;
     this.shownZoom = zoom;
     const size = SELECTION_BUTTON_PX / zoom;
     const gap = BUTTON_GAP_PX / zoom;
     const below = rect.y + rect.h < mapHeight;
-    const centerY = below ? (rect.y + rect.h) * TILE + gap + size / 2 : rect.y * TILE - gap - size / 2;
+    const centerY = liftY + (below ? (rect.y + rect.h) * TILE + gap + size / 2 : rect.y * TILE - gap - size / 2);
     const centerX = (rect.x + rect.w / 2) * TILE;
     const offset = (size + gap) / 2;
     this.buttons ??= { move: this.make('move'), delete: this.make('delete') };

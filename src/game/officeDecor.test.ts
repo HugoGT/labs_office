@@ -83,11 +83,11 @@ describe('officeDecor: pieces', () => {
     expect(decorInfoFromPieceId('tree-oak')).toEqual(TREE);
   });
 
-  it('turns chairs, desk tables and room tables, never plants', () => {
+  it('turns chairs, desk tables, room tables and plants (#121), never trees', () => {
     expect(isRotatable('chair')).toBe(true);
     expect(isRotatable('desk')).toBe(true);
     expect(isRotatable('table')).toBe(true);
-    expect(isRotatable('plant')).toBe(false);
+    expect(isRotatable('plant')).toBe(true);
     expect(isRotatable('tree')).toBe(false);
   });
 
@@ -95,7 +95,9 @@ describe('officeDecor: pieces', () => {
     expect(decorRotationsOf('chair')).toEqual([0, 90, 180, 270]);
     expect(decorRotationsOf('desk')).toEqual([0, 90, 180, 270]);
     expect(decorRotationsOf('table')).toEqual([0, 90]);
-    expect(decorRotationsOf('plant')).toEqual([0]);
+    // A plant turns between its drawing (0) and its mirror (180) (#121).
+    expect(decorRotationsOf('plant')).toEqual([0, 180]);
+    expect(decorRotationFor('plant', 180)).toBe(180);
     expect(decorRotationFor('table', 180)).toBe(0);
     expect(decorRotationFor('table', 270)).toBe(90);
     expect(decorRotationFor('plant', 90)).toBe(0);
@@ -249,13 +251,16 @@ describe('officeDecor: rotation', () => {
     expect(nextDecorRotation(90, -1)).toBe(180);
   });
 
-  it('toggles a room table between 0 and 90 either way, and leaves a plant at 0', () => {
+  it('toggles a room table between 0 and 90 and a plant between 0 and 180, either way', () => {
     expect(nextDecorRotation(0, 1, 'table')).toBe(90);
     expect(nextDecorRotation(90, 1, 'table')).toBe(0);
     expect(nextDecorRotation(0, -1, 'table')).toBe(90);
     expect(nextDecorRotation(90, -1, 'table')).toBe(0);
     expect(nextDecorRotation(180, 1, 'table')).toBe(90);
-    expect(nextDecorRotation(0, 1, 'plant')).toBe(0);
+    expect(nextDecorRotation(0, 1, 'plant')).toBe(180);
+    expect(nextDecorRotation(180, 1, 'plant')).toBe(0);
+    expect(nextDecorRotation(0, -1, 'plant')).toBe(180);
+    expect(nextDecorRotation(0, 1, 'tree')).toBe(0);
     expect(nextDecorRotation(0, 1, 'desk')).toBe(270);
   });
 

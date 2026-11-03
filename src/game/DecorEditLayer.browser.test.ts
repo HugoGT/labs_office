@@ -92,10 +92,11 @@ const GROUND: DecorGround = {
   wallTiles: Array.from({ length: WIDTH * HEIGHT }, () => false),
 };
 
-function layer(scene: Phaser.Scene, items: DecorItem[] = [], clock = { now: 1000 }) {
+function layer(scene: Phaser.Scene, items: DecorItem[] = [], clock = { now: 1000 }, liftOf?: (item: DecorItem) => number) {
   const bridge = createOfficeBridge();
   const drawn: DecorItem[] = [];
   const deps: DecorEditLayerDeps = {
+    ...(liftOf === undefined ? {} : { liftOf }),
     now: () => clock.now,
     width: WIDTH,
     height: HEIGHT,
@@ -221,7 +222,7 @@ describe('DecorEditLayer', () => {
     expect(picks).toEqual([at(3, 2)]);
   });
 
-  it('turns a picked chair, desk table or room table with R, back with Shift+R, never a plant nor while typing', async () => {
+  it('turns a picked chair, desk table, room table or plant (#121) with R, back with Shift+R, never while typing', async () => {
     const scene = await bootHostScene();
     const { bridge } = layer(scene);
     const steps: number[] = [];
@@ -244,7 +245,7 @@ describe('DecorEditLayer', () => {
     key({ key: 'r' });
     input.remove();
 
-    expect(steps).toEqual([1, -1, 1]);
+    expect(steps).toEqual([1, -1, 1, 1]);
   });
 
   it('turns a picked chair or desk table with the wheel, one quarter turn per notch, down forward and up back (#207)', async () => {
@@ -292,7 +293,7 @@ describe('DecorEditLayer', () => {
     expect(steps).toEqual([1, 1, 1, 1]);
   });
 
-  it('a trackpad gesture turns the piece once, and the wheel stays the zoom\'s for plants and nothing picked', async () => {
+  it('a trackpad gesture turns the piece once, and the wheel stays the zoom\'s with nothing picked', async () => {
     const scene = await bootHostScene();
     const clock = { now: 1000 };
     const { bridge, decorLayer } = layer(scene, [], clock);
@@ -306,7 +307,7 @@ describe('DecorEditLayer', () => {
     }
     expect(rotate).toHaveBeenCalledTimes(1);
 
-    for (const brush of [plant, null]) {
+    for (const brush of [null]) {
       bridge.emitCommand('decoredit', { brush, area: null });
       expect(decorLayer.holdsWheel()).toBe(false);
       clock.now += 1000;
@@ -667,6 +668,41 @@ describe('DecorEditLayer: the top layer (#121)', () => {
     const outline = named<Phaser.GameObjects.Rectangle>(scene, DECOR_SELECTION_NAME)!;
     expect([outline.x, outline.y, outline.width, outline.height]).toEqual([5.5 * TILE, 5.5 * TILE, TILE, TILE]);
     const trash = named<Phaser.GameObjects.Rectangle>(scene, DECOR_DELETE_BUTTON_NAME)!;
+    clickAt(scene, trash.x, trash.y);
+    expect(deletes).toEqual([TOP]);
+  });
+
+  // A top piece drawn 23px up onto its desk table: its art spans y 137..169 of tile row 5 (160..192).
+  const LIFT = -23;
+  const lifted = (item: DecorItem): number => (item.piece.startsWith('plant-') ? LIFT : 0);
+
+  it('selects a lifted top piece where its art is drawn, and the desk table under it by its front (#121)', async () => {
+    const scene = await bootHostScene();
+    const { bridge } = layer(scene, items, undefined, lifted);
+    const seen: (number | null)[] = [];
+    bridge.on('decorselect', ({ index }) => seen.push(index));
+    bridge.emitCommand('decoredit', { brush: null, area: null });
+
+    // Its crown, over the tile above the desk; then the desk table's front, under the lifted art.
+    clickAt(scene, mid(5), 5 * TILE - 8);
+    clickAt(scene, mid(5), 5 * TILE + 28);
+    // Off the art, the tile above holds nothing.
+    clickAt(scene, mid(5), 4 * TILE + 2);
+
+    expect(seen).toEqual([TOP, at(5, 5), null]);
+  });
+
+  it('outlines a lifted top piece where its art is drawn, its buttons under that (#121)', async () => {
+    const scene = await bootHostScene();
+    const { bridge } = layer(scene, items, undefined, lifted);
+    const deletes: number[] = [];
+    bridge.on('decordelete', ({ index }) => deletes.push(index));
+    bridge.emitCommand('decoredit', { brush: null, area: null, selected: TOP });
+
+    const outline = named<Phaser.GameObjects.Rectangle>(scene, DECOR_SELECTION_NAME)!;
+    expect([outline.x, outline.y, outline.width, outline.height]).toEqual([5.5 * TILE, 5.5 * TILE + LIFT, TILE, TILE]);
+    const trash = named<Phaser.GameObjects.Rectangle>(scene, DECOR_DELETE_BUTTON_NAME)!;
+    expect(trash.y).toBeLessThan(6 * TILE + LIFT + TILE);
     clickAt(scene, trash.x, trash.y);
     expect(deletes).toEqual([TOP]);
   });

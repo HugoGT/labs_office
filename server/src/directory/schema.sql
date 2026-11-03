@@ -617,3 +617,8 @@ END $$;
 ALTER TABLE office_decor ADD COLUMN IF NOT EXISTS layer text NOT NULL DEFAULT 'floor' CHECK (layer IN ('floor', 'top'));
 ALTER TABLE office_decor DROP CONSTRAINT IF EXISTS office_decor_pkey;
 ALTER TABLE office_decor ADD CONSTRAINT office_decor_pkey PRIMARY KEY (tile_index, layer);
+-- A plant stored before the layers sits on the floor, where no edit reaches it (`decorLayerOf` puts
+-- every plant on top): it moves up, unless a top item already holds its tile. Idempotent.
+UPDATE office_decor SET layer = 'top'
+  WHERE layer = 'floor' AND piece_id LIKE 'plant-%'
+    AND NOT EXISTS (SELECT 1 FROM office_decor above WHERE above.tile_index = office_decor.tile_index AND above.layer = 'top');

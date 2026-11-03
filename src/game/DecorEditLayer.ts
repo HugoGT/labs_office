@@ -68,6 +68,11 @@ export interface DecorEditLayerDeps {
   ground(): DecorGround;
   /** Draws one item the way the decor layer would (the scene's drawing); the layer makes it a ghost. */
   drawPiece(item: DecorItem): Phaser.GameObjects.GameObject[];
+  /**
+   * How many world pixels an item is drawn off its footprint, negative up: a top
+   * piece lifted onto its surface (#121) is picked and outlined where it shows. 0 by default.
+   */
+  liftOf?(item: DecorItem): number;
   /** Clock for wheel accumulation; injectable so tests do not wait on real time. */
   now?: () => number;
 }
@@ -247,11 +252,32 @@ export class DecorEditLayer {
     return pointer.camera == null || pointer.camera === this.scene.cameras.main;
   }
 
-  /** The key of the item under the pointer, inside the command's area, or `null`. */
+  /** How far the scene draws `item` off its footprint, in world pixels (`liftOf`). */
+  private liftOf(item: DecorItem): number {
+    return this.deps.liftOf?.(item) ?? 0;
+  }
+
+  /**
+   * The key of the item under the pointer, inside the command's area, or `null`. A lifted top piece
+   * (#121) is where its art shows, over the tile above its own: it is found there first, and the tile
+   * under it then belongs to the desk table or room table it stands on.
+   */
   private itemAt(pointer: Phaser.Input.Pointer): number | null {
+    const command = this.command;
+    if (command == null) return null;
+    const infoOf = (piece: string) => this.deps.infoOf(piece);
+    const items = this.deps.items();
+    const lifted = items.filter((item) => decorLayerOf(item.piece) === 'top' && this.liftOf(item) !== 0);
+    for (const item of lifted) {
+      const rect = decorFootprint(item, infoOf(item.piece), this.deps.width);
+      const x = pointer.worldX / TILE - rect.x;
+      const y = (pointer.worldY - this.liftOf(item)) / TILE - rect.y;
+      if (x < 0 || y < 0 || x >= rect.w || y >= rect.h) continue;
+      if (decorPickAt([item], infoOf, this.deps.width, item.index, command.area) !== null) return decorItemKey(item);
+    }
     const tile = this.tileAt(pointer);
-    if (tile === null || this.command == null) return null;
-    const item = decorPickAt(this.deps.items(), (piece) => this.deps.infoOf(piece), this.deps.width, tile, this.command.area);
+    if (tile === null) return null;
+    const item = decorPickAt(items.filter((candidate) => !lifted.includes(candidate)), infoOf, this.deps.width, tile, command.area);
     return item === null ? null : decorItemKey(item);
   }
 
@@ -350,13 +376,13 @@ export class DecorEditLayer {
   }
 
   /** The selected item, if it is still on the layer and nothing is picked; `null` otherwise. */
-  private selectedFootprint(): { index: number; rect: DecorTileRect } | null {
+  private selectedFootprint(): { index: number; rect: DecorTileRect; liftY: number } | null {
     const command = this.command;
     const index = command?.selected ?? null;
     if (command == null || command.brush !== null || index === null) return null;
     const item = this.deps.items().find((candidate) => decorItemKey(candidate) === index);
     if (item === undefined) return null;
-    return { index, rect: decorFootprint(item, this.deps.infoOf(item.piece), this.deps.width) };
+    return { index, rect: decorFootprint(item, this.deps.infoOf(item.piece), this.deps.width), liftY: this.liftOf(item) };
   }
 
   /** Outlines the selected item and puts its two buttons under it (over it at the map's bottom edge). */
@@ -368,14 +394,15 @@ export class DecorEditLayer {
       this.buttons.hide();
       return;
     }
-    const { rect } = selected;
+    const { rect, liftY } = selected;
     this.selection ??= this.scene.add.rectangle(0, 0, TILE, TILE).setFillStyle().setDepth(LAYOUT_GHOST_DEPTH + 1).setName(DECOR_SELECTION_NAME);
+    // A lifted top piece is outlined where its art shows (#121).
     this.selection
       .setSize(rect.w * TILE, rect.h * TILE)
       .setStrokeStyle(STROKE_WIDTH, DECOR_SELECTION_COLOR)
-      .setPosition((rect.x + rect.w / 2) * TILE, (rect.y + rect.h / 2) * TILE)
+      .setPosition((rect.x + rect.w / 2) * TILE, (rect.y + rect.h / 2) * TILE + liftY)
       .setVisible(true);
 
-    this.buttons.show(rect, this.deps.height);
+    this.buttons.show(rect, this.deps.height, liftY);
   }
 }

@@ -37,7 +37,7 @@ import {
 import { deskAt, deskZoneName } from './deskLayout';
 import { SPACE_SHADE_ALPHA, SPACE_SHADE_NAME, shadeAround, shadeKey } from './spaceFocus';
 import { tableFacing, tableFloorRect } from './deskTable';
-import { decorChairFacing, decorChairs, decorFootprint, decorLayerOf, decorSeats, encodeOfficeDecor, isDecorChairPiece, isDecorSofaPiece, withDecor, type DecorEdit, type DecorItem, type DecorLayer, type DecorTileRect } from './officeDecor';
+import { decorChairFacing, decorChairs, decorFootprint, decorLayerOf, decorRotationFor, decorSeats, encodeOfficeDecor, isDecorChairPiece, isDecorSofaPiece, withDecor, type DecorEdit, type DecorItem, type DecorLayer, type DecorTileRect } from './officeDecor';
 import { deskSurface, onTopGround, tableSurface, type DecorSurface } from './decorTop';
 import { doorEdge, doorHingeStops, doorLeaves, doorOpenings, doorSpan, doorStepOf, doorSwingRotation, keptSwings, moveDoors, openDoorLeaves, type DoorLeaf, type DoorMotion } from './officeDoors';
 import { deskEntryRefused, isOnDesk } from './deskDecorRules';
@@ -861,6 +861,13 @@ export class OfficeScene extends Phaser.Scene {
       ground: () => this.terrain,
       // The ghost of a top piece stands on the surfaces of the layer it is judged against.
       drawPiece: (item) => this.drawDecorPiece(item, this.decorPreview === null ? this.officeDecor : withDecor(this.officeDecor, this.decorPreview)),
+      // A top piece is picked and outlined where it is drawn, lifted onto its surface (#121).
+      liftOf: (item) => {
+        const items = this.decorPreview === null ? this.officeDecor : withDecor(this.officeDecor, this.decorPreview);
+        const rect = decorFootprint(item, decorInfoFromManifest(this.art.manifest)(item.piece), this.layout.width);
+        const lift = this.decorLift(item, rect, items);
+        return lift === null ? 0 : lift.y - (rect.y + rect.h) * TILE;
+      },
     });
     this.unsubscribeDecorEdit = this.bridge.onCommand('decoredit', (command) => {
       const opening = command !== null && !this.decorEditing;
@@ -1721,11 +1728,8 @@ export class OfficeScene extends Phaser.Scene {
     const infoOf = decorInfoFromManifest(this.art.manifest);
     const rect = decorFootprint(item, infoOf(item.piece), width);
     const name = decorObjectName(item.index, decorLayerOf(item.piece));
-    // Floor pieces stand on the bottom of their footprint; a top piece on the surface under it.
     const footprintBottom = (rect.y + rect.h) * TILE;
-    // With no surface left under it (a stored row) a top piece is drawn as on the floor, as before the layers.
-    const surfaces = decorLayerOf(item.piece) === 'top' ? this.decorSurfacesUnder(rect, items) : [];
-    const lift = surfaces.length === 0 ? null : onTopGround(footprintBottom, surfaces);
+    const lift = this.decorLift(item, rect, items);
     const dy = lift === null ? 0 : lift.y - footprintBottom;
     const depthOf = (depthY: number): number => (lift === null ? worldAssetDepth(depthY) : onTopDepth(lift.depthY));
     if (kind === 'desk') {
@@ -1759,7 +1763,21 @@ export class OfficeScene extends Phaser.Scene {
     // A room table standing vertical is its sheet's second frame, anchored on its swapped footprint.
     const placement = propPlacement({ anchor: sheet.piece.anchor, footprint: { w: rect.w, h: rect.h } }, rect.x, rect.y);
     const frame = sheet.piece.kind === 'table' ? tableFrameIndex(item.rotation) : 0;
-    return [putArtSprite(this, sheet.key, { ...placement, y: placement.y + dy, frame }, depthOf(placement.depthY)).setName(name)];
+    const sprite = putArtSprite(this, sheet.key, { ...placement, y: placement.y + dy, frame }, depthOf(placement.depthY)).setName(name);
+    // A plant turned 180 is its mirror (#121): one frame, flipped about its anchor's column, the middle of its frame.
+    if (sheet.piece.kind === 'plant' && decorRotationFor('plant', item.rotation) === 180) sprite.setFlipX(true);
+    return [sprite];
+  }
+
+  /**
+   * Where a top piece stands lifted onto the desk tables and room tables under
+   * it (#121), or `null` for a floor piece or a top piece with no surface left
+   * under it (a stored row), drawn on its own tile as before the layers.
+   */
+  private decorLift(item: DecorItem, rect: DecorTileRect, items: readonly DecorItem[]): ReturnType<typeof onTopGround> | null {
+    if (decorLayerOf(item.piece) !== 'top') return null;
+    const surfaces = this.decorSurfacesUnder(rect, items);
+    return surfaces.length === 0 ? null : onTopGround((rect.y + rect.h) * TILE, surfaces);
   }
 
   /**

@@ -160,7 +160,7 @@ describe('useDecorEditor', () => {
     expect(result.current.brush).toMatchObject({ piece: 'desk-wood', rotation: 270 });
   });
 
-  it('never turns a plant, and with nothing picked the map turns nothing', () => {
+  it('mirrors a picked plant either way (#121), and with nothing picked the map turns nothing', () => {
     const { bridge, result } = setup();
     act(() => result.current.enter());
     act(() => bridge.emit('decorrotate', { step: 1 }));
@@ -168,8 +168,9 @@ describe('useDecorEditor', () => {
 
     act(() => result.current.pick(PLANT));
     act(() => bridge.emit('decorrotate', { step: 1 }));
+    expect(result.current.brush).toMatchObject({ piece: 'plant-bonsai', rotation: 180 });
+    act(() => bridge.emit('decorrotate', { step: -1 }));
     expect(result.current.brush).toMatchObject({ piece: 'plant-bonsai', rotation: 0 });
-    expect(result.current.rotation).toBe(0);
   });
 
   it('turns a picked room table between horizontal (0) and vertical (90) either way, and takes the symmetric half of a chair turn', () => {

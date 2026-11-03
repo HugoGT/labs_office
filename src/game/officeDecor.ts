@@ -162,9 +162,9 @@ export function isDecorColor(value: unknown): value is string {
   return typeof value === 'string' && DECOR_COLOR.test(value);
 }
 
-/** Chairs, desk tables, room tables and doors turn; a plant or a tree is drawn in one frame. */
+/** Chairs, desk tables, room tables and doors turn, and a plant mirrors (#121); a tree is drawn in one frame. */
 export function isRotatable(kind: DecorKind): boolean {
-  return kind !== 'plant' && kind !== 'tree';
+  return kind !== 'tree';
 }
 
 /**
@@ -174,6 +174,8 @@ export function isRotatable(kind: DecorKind): boolean {
  */
 export function decorRotationsOf(kind: DecorKind): readonly DecorRotation[] {
   if (kind === 'table') return [0, 90];
+  // A plant turns between its drawing (0) and its mirror (180), #121.
+  if (kind === 'plant') return [0, 180];
   return isRotatable(kind) ? DECOR_ROTATIONS : [0];
 }
 
@@ -189,6 +191,7 @@ export function defaultDecorRotation(kind: DecorKind): DecorRotation {
 /** `rotation` as `kind` can take it: a room table's symmetric turn, 0 for a plant. */
 export function decorRotationFor(kind: DecorKind, rotation: DecorRotation): DecorRotation {
   if (kind === 'table') return rotation === 90 || rotation === 270 ? 90 : 0;
+  if (kind === 'plant') return rotation === 180 ? 180 : 0;
   return isRotatable(kind) ? rotation : 0;
 }
 
@@ -344,10 +347,11 @@ export function decorItemCovering(
  * The next rotation of a brush (the wheel, R): one step turns a chair or a
  * desk table down, left, up, right, the order the chair brush always had,
  * and the other step back. A room table toggles between horizontal and
- * vertical either way; a plant stays at 0.
+ * vertical either way, a plant between its drawing and its mirror (#121).
  */
 export function nextDecorRotation(rotation: DecorRotation, step: 1 | -1, kind: DecorKind = 'chair'): DecorRotation {
   if (kind === 'table') return decorRotationFor('table', rotation) === 0 ? 90 : 0;
+  if (kind === 'plant') return decorRotationFor('plant', rotation) === 0 ? 180 : 0;
   if (!isRotatable(kind)) return 0;
   return ((((rotation - step * 90) % 360) + 360) % 360) as DecorRotation;
 }

@@ -42,4 +42,13 @@ describe('schema.sql: the top layer of the office decor (#121)', () => {
     // No block of its own: the grid-move test reads the last `DO $$` as the decor copy.
     expect(squashed.lastIndexOf('do $$')).toBeLessThan(copyEnd);
   });
+
+  it('moves a plant stored on the floor before the layers to the top, where its id puts it, unless a top item holds its tile', () => {
+    const lift =
+      "update office_decor set layer = 'top' where layer = 'floor' and piece_id like 'plant-%' " +
+      "and not exists (select 1 from office_decor above where above.tile_index = office_decor.tile_index and above.layer = 'top');";
+    expect(squashed).toContain(lift);
+    // After the new key: (tile, 'top') is a row of its own only then.
+    expect(squashed.indexOf(lift)).toBeGreaterThan(squashed.indexOf(addKey));
+  });
 });
