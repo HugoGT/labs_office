@@ -1,4 +1,4 @@
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import * as vitestBrowser from 'vitest/browser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -30,7 +30,6 @@ afterEach(() => cleanup());
 
 describe('CharacterCreator in a browser', () => {
   it('draws the character being built on its preview canvas and redraws it after a change', async () => {
-    const user = userEvent.setup();
     render(
       <CharacterCreator
         heading="Crea tu personaje"
@@ -49,8 +48,9 @@ describe('CharacterCreator in a browser', () => {
     await vi.waitFor(() => expect(opaquePixels(idle)).toBeGreaterThan(100));
     const before = idle.getContext('2d')!.getImageData(0, 0, idle.width, idle.height).data.slice();
 
-    await user.click(within(screen.getByRole('group', { name: 'Superior' })).getByRole('button', { name: /^Color de la parte superior/ }));
-    await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Blanco' }));
+    // What the browser's color picker reports when a color is chosen in it.
+    const color = within(screen.getByRole('group', { name: 'Superior' })).getByLabelText('Color de la parte superior', { selector: 'input' });
+    fireEvent.input(color, { target: { value: '#f4f4f0' } });
 
     await vi.waitFor(() => {
       const after = idle.getContext('2d')!.getImageData(0, 0, idle.width, idle.height).data;
@@ -110,10 +110,6 @@ describe('CharacterCreator fits one screen', () => {
     noVerticalScroll();
     await user.click(within(screen.getByRole('group', { name: 'Zapatos' })).getByRole('button', { name: /^Estilo de zapatos/ }));
     insideViewport(screen.getByRole('menu'));
-    noVerticalScroll();
-    await user.keyboard('{Escape}');
-    await user.click(within(screen.getByRole('group', { name: 'Zapatos' })).getByRole('button', { name: /^Color de zapatos/ }));
-    insideViewport(screen.getByRole('dialog'));
     noVerticalScroll();
   });
 });
