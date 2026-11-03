@@ -405,10 +405,11 @@ export function sofaSeatsOf(piece: string): number | null {
 
 /**
  * A desk piece is the table a person places on one 3-tile edge of their desk
- * (desk decor, Editar espacios): about 2.5 tiles (80px) long in any facing,
- * so it looks centered on the edge and leaves the rest of the 3x3 free. A
- * 96x104 cell fits it horizontal or vertical (the vertical one stands its top
- * over 80 floor rows); the footprint is the whole edge, along the long side.
+ * (desk decor, Editar espacios): about 2.6 tiles (84px) long in any facing,
+ * so it looks centered on the edge, close to the next desk like in a real
+ * office. A 96x104 cell fits it horizontal or vertical (the vertical one
+ * stands its top over 84 floor rows, 100 rows with its height); the footprint
+ * is the whole edge, along the long side.
  */
 export const DESK: DeskSpec = {
   kind: 'desk',

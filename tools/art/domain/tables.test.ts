@@ -2,6 +2,8 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { PixelBuffer } from '../../../src/art/pixelBuffer.ts';
 import { FACINGS } from '../../../src/art/seating.ts';
+import { DESK } from '../../../src/game/artContract.ts';
+import { TABLE_DEPTH_PX, TABLE_LONG_SIDE_PX, tableFloorRect } from '../../../src/game/deskTable.ts';
 import { DEFAULT_GAMER_LIGHT, DEFAULT_TABLE_COLOR, TABLE_MATERIALS, tableSprite } from './tables.ts';
 
 const luma = (p: { r: number; g: number; b: number }): number => p.r * 0.3 + p.g * 0.59 + p.b * 0.11;
@@ -28,14 +30,62 @@ test('tables are wide facing up or down and deep facing left or right, small eno
   }
 });
 
-test('a table is about 2.5 tiles long on screen, horizontal or vertical, so it sits centered on a 3-tile desk edge', () => {
-  // The floor run of the top along the long side: 80px, 2.4 to 2.6 tiles, the outline aside.
+test('a table is 84px long on screen, horizontal or vertical, so neighbouring desks stand closer (S19)', () => {
+  // The floor run of the top along the long side, the outline aside: 2.625 tiles, grown from 80px.
+  assert.equal(TABLE_LONG_SIDE_PX, 84);
   for (const { material, facing, sprite } of ALL) {
     const name = `${material} ${facing}`;
-    const { floorLength } = sprite;
-    assert.ok(floorLength >= 2.4 * 32 && floorLength <= 2.6 * 32, `${name}: ${floorLength}`);
+    assert.equal(sprite.floorLength, TABLE_LONG_SIDE_PX, name);
     const drawn = facing === 'up' || facing === 'down' ? sprite.image.width : sprite.image.height;
-    assert.ok(drawn >= floorLength && drawn < 3 * 32 + 8, `${name}: ${drawn}`);
+    assert.ok(drawn >= sprite.floorLength && drawn < 3 * 32 + 8, `${name}: ${drawn}`);
+  }
+});
+
+test('the top grows in depth by the same 84/80 as in length, as close to the old 80x24 proportion as an even depth allows', () => {
+  // The model is symmetric around the middle in whole pixels, so the depth is even: 26 is the even depth nearest 24 * 84 / 80.
+  assert.equal(TABLE_DEPTH_PX, 26);
+  const nearest = [24, 26, 28].sort((a, b) => Math.abs(80 / 24 - TABLE_LONG_SIDE_PX / a) - Math.abs(80 / 24 - TABLE_LONG_SIDE_PX / b))[0];
+  assert.equal(TABLE_DEPTH_PX, nearest);
+  for (const material of TABLE_MATERIALS.filter((m) => m !== 'curved')) {
+    // Turned sideways the depth runs across the screen, untouched by DEPTH_SCALE.
+    assert.equal(tableSprite(material, 'left').floorDepth, TABLE_DEPTH_PX, material);
+    assert.equal(tableSprite(material, 'right').floorDepth, TABLE_DEPTH_PX, material);
+  }
+  // The horizontal facings widen by the 4px the long side gained (82 columns before, outline included).
+  for (const material of TABLE_MATERIALS) for (const facing of ['up', 'down'] as const) assert.equal(tableSprite(material, facing).image.width, 86, `${material} ${facing}`);
+});
+
+test('the side facings span 100 rows and every facing still fits the 96x104 DESK cell', () => {
+  // Before S19 the side facings spanned 97 rows (96 for the gamer and curved desks); the 4 rows of length round to 100 in all of them.
+  for (const { material, facing, sprite } of ALL) {
+    const name = `${material} ${facing}`;
+    if (facing === 'left' || facing === 'right') assert.equal(sprite.image.height, 100, name);
+    // Placed as deskSheet places it: the floor under its middle on DESK.anchor.
+    const x = DESK.anchor.x - sprite.center.x;
+    const y = DESK.anchor.y - sprite.center.y;
+    assert.ok(x >= 0 && x + sprite.image.width <= DESK.frame.width, `${name}: columns ${x}..${x + sprite.image.width}`);
+    assert.ok(y >= 0 && y + sprite.image.height <= DESK.frame.height, `${name}: rows ${y}..${y + sprite.image.height}`);
+  }
+});
+
+test('a chair keeps the gap to the sitter edge of the top that it had at the 80px desk', () => {
+  // In front of or behind the top: 3 floor rows past its edge. Beside it: 9 columns past it, so the seat stays clear of the top.
+  for (const { material, facing, sprite } of ALL) {
+    const name = `${material} ${facing}`;
+    const { chairGround, center, floorDepth } = sprite;
+    const offset = { x: chairGround.x - center.x, y: chairGround.y - center.y };
+    const expected = { up: { x: 0, y: floorDepth / 2 + 3 }, down: { x: 0, y: -floorDepth / 2 - 3 }, left: { x: TABLE_DEPTH_PX / 2 + 9, y: 0 }, right: { x: -TABLE_DEPTH_PX / 2 - 9, y: 0 } }[facing];
+    assert.deepEqual(offset, expected, name);
+  }
+});
+
+test('the default collision under a desk is the floor its top covers', () => {
+  // Shared with the server (deskTable.ts): rotation 0 faces down, 90 right.
+  for (const material of TABLE_MATERIALS.filter((m) => m !== 'curved')) {
+    const down = tableSprite(material, 'down');
+    const right = tableSprite(material, 'right');
+    assert.deepEqual([tableFloorRect(0).w, tableFloorRect(0).h], [down.floorLength, down.floorDepth], material);
+    assert.deepEqual([tableFloorRect(90).w, tableFloorRect(90).h], [right.floorDepth, right.floorLength], material);
   }
 });
 

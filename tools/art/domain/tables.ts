@@ -11,6 +11,7 @@
  */
 import { makeRamp, mixRgba, type Ramp } from './color.ts';
 import { ART_TILE, TABLE, type Footprint, type TableFacing } from '../../../src/game/artContract.ts';
+import { TABLE_DEPTH_PX, TABLE_LONG_SIDE_PX } from '../../../src/game/deskTable.ts';
 import { DEPTH_SCALE, floorPoint, floorSpans, renderFurniture, type Box, type FurnitureModel, type Span, type SurfacePoint } from './furnitureModel.ts';
 import { PixelBuffer, rgba, type Rgba } from '../../../src/art/pixelBuffer.ts';
 import type { Facing, SeatPoint } from '../../../src/art/seating.ts';
@@ -41,26 +42,32 @@ export interface TableSprite {
   readonly chairGround: SeatPoint;
   /** Screen pixels of floor the top runs along its long side, the outline aside. */
   readonly floorLength: number;
+  /** Screen pixels of floor across a regular desk's top (front to back edge), the outline aside: rows facing up or down, columns facing left or right. */
+  readonly floorDepth: number;
 }
 
 /** Model extents: `u` runs from the sitter's side (negative) to the far side, `v` along the top. */
-const HALF_DEPTH = 12;
+const HALF_DEPTH = TABLE_DEPTH_PX / 2;
 /**
- * Half the long side on screen: 80px, about 2.5 tiles, so a table sits
- * centered on a 3-tile edge of a desk (a decor table, Editar espacios) and
- * leaves the rest of the 3x3 free. Facing left or right the long side runs
+ * Half the long side on screen: 84px, a little over 2.5 tiles, so a table
+ * sits centered on a 3-tile edge of a desk (a decor table, Editar espacios)
+ * close to its neighbours (S19). Facing left or right the long side runs
  * along the floor depth, which DEPTH_SCALE shortens, so the model is longer
- * there to draw the same 80px.
+ * there to draw the same 84px.
  */
-const HALF_LENGTH_PX = 40;
+const HALF_LENGTH_PX = TABLE_LONG_SIDE_PX / 2;
+/** How much the desks grew from their first 80px; the curved desk's arcs grow with it. */
+const GROWTH = TABLE_LONG_SIDE_PX / 80;
 const TOP_UNDER = TABLE_HEIGHT - 2;
 const LEG_U: Span = [HALF_DEPTH - 3, HALF_DEPTH - 1];
 /**
- * A chair's seat is 14 deep. In front of or behind the table it slides 3 pixels under the top; beside
- * it (left/right) the sitter sorts before the table, so the seat stops 2 pixels short of the top
+ * A chair's seat is 14 deep. In front of or behind the table its ground point sits 3 floor rows
+ * past the top's sitter edge, so the seat slides under the top; counted in rows, not model
+ * pixels, so the gap stays the 80px desk's however DEPTH_SCALE rounds a deeper top. Beside it
+ * (left/right) the sitter sorts before the table, so the seat stops 2 pixels short of the top
  * and the table never covers the sitter's head and chest.
  */
-const CHAIR_U = -(HALF_DEPTH + 7 - 3);
+const CHAIR_ROWS_PAST_EDGE = 3;
 const SIDE_CHAIR_U = -(HALF_DEPTH + 7 + 2);
 
 interface TableLook {
@@ -216,7 +223,7 @@ function gamerDeskModel(lightHex: string, halfWidth: number): FurnitureModel {
 
 const TERRACOTTA = makeRamp('#b9683c');
 /** The curved desk's top runs this much deeper than the others, so the front half-ring has room. */
-const CURVED_HALF_DEPTH = HALF_DEPTH + 6;
+const CURVED_HALF_DEPTH = HALF_DEPTH + Math.round(6 * GROWTH);
 
 /**
  * A curved wooden desk, as seen from above: its far corners rounded off in a wide arc and, at the
@@ -227,9 +234,9 @@ const CURVED_HALF_DEPTH = HALF_DEPTH + 6;
 function curvedDeskModel(halfWidth: number): FurnitureModel {
   // Turned sideways the long side is drawn longer (DEPTH_SCALE), so the arcs along it stretch too.
   const stretch = halfWidth / HALF_LENGTH_PX;
-  const corner = 14;
-  const notch = 11;
-  const ring = 4;
+  const corner = Math.round(14 * GROWTH);
+  const notch = Math.round(11 * GROWTH);
+  const ring = Math.round(4 * GROWTH);
   const front = -HALF_DEPTH;
   const back = CURVED_HALF_DEPTH;
   // How far a point sits from the notch's middle, in notch radii (v squeezed back by the stretch).
@@ -262,7 +269,8 @@ function curvedDeskModel(halfWidth: number): FurnitureModel {
   const legs = [leg([front + 2, front + 5], [halfWidth - 6, halfWidth - 3]), leg([back - 9, back - 6], [halfWidth - 10, halfWidth - 7])];
   const panel: Box = { u: [back - 8, back - 6], v: [-halfWidth + 12, halfWidth - 12], y: [3, TOP_UNDER], ramp: TERRACOTTA, top: 'shadow', side: 'shadow' };
   return {
-    shadow: { u: [front + 1, back + 1], v: [-halfWidth, halfWidth], shape: 'ellipse' },
+    // Up to the back edge, not past it: a row further rounds into one more floor row facing down than up.
+    shadow: { u: [front + 1, back], v: [-halfWidth, halfWidth], shape: 'ellipse' },
     parts: [{ boxes: [...legs, ...legs.map(mirrorV)] }, { boxes: [panel] }, { boxes: top }],
   };
 }
@@ -283,14 +291,20 @@ export function tableSprite(material: TableMaterial, facing: Facing, color?: str
   // The curved desk's top runs deeper on the far side; its front edge, where people sit, is the others'.
   const spans = floorSpans(facing, [-HALF_DEPTH, material === 'curved' ? CURVED_HALF_DEPTH : HALF_DEPTH], [-halfWidth, halfWidth]);
   const front = spans.z[1] - 1;
-  const floorLength = facing === 'up' || facing === 'down' ? spans.x[1] - spans.x[0] : spans.z[1] - spans.z[0];
-  const chair = floorPoint(facing, facing === 'left' || facing === 'right' ? SIDE_CHAIR_U : CHAIR_U, 0);
+  const across = facing === 'up' || facing === 'down';
+  const floorLength = across ? spans.x[1] - spans.x[0] : spans.z[1] - spans.z[0];
+  const regular = floorSpans(facing, [-HALF_DEPTH, HALF_DEPTH], [-halfWidth, halfWidth]);
+  const floorDepth = across ? regular.z[1] - regular.z[0] : regular.x[1] - regular.x[0];
+  const chair = across
+    ? { x: 0, y: facing === 'up' ? regular.z[1] + CHAIR_ROWS_PAST_EDGE : regular.z[0] - CHAIR_ROWS_PAST_EDGE }
+    : floorPoint(facing, SIDE_CHAIR_U, 0);
   const sprite: TableSprite = {
     image: back,
     center: origin,
     ground: { x: origin.x, y: origin.y + front },
     chairGround: { x: origin.x + chair.x, y: origin.y + chair.y },
     floorLength,
+    floorDepth,
   };
   if (painted !== '' && cache.size > 64) cache.clear();
   cache.set(id, sprite);

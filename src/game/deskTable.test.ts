@@ -12,17 +12,17 @@ describe('deskTable: a desk table of the decor layer', () => {
     expect(tableFacing(45)).toBe('down');
   });
 
-  it('draws a table about 2.5 tiles long', () => {
-    expect(TABLE_LONG_SIDE_PX / 32).toBeGreaterThanOrEqual(2.4);
-    expect(TABLE_LONG_SIDE_PX / 32).toBeLessThanOrEqual(2.6);
+  it('draws a table 84px long, a little over 2.5 tiles, so neighbouring desks stand closer', () => {
+    expect(TABLE_LONG_SIDE_PX).toBe(84);
+    expect(TABLE_LONG_SIDE_PX / 32).toBeLessThan(3);
   });
 });
 
 describe('deskTable: default collision', () => {
   it('blocks the floor under the top, along its row or column, centered on the anchor', () => {
-    expect(tableFloorRect(0)).toEqual({ x: -40, y: -7, w: 80, h: 14 });
+    expect(tableFloorRect(0)).toEqual({ x: -42, y: -8, w: 84, h: 16 });
     expect(tableFloorRect(180)).toEqual(tableFloorRect(0));
-    expect(tableFloorRect(90)).toEqual({ x: -12, y: -40, w: 24, h: 80 });
+    expect(tableFloorRect(90)).toEqual({ x: -13, y: -42, w: 26, h: 84 });
     expect(tableFloorRect(270)).toEqual(tableFloorRect(90));
   });
 });
