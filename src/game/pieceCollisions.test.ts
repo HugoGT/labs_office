@@ -52,6 +52,7 @@ const DECOR_INFO: Record<string, DecorPieceInfo> = {
   'desk-wood': { kind: 'desk', footprint: { w: 3, h: 1 } },
   'desk-glass': { kind: 'desk', footprint: { w: 3, h: 1 } },
   'plant-ficus': { kind: 'plant', footprint: { w: 1, h: 1 } },
+  'tree-large': { kind: 'tree', footprint: { w: 1, h: 1 } },
   'table-meeting': { kind: 'table', footprint: { w: 7, h: 5 } },
   'sofa-leather-3': { kind: 'sofa', footprint: { w: 3, h: 1 } },
   'sofa-fabric-2': { kind: 'sofa', footprint: { w: 2, h: 1 }, colorable: true },
@@ -280,6 +281,14 @@ describe('pieceCollisions: instances', () => {
     const [layoutPlant] = layoutPropInstances([prop({ piece: 'plant-ficus', kind: 'plant', tx: 6, ty: 4 })]);
     const edit = new Map([['plant-ficus', [{ x: -8, y: -12, w: 16, h: 12 }]]]);
     expect(worldRectsOf(plant!, edit)).toEqual(worldRectsOf(layoutPlant!, edit));
+  });
+
+  it('blocks a placed tree\'s 1x1 base by default, like the layout tree on the same tile, whatever its crown covers', () => {
+    const [tree] = officeDecorInstances([{ index: 4 * 20 + 6, piece: 'tree-large', rotation: 0 }], infoOf, 20);
+    const [layoutTree] = layoutPropInstances([prop({ piece: 'tree-large', kind: 'tree', tx: 6, ty: 4 })]);
+
+    expect(tree).toEqual(layoutTree);
+    expect(worldRectsOf(tree!, NO_EDITS)).toEqual([{ x: 6 * 32, y: 4 * 32, w: 32, h: 32 }]);
   });
 
   it('blocks a room table\'s whole footprint by default, like a solid Tiled prop', () => {

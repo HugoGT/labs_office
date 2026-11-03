@@ -219,6 +219,7 @@ export function terrainLayerImage(tileset: PixelBuffer, width: number, height: n
 // --- Map props ---------------------------------------------------------------------------------
 
 export function treeSheet(kind: TreeKind): PixelBuffer {
+  // The broadleaf tree is exported in its default leaves; the office repaints them at runtime.
   return treeSprite(kind);
 }
 

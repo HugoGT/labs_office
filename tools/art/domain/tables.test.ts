@@ -2,7 +2,7 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { PixelBuffer } from '../../../src/art/pixelBuffer.ts';
 import { FACINGS } from '../../../src/art/seating.ts';
-import { DEFAULT_TABLE_COLOR, TABLE_MATERIALS, tableSprite } from './tables.ts';
+import { DEFAULT_GAMER_LIGHT, DEFAULT_TABLE_COLOR, TABLE_MATERIALS, tableSprite } from './tables.ts';
 
 const luma = (p: { r: number; g: number; b: number }): number => p.r * 0.3 + p.g * 0.59 + p.b * 0.11;
 
@@ -118,4 +118,63 @@ test('every table has a 1px dark outline', () => {
     }
     assert.equal(light, 0, `${material} ${facing}: light pixels on the silhouette edge`);
   }
+});
+
+test('the gamer desk is all black but for the lights along its two sides, which take any color', () => {
+  for (const facing of FACINGS) {
+    const exported = tableSprite('gamer', facing).image;
+    const teal = tableSprite('gamer', facing, '#2ec4b6').image;
+    assert.equal(alphaMask(teal), alphaMask(exported), `${facing}: same silhouette`);
+    let lights = 0;
+    let body = 0;
+    let bright = 0;
+    for (let i = 0; i < exported.data.length; i += 4) {
+      if ((exported.data[i + 3] ?? 0) !== 255) continue;
+      const before = [exported.data[i] ?? 0, exported.data[i + 1] ?? 0, exported.data[i + 2] ?? 0];
+      const after = [teal.data[i] ?? 0, teal.data[i + 1] ?? 0, teal.data[i + 2] ?? 0];
+      if (before.join() !== after.join()) {
+        lights += 1;
+        continue;
+      }
+      body += 1;
+      if (luma({ r: before[0]!, g: before[1]!, b: before[2]! }) > 70) bright += 1;
+    }
+    assert.ok(lights >= 20, `${facing}: ${lights} light pixels take the color`);
+    assert.ok(body > lights * 2, `${facing}: the lights are a trim, not the desk`);
+    assert.equal(bright, 0, `${facing}: everything but the lights is black`);
+  }
+  assert.deepEqual(tableSprite('gamer', 'up').image.data, tableSprite('gamer', 'up', DEFAULT_GAMER_LIGHT).image.data);
+});
+
+test('the gamer lights run along the two short sides of the top, and nowhere in the middle', () => {
+  const image = tableSprite('gamer', 'up').image;
+  const painted = tableSprite('gamer', 'up', '#2ec4b6').image;
+  const changed = (x: number, y: number): boolean => image.getPixel(x, y).g !== painted.getPixel(x, y).g;
+  const columns = new Set<number>();
+  for (let y = 0; y < image.height; y += 1) for (let x = 0; x < image.width; x += 1) if (changed(x, y)) columns.add(x);
+  const middle = image.width / 2;
+  assert.ok([...columns].every((x) => Math.abs(x - middle) > image.width / 3), `light columns ${[...columns].join(',')}`);
+  assert.ok([...columns].some((x) => x < middle) && [...columns].some((x) => x > middle), 'lights on both sides');
+});
+
+test('the curved desk rounds off its far corners and opens a half-ring at the front for the sitter', () => {
+  const curved = tableSprite('curved', 'up');
+  const wood = tableSprite('wood', 'up');
+  const { image } = curved;
+  // Facing up the far side is at the top of the sprite: its corners are cut where the wooden desk's are solid.
+  const topRow = (sprite: typeof curved): number => {
+    for (let y = 0; y < sprite.image.height; y += 1) if (sprite.image.alphaAt(sprite.center.x, y) === 255) return y;
+    return -1;
+  };
+  const top = topRow(curved);
+  assert.equal(wood.image.alphaAt(2, topRow(wood) + 1), 255, 'wood: square far corner');
+  assert.ok(image.alphaAt(2, top + 1) < 255, 'curved: left far corner cut');
+  assert.ok(image.alphaAt(image.width - 3, top + 1) < 255, 'curved: right far corner cut');
+  // Facing down the sitter's side is the top edge of the sprite: the notch starts the top lower in the middle than beside it.
+  const firstOpaque = (image: PixelBuffer, x: number): number => {
+    for (let y = 0; y < image.height; y += 1) if (image.alphaAt(x, y) === 255) return y;
+    return -1;
+  };
+  const down = tableSprite('curved', 'down').image;
+  assert.ok(firstOpaque(down, down.width / 2) - firstOpaque(down, down.width / 4) >= 4, 'curved: the half-ring is cut into the sitter side');
 });

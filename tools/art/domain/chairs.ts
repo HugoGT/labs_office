@@ -1,5 +1,5 @@
 /**
- * Chairs in seven materials (wood, metal, leather, gamer, office, task, fabric) and the four
+ * Chairs in nine materials (wood, metal, leather, gamer, office, task, fabric, dining, pouf) and the four
  * facings of seating.ts, built
  * from boxes by furnitureModel.ts. Every chair shares one seat: 14x14 pixels, its surface
  * SEAT_HEIGHT above the floor, its backrest's inner face 5 pixels behind the seat center, so any
@@ -15,12 +15,12 @@
  *   always `ground` moved SEAT_HEIGHT pixels up.
  */
 import { makeRamp, mixRgba, type Ramp } from './color.ts';
-import { renderFurniture, type Box, type FurnitureModel, type Part } from './furnitureModel.ts';
+import { renderFurniture, type Box, type FurnitureModel, type Part, type Shader, type SurfacePoint } from './furnitureModel.ts';
 import { ARM_TOP, BACK_FACE, DEFAULT_FABRIC_COLOR, SEAT_HALF, SEAT_SPAN, SEAT_UNDER, armLayer, backrestLayer, upholsteredModel } from './upholstery.ts';
 import type { PixelBuffer, Rgba } from '../../../src/art/pixelBuffer.ts';
 import { SEAT_HEIGHT, type Facing, type SeatPoint } from '../../../src/art/seating.ts';
 
-export const CHAIR_MATERIALS = ['wood', 'metal', 'leather', 'gamer', 'office', 'task', 'fabric'] as const;
+export const CHAIR_MATERIALS = ['wood', 'metal', 'leather', 'gamer', 'office', 'task', 'fabric', 'dining', 'pouf'] as const;
 export type ChairMaterial = (typeof CHAIR_MATERIALS)[number];
 
 export interface ChairSprite {
@@ -252,13 +252,98 @@ function taskChair(): FurnitureModel {
   };
 }
 
+// --- Dining ------------------------------------------------------------------------------------
+
+/** The grey that leans to white of the dining chair's seat cushion. */
+const CUSHION = makeRamp('#c4c8ce');
+
+/** The wooden chair with an open back (posts and top rail only) and a soft cushion tied on its seat. */
+function diningChair(): FurnitureModel {
+  const wood = woodChair();
+  const [legs, seat] = wood.parts as [Part, Part, Part];
+  return {
+    shadow: wood.shadow,
+    parts: [
+      legs,
+      { boxes: [...seat.boxes, { u: [-6, 6], v: [-6, 6], y: [SEAT_HEIGHT, SEAT_HEIGHT + 2], ramp: CUSHION, top: 'base', side: 'shadow', rounded: true }] },
+      {
+        layer: backrestLayer,
+        boxes: [
+          ...pair({ u: [-7, BACK_FACE], v: [5, 7], y: [0, WOOD_TOP], ramp: WOOD, top: 'light', side: 'base' }),
+          { u: [-7, BACK_FACE], v: [-5, 5], y: [WOOD_TOP - 4, WOOD_TOP], ramp: WOOD, top: 'light', side: 'base' },
+        ],
+      },
+    ],
+  };
+}
+
+// --- Pouf --------------------------------------------------------------------------------------
+
+/** The fabric the pouf is exported in; it takes any color, like the fabric armchair. */
+export const DEFAULT_POUF_COLOR = '#6b8fb3';
+const POUF_RADIUS = 10;
+/** The crown of the dome, a pixel over the seat so the sitter sinks into it. */
+const POUF_TOP = SEAT_HEIGHT + 1;
+/** The button sits this far toward the back (model u), off the middle, so the pouf shows which way it faces. */
+const POUF_BUTTON_U = -4;
+
+/** The dome's height `r` (0 center, 1 rim) out from its middle: a soft top bulging out to round sides. */
+function poufProfile(r: number): number {
+  return r >= 1 ? 0 : POUF_TOP * Math.pow(1 - r ** 5, 0.4);
+}
+
+/** How far out from the middle a model pixel center lies, 0 to 1 at the rim. */
+function poufRadius(u: number, v: number): number {
+  return Math.hypot(u, v) / POUF_RADIUS;
+}
+
+/**
+ * Soft fabric lit the same from every side: lighter on the crown, a button toward the back, darker
+ * toward the rim and the floor.
+ */
+function poufShader(fabric: Ramp): Shader {
+  return (point: SurfacePoint, color: Rgba): Rgba => {
+    const r = poufRadius(point.u, point.v);
+    if (point.face === 'top') {
+      if (poufRadius(point.u - POUF_BUTTON_U, point.v) < 0.12) return fabric.deep;
+      if (r < 0.45) return mixRgba(color, fabric.light, 0.45);
+      return r > 0.82 ? mixRgba(color, fabric.shadow, 0.4) : color;
+    }
+    if (point.y < 2) return mixRgba(color, fabric.deep, 0.5);
+    return point.y < POUF_TOP / 2 ? mixRgba(color, fabric.shadow, 0.35) : color;
+  };
+}
+
+/**
+ * A round pouf to rest on, with no backrest: a dome of one-pixel columns, each as tall as the
+ * profile at its middle, so it bulges round from every facing.
+ */
+function poufChair(color: string): FurnitureModel {
+  const fabric = makeRamp(color);
+  const shade = poufShader(fabric);
+  const boxes: Box[] = [];
+  for (let u = -POUF_RADIUS; u < POUF_RADIUS; u += 1) {
+    for (let v = -POUF_RADIUS; v < POUF_RADIUS; v += 1) {
+      const height = Math.round(poufProfile(poufRadius(u + 0.5, v + 0.5)));
+      if (height <= 0) continue;
+      boxes.push({ u: [u, u + 1], v: [v, v + 1], y: [0, Math.max(2, height)], ramp: fabric, top: 'base', side: 'base', shade });
+    }
+  }
+  return {
+    // Round like the bag, so every facing casts the same one.
+    shadow: { u: [-POUF_RADIUS - 2, POUF_RADIUS + 2], v: [-POUF_RADIUS - 2, POUF_RADIUS + 2], shape: 'ellipse' },
+    parts: [{ boxes }],
+  };
+}
+
 /** The color a colorable chair is exported in; a chair without one keeps its materials. */
 export const CHAIR_DEFAULT_COLORS: Readonly<Partial<Record<ChairMaterial, string>>> = {
   gamer: DEFAULT_GAMER_ACCENT,
   fabric: DEFAULT_FABRIC_COLOR,
+  pouf: DEFAULT_POUF_COLOR,
 };
 
-/** Only the gamer chair (its accent) and the fabric armchair read the color; the rest keep their own. */
+/** Only the gamer chair (its accent), the fabric armchair and the pouf read the color; the rest keep their own. */
 const MODELS: Readonly<Record<ChairMaterial, (facing: Facing, color: string) => FurnitureModel>> = {
   wood: woodChair,
   metal: metalChair,
@@ -267,6 +352,8 @@ const MODELS: Readonly<Record<ChairMaterial, (facing: Facing, color: string) => 
   office: officeChair,
   task: taskChair,
   fabric: (facing, color) => upholsteredModel('fabric', 1, facing, color),
+  dining: diningChair,
+  pouf: (_facing, color) => poufChair(color),
 };
 
 const cache = new Map<string, ChairSprite>();

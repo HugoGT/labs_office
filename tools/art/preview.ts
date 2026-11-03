@@ -42,6 +42,7 @@ import type { Terrain } from './domain/tiles.ts';
 import { groupWallGeometry, resolveWallGeometry } from './domain/wallGeometry.ts';
 import { WallMap, type WallMaterial } from './domain/wallMap.ts';
 import { BACKDROP, crop, upscale } from './imageOps.ts';
+import { treeSprite } from './domain/props.ts';
 import { ROOM_TABLE_FOOTPRINTS, type RoomTable } from './domain/tables.ts';
 import { terrainLayerImage, wallLayer, type PackSheets } from './sheets.ts';
 
@@ -242,6 +243,9 @@ function hedges(sheets: PackSheets, tiles: readonly (readonly [number, number])[
   });
 }
 
+/** The leaf color the previews paint one tree in, to show the tree takes any. */
+const AUTUMN_LEAVES = '#d9822b';
+
 function sheetOf<K extends string>(entries: readonly { readonly kind: K; readonly image: PixelBuffer }[], kind: K): PixelBuffer {
   return entries.find((entry) => entry.kind === kind)!.image;
 }
@@ -270,7 +274,8 @@ function terrainScene(sheets: PackSheets): PixelBuffer {
   const width = TERRAIN_SCENE[0]!.length;
   const image = terrainLayerImage(sheets.tileset, width, TERRAIN_SCENE.length, mapOf(TERRAIN_SCENE));
   const oak = sheetOf(sheets.trees, 'oak');
-  const maple = sheetOf(sheets.trees, 'maple');
+  // The same tree with its leaves painted orange, as the office paints it.
+  const autumn = treeSprite('oak', AUTUMN_LEAVES);
   drawScene(image, [
     decal(sheets, 'lily-pad', 6, 3),
     decal(sheets, 'lily-pad', 8, 5),
@@ -283,7 +288,7 @@ function terrainScene(sheets: PackSheets): PixelBuffer {
     decal(sheets, 'leaves', 0, 12),
     bridge(sheets, 'north-south', 2, 8),
     prop(oak, TREE, 1, 4),
-    prop(maple, TREE, 13, 5),
+    prop(autumn, TREE, 13, 5),
     prop(oak, TREE, 22, 1),
     prop(oak, TREE, 9, 14),
     prop(sheetOf(sheets.plants, 'ficus'), PLANT, 20, 12),
@@ -383,9 +388,11 @@ function propsPreview(sheets: PackSheets): PixelBuffer {
     bridge(sheets, 'north-south', 4, 3),
     bridge(sheets, 'east-west', 11, 0),
     prop(sheetOf(sheets.trees, 'oak'), TREE, 1, 1),
-    prop(sheetOf(sheets.trees, 'maple'), TREE, 8, 1),
+    prop(treeSprite('oak', AUTUMN_LEAVES), TREE, 8, 1),
     prop(sheetOf(sheets.trees, 'oak'), TREE, 8, 7),
+    prop(sheetOf(sheets.trees, 'large'), TREE, 6, 7),
     prop(sheetOf(sheets.plants, 'ficus'), PLANT, 2, 7),
+    prop(sheetOf(sheets.plants, 'bonsai'), PLANT, 4, 7),
     ...hedges(sheets, ring),
   ]);
 
@@ -402,6 +409,7 @@ function propsPreview(sheets: PackSheets): PixelBuffer {
     ...table('cafeteria', 12, 3, false),
     prop(sheetOf(sheets.plants, 'ficus'), PLANT, 20, 1),
     prop(sheetOf(sheets.plants, 'ficus'), PLANT, 20, 7),
+    prop(sheetOf(sheets.plants, 'bonsai'), PLANT, 21, 4),
   ]);
 
   const out = backdrop(GAP + outdoor.width + GAP, GAP + outdoor.height + GAP + room.height + GAP);
@@ -428,6 +436,7 @@ function tablesPreview(sheets: PackSheets): PixelBuffer {
     ...table('oval', 'vertical', 22, 2, { ends: true, rows: true }),
     ...table('meeting', 'vertical', 2, 10, { ends: true, rows: true }),
     ...table('cafeteria', 'vertical', 11, 10, { ends: true, rows: false }),
+    ...table('round', 'horizontal', 18, 12, { ends: true, rows: true }),
   ]);
   const out = backdrop(GAP + room.width + GAP, GAP + room.height + GAP);
   out.blit(room, GAP, GAP);

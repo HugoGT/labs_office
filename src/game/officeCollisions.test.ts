@@ -19,7 +19,9 @@ describe('officeCollisions', () => {
     const infoOf = decorInfoFromManifest(PACK);
     expect(infoOf('table-meeting')).toEqual({ kind: 'table', footprint: { w: 7, h: 5 } });
     expect(infoOf('chair-wood')).toEqual({ kind: 'chair', footprint: { w: 1, h: 1 } });
-    expect(infoOf('tree-oak')).toBeNull();
+    // A tree stands on its 1x1 base; a bridge is the map's, never the decor layer's.
+    expect(infoOf('tree-oak')).toEqual({ kind: 'tree', footprint: { w: 1, h: 1 }, colorable: true });
+    expect(infoOf('bridge-wood')).toBeNull();
     expect(decorInfoFromManifest(null)('desk-upload-0123456789abcdef')).toEqual({ kind: 'desk', footprint: { w: 3, h: 1 } });
     expect(decorInfoFromManifest(null)('table-meeting')).toBeNull();
   });

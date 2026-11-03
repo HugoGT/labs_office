@@ -59,7 +59,7 @@ const DESK_ROWS: readonly (readonly [number, number, number])[] = [
   [28, 36, 3],
 ];
 
-/** `TREES` of mapData.ts. Every fourth one was the orange Kenney tree: a maple now. */
+/** `TREES` of mapData.ts. Every fourth one was the orange Kenney tree; the pack has one tree now, whose leaves take a color. */
 const TREES: readonly (readonly [number, number])[] = [
   [2, 2],
   [9, 2],
@@ -245,7 +245,7 @@ function newTrees(taken: readonly Footprint[], seats: readonly Footprint[]): { t
       if (hash(tx, ty, 0x7ee5) >= density) continue;
       if (!surelyOn(tx, ty, ['grass', 'dirt']) || !clearAround(tx, ty, 1, seats)) continue;
       if (taken.some((prop) => near(prop, tx, ty, 2)) || trees.some((tree) => near({ ...tree, w: 1, h: 1 }, tx, ty, 2))) continue;
-      trees.push({ tx, ty, piece: hash(tx, ty, 0x0a4) < 0.4 ? 'tree-maple' : 'tree-oak' });
+      trees.push({ tx, ty, piece: 'tree-oak' });
     }
   }
   return trees;
@@ -325,7 +325,7 @@ export function buildLegacyLayout() {
   for (const tx of [13, 32]) {
     add('bridge-wood', { tx, ty: 19, w: 3, h: 3 }, [{ name: 'orientation', type: 'string', value: 'north-south' }]);
   }
-  TREES.forEach(([tx, ty], index) => add(index % 4 === 3 ? 'tree-maple' : 'tree-oak', { tx, ty, w: 1, h: 1 }));
+  TREES.forEach(([tx, ty]) => add('tree-oak', { tx, ty, w: 1, h: 1 }));
 
   const seatList = baseSeats();
   const seatFootprints = seatList.map(({ tx, ty }) => ({ tx, ty, w: 1, h: 1 }));

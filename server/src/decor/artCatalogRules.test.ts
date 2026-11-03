@@ -93,7 +93,8 @@ describe('art_pieces kinds in schema.sql', () => {
 describe('artPieceFields', () => {
   it('keeps the material of every piece that has one: props yes, characters and the tileset no', () => {
     const fields = (id: string) => artPieceFields(MANIFEST.pieces.find((piece) => piece.id === id)!);
-    expect(fields('tree-oak')).toMatchObject({ kind: 'tree', material: 'oak', colorable: false, defaultColor: null });
+    expect(fields('tree-oak')).toMatchObject({ kind: 'tree', material: 'oak', colorable: true, defaultColor: '#4f8f3a' });
+    expect(fields('tree-large')).toMatchObject({ kind: 'tree', material: 'large', colorable: false, defaultColor: null });
     expect(fields('table-meeting')).toMatchObject({ kind: 'table', material: 'walnut' });
     expect(fields('tileset-terrain')).toMatchObject({ kind: 'tileset', material: null, colorable: false });
     expect(fields('character-p01-burgundy-suit').material).toBeNull();
@@ -341,7 +342,7 @@ describe('normalizeStoredAppearance', () => {
 describe('packDecorAsset', () => {
   it('offers every pack chair as a one-tile desk decor asset under its Spanish name', () => {
     const chairs = MANIFEST.pieces.filter((piece) => piece.kind === 'chair');
-    expect(chairs.map((piece) => piece.id).sort()).toEqual(['chair-fabric', 'chair-gamer', 'chair-leather', 'chair-metal', 'chair-office', 'chair-task', 'chair-wood']);
+    expect(chairs.map((piece) => piece.id).sort()).toEqual(['chair-dining', 'chair-fabric', 'chair-gamer', 'chair-leather', 'chair-metal', 'chair-office', 'chair-pouf', 'chair-task', 'chair-wood']);
     for (const chair of chairs) {
       expect(packDecorAsset(chair)).toEqual({
         name: chair.name,
@@ -357,7 +358,7 @@ describe('packDecorAsset', () => {
 
   it('offers every pack desk as the table of a desk decor, three tiles along an edge (Editar espacios)', () => {
     const desks = MANIFEST.pieces.filter((piece) => piece.kind === 'desk');
-    expect(desks.map((piece) => piece.id).sort()).toEqual(['desk-glass', 'desk-metal', 'desk-painted', 'desk-wood']);
+    expect(desks.map((piece) => piece.id).sort()).toEqual(['desk-curved', 'desk-gamer', 'desk-glass', 'desk-metal', 'desk-painted', 'desk-wood']);
     for (const desk of desks) {
       expect(packDecorAsset(desk)).toEqual({
         name: desk.name,

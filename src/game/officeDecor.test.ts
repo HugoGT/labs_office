@@ -32,6 +32,7 @@ const WIDTH = 20;
 const CHAIR: DecorPieceInfo = { kind: 'chair', footprint: { w: 1, h: 1 } };
 const DESK: DecorPieceInfo = { kind: 'desk', footprint: { w: 3, h: 1 } };
 const PLANT: DecorPieceInfo = { kind: 'plant', footprint: { w: 1, h: 1 } };
+const TREE: DecorPieceInfo = { kind: 'tree', footprint: { w: 1, h: 1 } };
 const MEETING: DecorPieceInfo = { kind: 'table', footprint: { w: 7, h: 5 } };
 const at = (tx: number, ty: number): number => ty * WIDTH + tx;
 
@@ -52,19 +53,23 @@ describe('officeDecor: pieces', () => {
     expect(decorPieceInfo(byId.get('plant-ficus')!)).toEqual(PLANT);
     expect(decorPieceInfo(byId.get('table-meeting')!)).toEqual(MEETING);
     expect(decorPieceInfo(byId.get('table-cafeteria')!)).toEqual({ kind: 'table', footprint: { w: 5, h: 3 } });
-    for (const id of ['floor-wood', 'wall-brick', 'tree-oak', 'character-01']) {
+    // A tree stands on its 1x1 base, whatever its crown covers.
+    expect(decorPieceInfo(byId.get('tree-large')!)).toEqual(TREE);
+    // The tree takes a color, its leaves.
+    expect(decorPieceInfo(byId.get('tree-oak')!)).toEqual({ ...TREE, colorable: true });
+    for (const id of ['floor-wood', 'wall-brick', 'character-01']) {
       const piece = byId.get(id);
       if (piece !== undefined) expect(decorPieceInfo(piece), id).toBeNull();
     }
     expect(decorPieceInfo({ kind: 'plant' })).toBeNull();
   });
 
-  it('falls back on the id for chairs, desk tables and plants when no catalog says, never for room tables', () => {
+  it('falls back on the id for chairs, desk tables, plants and trees when no catalog says, never for room tables', () => {
     expect(decorInfoFromPieceId('chair-gamer')).toEqual(CHAIR);
     expect(decorInfoFromPieceId('desk-upload-0123456789abcdef')).toEqual(DESK);
     expect(decorInfoFromPieceId('plant-upload-0123456789abcdef')).toEqual(PLANT);
     expect(decorInfoFromPieceId('table-meeting')).toBeNull();
-    expect(decorInfoFromPieceId('tree-oak')).toBeNull();
+    expect(decorInfoFromPieceId('tree-oak')).toEqual(TREE);
   });
 
   it('turns chairs, desk tables and room tables, never plants', () => {
@@ -72,6 +77,7 @@ describe('officeDecor: pieces', () => {
     expect(isRotatable('desk')).toBe(true);
     expect(isRotatable('table')).toBe(true);
     expect(isRotatable('plant')).toBe(false);
+    expect(isRotatable('tree')).toBe(false);
   });
 
   it('turns a room table only between horizontal (0) and vertical (90): it is symmetric', () => {

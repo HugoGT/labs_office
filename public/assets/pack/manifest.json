@@ -1022,6 +1022,94 @@
       ]
     },
     {
+      "id": "chair-dining",
+      "kind": "chair",
+      "name": "Silla de comedor",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "dining",
+      "facings": [
+        "up",
+        "down",
+        "left",
+        "right"
+      ],
+      "layers": [
+        "back",
+        "front"
+      ],
+      "anchors": {
+        "seat": {
+          "x": 18,
+          "y": 22
+        },
+        "ground": {
+          "x": 18,
+          "y": 31
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "colorable": false,
+      "defaultColor": null,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "chair/dining.png",
+          "imageKind": "chair",
+          "width": 144,
+          "height": 76,
+          "sha256": "e0c8fa3e0ba057eb41cd3f412dea5a1b078494e4f191b8d7bac23a519dc44289"
+        }
+      ]
+    },
+    {
+      "id": "chair-pouf",
+      "kind": "chair",
+      "name": "Puff",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "pouf",
+      "facings": [
+        "up",
+        "down",
+        "left",
+        "right"
+      ],
+      "layers": [
+        "back",
+        "front"
+      ],
+      "anchors": {
+        "seat": {
+          "x": 18,
+          "y": 22
+        },
+        "ground": {
+          "x": 18,
+          "y": 31
+        }
+      },
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "colorable": true,
+      "defaultColor": "#6b8fb3",
+      "files": [
+        {
+          "role": "sheet",
+          "path": "chair/pouf.png",
+          "imageKind": "chair",
+          "width": 144,
+          "height": 76,
+          "sha256": "18a74e1c9f863b928b0b20df1aebf9ea1089d02d5551034355c3d6ba6d93ee97"
+        }
+      ]
+    },
+    {
       "id": "sofa-leather-2",
       "kind": "sofa",
       "name": "Sofá de cuero (2 plazas)",
@@ -1506,6 +1594,170 @@
       ]
     },
     {
+      "id": "desk-gamer",
+      "kind": "desk",
+      "name": "Escritorio gamer",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "gamer",
+      "colorable": true,
+      "defaultColor": "#a066e8",
+      "anchor": {
+        "x": 48,
+        "y": 60
+      },
+      "facings": {
+        "up": {
+          "footprint": {
+            "w": 3,
+            "h": 1
+          },
+          "ground": {
+            "x": 0,
+            "y": 6
+          },
+          "chairGround": {
+            "x": 0,
+            "y": 10
+          }
+        },
+        "down": {
+          "footprint": {
+            "w": 3,
+            "h": 1
+          },
+          "ground": {
+            "x": 0,
+            "y": 6
+          },
+          "chairGround": {
+            "x": 0,
+            "y": -10
+          }
+        },
+        "left": {
+          "footprint": {
+            "w": 1,
+            "h": 3
+          },
+          "ground": {
+            "x": 0,
+            "y": 39
+          },
+          "chairGround": {
+            "x": 21,
+            "y": 0
+          }
+        },
+        "right": {
+          "footprint": {
+            "w": 1,
+            "h": 3
+          },
+          "ground": {
+            "x": 0,
+            "y": 39
+          },
+          "chairGround": {
+            "x": -21,
+            "y": 0
+          }
+        }
+      },
+      "files": [
+        {
+          "role": "sheet",
+          "path": "desk/gamer.png",
+          "imageKind": "desk",
+          "width": 384,
+          "height": 104,
+          "sha256": "9f12463b13fc6c02e7b3386db8637e6e6a896ce2220eac2b8d7e0ec32d227c92"
+        }
+      ]
+    },
+    {
+      "id": "desk-curved",
+      "kind": "desk",
+      "name": "Escritorio curvo",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "curved",
+      "colorable": false,
+      "defaultColor": null,
+      "anchor": {
+        "x": 48,
+        "y": 60
+      },
+      "facings": {
+        "up": {
+          "footprint": {
+            "w": 3,
+            "h": 1
+          },
+          "ground": {
+            "x": 0,
+            "y": 6
+          },
+          "chairGround": {
+            "x": 0,
+            "y": 10
+          }
+        },
+        "down": {
+          "footprint": {
+            "w": 3,
+            "h": 1
+          },
+          "ground": {
+            "x": 0,
+            "y": 10
+          },
+          "chairGround": {
+            "x": 0,
+            "y": -10
+          }
+        },
+        "left": {
+          "footprint": {
+            "w": 1,
+            "h": 3
+          },
+          "ground": {
+            "x": 0,
+            "y": 39
+          },
+          "chairGround": {
+            "x": 21,
+            "y": 0
+          }
+        },
+        "right": {
+          "footprint": {
+            "w": 1,
+            "h": 3
+          },
+          "ground": {
+            "x": 0,
+            "y": 39
+          },
+          "chairGround": {
+            "x": -21,
+            "y": 0
+          }
+        }
+      },
+      "files": [
+        {
+          "role": "sheet",
+          "path": "desk/curved.png",
+          "imageKind": "desk",
+          "width": 384,
+          "height": 104,
+          "sha256": "1fc6b45e8c99ce0d686670d0e15a58d0055a3d62d851434d8c7a74ba7a8f19f9"
+        }
+      ]
+    },
+    {
       "id": "floor-wood",
       "kind": "floor",
       "name": "Madera",
@@ -1887,10 +2139,12 @@
     {
       "id": "tree-oak",
       "kind": "tree",
-      "name": "Roble",
+      "name": "Árbol",
       "author": "HugoGT",
       "license": "proprietary-internal",
       "material": "oak",
+      "colorable": true,
+      "defaultColor": "#4f8f3a",
       "footprint": {
         "w": 1,
         "h": 1
@@ -1908,17 +2162,19 @@
           "imageKind": "tree",
           "width": 64,
           "height": 96,
-          "sha256": "32d70be731b0b5aa110cf1d4816dfa651c5f20430011dc28fd8e8a0623a634f6"
+          "sha256": "0d0423f84aabc7220a81d4cd2b1907838f2bfb13f5dd9c5cdc1fc2b875f37704"
         }
       ]
     },
     {
-      "id": "tree-maple",
+      "id": "tree-large",
       "kind": "tree",
-      "name": "Arce",
+      "name": "Árbol grande",
       "author": "HugoGT",
       "license": "proprietary-internal",
-      "material": "maple",
+      "material": "large",
+      "colorable": false,
+      "defaultColor": null,
       "footprint": {
         "w": 1,
         "h": 1
@@ -1932,11 +2188,11 @@
       "files": [
         {
           "role": "sheet",
-          "path": "tree/maple.png",
+          "path": "tree/large.png",
           "imageKind": "tree",
           "width": 64,
           "height": 96,
-          "sha256": "51f072845a8d0964845e4338980d09bbceecb18576c97c7ffdb6ee7df661f5e5"
+          "sha256": "a8e85d9b5be1173d502ee3098455eaef48101667eeff26bd9693c1de09bfc89c"
         }
       ]
     },
@@ -1965,6 +2221,34 @@
           "width": 32,
           "height": 48,
           "sha256": "b1b1dc261525fe15d685bcd51a53d6e040a44c1337a927a27b25af5c8ddce8df"
+        }
+      ]
+    },
+    {
+      "id": "plant-bonsai",
+      "kind": "plant",
+      "name": "Bonsái",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "bonsai",
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "anchor": {
+        "x": 16,
+        "y": 46
+      },
+      "layer": "sorted",
+      "collision": "solid",
+      "files": [
+        {
+          "role": "sheet",
+          "path": "plant/bonsai.png",
+          "imageKind": "plant",
+          "width": 32,
+          "height": 48,
+          "sha256": "9e2dcac2973ea2240a1de4f4236a224b4d346c72e366291a7bccf69273f1a549"
         }
       ]
     },
@@ -2136,6 +2420,38 @@
           "width": 512,
           "height": 256,
           "sha256": "3e76f1040407a81ee30452436d42950f37bbea5d75b7ff932e0408a78d785020"
+        }
+      ]
+    },
+    {
+      "id": "table-round",
+      "kind": "table",
+      "name": "Mesa redonda",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "oak",
+      "footprint": {
+        "w": 1,
+        "h": 1
+      },
+      "anchor": {
+        "x": 128,
+        "y": 244
+      },
+      "layer": "sorted",
+      "collision": "solid",
+      "facings": [
+        "horizontal",
+        "vertical"
+      ],
+      "files": [
+        {
+          "role": "sheet",
+          "path": "table/round.png",
+          "imageKind": "table",
+          "width": 512,
+          "height": 256,
+          "sha256": "ff6f97fdab17b38d4f5e15d46667313c26d17f5078e1ee09c233f8cf796fe522"
         }
       ]
     },

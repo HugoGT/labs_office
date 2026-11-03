@@ -1369,6 +1369,12 @@ interface ArtPropPieceBase extends ArtPieceBase {
 
 export interface ArtTreePiece extends ArtPropPieceBase {
   readonly kind: 'tree';
+  /**
+   * The broadleaf tree takes a color, its leaves, exported in `defaultColor` like a painted desk.
+   * Absent, as on a tree exported before trees had colors, means not colorable.
+   */
+  readonly colorable?: boolean;
+  readonly defaultColor?: string | null;
 }
 
 export interface ArtPlantPiece extends ArtPropPieceBase {

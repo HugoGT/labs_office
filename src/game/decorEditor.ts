@@ -154,7 +154,8 @@ const DESK_SIDE = 3;
  * Nor a sofa: it furnishes the office, a desk seats one at its table.
  */
 export function fitsDeskArea(info: DecorPieceInfo): boolean {
-  if (info.kind === 'door' || info.kind === 'table' || info.kind === 'sofa') return false;
+  // A tree's crown covers the office around its base, never a desk's business.
+  if (info.kind === 'door' || info.kind === 'table' || info.kind === 'sofa' || info.kind === 'tree') return false;
   return info.footprint.w <= DESK_SIDE && info.footprint.h <= DESK_SIDE;
 }
 

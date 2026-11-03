@@ -47,8 +47,11 @@ test('the seat point sits SEAT_HEIGHT above the ground point, both inside the sp
   }
 });
 
+/** Every chair but the pouf, which has no backrest. */
+const BACKED = CHAIR_MATERIALS.filter((material) => material !== 'pouf');
+
 test('the backrest goes behind a sitter facing the viewer and in front of one facing away', () => {
-  for (const material of CHAIR_MATERIALS) {
+  for (const material of BACKED) {
     const down = chairSprite(material, 'down');
     const up = chairSprite(material, 'up');
     assert.ok(opaqueRows(down.back, 0, down.seat.y - 4) > 20, `${material} down: backrest above the seat, behind the sitter`);
@@ -66,16 +69,16 @@ test('armrests over the sitter legs are in front only on the near side of a side
     }
   }
   for (const facing of FACINGS) {
-    for (const material of ['wood', 'metal', 'task'] as const) {
+    for (const material of ['wood', 'metal', 'task', 'dining', 'pouf'] as const) {
       if (facing !== 'up') assert.equal(chairSprite(material, facing).front.countOpaque(), 0, `${material} ${facing}: no arms, nothing in front`);
     }
   }
 });
 
 test('left and right face opposite ways and every chair is its own drawing', () => {
-  const keys = new Set(ALL.map(({ sprite }) => [sprite.back.data.join(), sprite.front.data.join()].join('|')));
-  assert.equal(keys.size, CHAIR_MATERIALS.length * 4);
-  for (const material of CHAIR_MATERIALS) {
+  const keys = new Set(ALL.filter(({ material }) => material !== 'pouf').map(({ sprite }) => [sprite.back.data.join(), sprite.front.data.join()].join('|')));
+  assert.equal(keys.size, BACKED.length * 4);
+  for (const material of BACKED) {
     const right = chairSprite(material, 'right');
     const left = chairSprite(material, 'left');
     // The backrest is behind the pelvis: west of it facing right, east of it facing left.
@@ -140,14 +143,84 @@ test('the gamer chair is the tallest and carries its accent color', () => {
   }
 });
 
+test('the dining chair is the wooden one without the middle of its back, and a grey-white cushion on the seat', () => {
+  // Facing down the back rises behind the seat; facing up it stands in front of the sitter, on the front layer.
+  const down = chairSprite('dining', 'down');
+  const woodDown = chairSprite('wood', 'down');
+  assert.equal(composite(woodDown).alphaAt(woodDown.seat.x, woodDown.seat.y - 8), 255, 'wood down: the splat fills the back');
+  assert.ok(composite(down).alphaAt(down.seat.x, down.seat.y - 8) < 255, 'dining down: the back is open in the middle');
+  const up = chairSprite('dining', 'up');
+  const woodUp = chairSprite('wood', 'up');
+  assert.equal(woodUp.front.alphaAt(woodUp.seat.x, woodUp.seat.y - 4), 255, 'wood up: the splat covers the back');
+  assert.ok(up.front.alphaAt(up.seat.x, up.seat.y - 4) < 255, 'dining up: the back is open in the middle');
+  for (const facing of FACINGS) {
+    const image = composite(chairSprite('dining', facing));
+    let cushion = 0;
+    for (let i = 0; i < image.data.length; i += 4) {
+      const [r, g, b] = [image.data[i] ?? 0, image.data[i + 1] ?? 0, image.data[i + 2] ?? 0];
+      if ((image.data[i + 3] ?? 0) === 255 && Math.min(r, g, b) > 170 && Math.max(r, g, b) - Math.min(r, g, b) < 24) cushion += 1;
+    }
+    assert.ok(cushion >= 20, `dining ${facing}: ${cushion} grey-white cushion pixels`);
+  }
+});
+
+/** Where the pouf's button shows: the mean of its darkest pixels inside the silhouette. */
+function poufButton(sprite: ChairSprite): { x: number; y: number } {
+  const image = composite(sprite);
+  let darkest = Infinity;
+  let points: { x: number; y: number }[] = [];
+  for (let y = 1; y < image.height - 1; y += 1) {
+    for (let x = 1; x < image.width - 1; x += 1) {
+      const inside = [image.alphaAt(x, y), image.alphaAt(x - 1, y), image.alphaAt(x + 1, y), image.alphaAt(x, y - 1), image.alphaAt(x, y + 1)].every((a) => a === 255);
+      if (!inside) continue;
+      const value = luma(image.getPixel(x, y));
+      if (value < darkest) [darkest, points] = [value, [{ x, y }]];
+      else if (value === darkest) points.push({ x, y });
+    }
+  }
+  return { x: points.reduce((sum, p) => sum + p.x, 0) / points.length, y: points.reduce((sum, p) => sum + p.y, 0) / points.length };
+}
+
+test('the pouf is round with no backrest: nothing in front of the sitter, about as tall as its seat, its button toward the back', () => {
+  const down = chairSprite('pouf', 'down');
+  for (const facing of FACINGS) assert.equal(chairSprite('pouf', facing).front.countOpaque(), 0, `${facing}: nothing in front of the sitter`);
+  // The button sits off the middle, toward where a backrest would be, so the pouf shows which way it faces.
+  const button = (facing: (typeof FACINGS)[number]) => poufButton(chairSprite('pouf', facing));
+  assert.ok(button('down').y < button('up').y, `down ${button('down').y}, up ${button('up').y}`);
+  assert.ok(button('right').x < chairSprite('pouf', 'right').seat.x - 1, `right: ${button('right').x} west of ${chairSprite('pouf', 'right').seat.x}`);
+  assert.ok(button('left').x > chairSprite('pouf', 'left').seat.x + 1, `left: ${button('left').x} east of ${chairSprite('pouf', 'left').seat.x}`);
+  // A dome: its lowest row of the top surface never rises much above the seat.
+  const image = composite(down);
+  let top = 0;
+  while (top < image.height && opaqueRows(image, top, top + 1) === 0) top += 1;
+  const wood = composite(chairSprite('wood', 'down'));
+  let woodTop = 0;
+  while (woodTop < wood.height && opaqueRows(wood, woodTop, woodTop + 1) === 0) woodTop += 1;
+  assert.ok(down.ground.y - top < chairSprite('wood', 'down').ground.y - woodTop - 8, `pouf ${down.ground.y - top}px tall, well under the wooden chair's backrest`);
+  // Rounded: its widest row is near the middle of its height, not at the floor.
+  const widths = Array.from({ length: image.height }, (_, y) => opaqueRows(image, y, y + 1));
+  const widest = widths.indexOf(Math.max(...widths));
+  assert.ok(widest < down.ground.y - 2, `widest row ${widest}, ground ${down.ground.y}`);
+});
+
+test('the pouf is a low bag resting on the floor, with no legs', () => {
+  for (const facing of FACINGS) {
+    const pouf = chairSprite('pouf', facing);
+    const wood = chairSprite('wood', facing);
+    assert.ok(pouf.ground.y < wood.ground.y, `${facing}: lower than the wooden chair (${pouf.ground.y} vs ${wood.ground.y})`);
+    assert.equal(composite(pouf).alphaAt(pouf.ground.x, pouf.ground.y), 255, `${facing}: the bag sits on the floor`);
+    assert.ok(composite(wood).alphaAt(wood.ground.x, wood.ground.y) < 255, `${facing}: the wooden chair stands on legs`);
+  }
+});
+
 test('chairs are cached and deterministic', () => {
   assert.equal(chairSprite('wood', 'up'), chairSprite('wood', 'up'));
 });
 
-test('only the gamer chair and the fabric armchair take a color, and the silhouette does not change with it', () => {
+test('only the gamer chair, the fabric armchair and the pouf take a color, and the silhouette does not change with it', () => {
   const teal = '#2a9d8f';
   for (const facing of FACINGS) {
-    for (const material of ['gamer', 'fabric'] as const) {
+    for (const material of ['gamer', 'fabric', 'pouf'] as const) {
       const exported = chairSprite(material, facing);
       const painted = chairSprite(material, facing, teal);
       const alpha = (image: PixelBuffer): number[] => Array.from(image.data).filter((_, index) => index % 4 === 3);

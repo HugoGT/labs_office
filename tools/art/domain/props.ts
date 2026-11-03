@@ -18,6 +18,7 @@ import {
 } from '../../../src/game/artContract.ts';
 import { makeRamp, mixRgba, type Ramp } from './color.ts';
 import { periodicNoise, type Noise } from './noise.ts';
+import { createRng } from './random.ts';
 import { PixelBuffer, rgba, type Rgba } from '../../../src/art/pixelBuffer.ts';
 
 /** Same contact shadow as furniture and characters. */
@@ -34,7 +35,8 @@ function shadowEllipse(image: PixelBuffer, cx: number, cy: number, rx: number, r
     for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x += 1) {
       const u = (x + 0.5 - cx) / rx;
       const v = (y + 0.5 - cy) / ry;
-      if (u * u + v * v <= 1) image.setPixel(x, y, CONTACT_SHADOW);
+      // Only on bare ground: drawn after an outline, it never covers the ink around a trunk's base.
+      if (u * u + v * v <= 1 && image.alphaAt(x, y) === 0) image.setPixel(x, y, CONTACT_SHADOW);
     }
   }
 }
@@ -81,10 +83,12 @@ function foliage(image: PixelBuffer, blobs: readonly Blob[], ramp: Ramp, noise: 
 
 // --- Trees -------------------------------------------------------------------------------------
 
-export const TREE_KINDS = ['oak', 'maple'] as const;
+/** One broadleaf tree, its leaves in any color (an autumn one is the same tree painted orange), and the large tree. */
+export const TREE_KINDS = ['oak', 'large'] as const;
 export type TreeKind = (typeof TREE_KINDS)[number];
 
-const TREE_LEAVES: Readonly<Record<TreeKind, string>> = { oak: '#4f8f3a', maple: '#d9822b' };
+/** The leaves the broadleaf tree is exported in; the large tree keeps its own greens. */
+export const DEFAULT_TREE_COLOR = '#4f8f3a';
 const BARK = makeRamp('#6b4a32');
 
 const CROWN: readonly Blob[] = [
@@ -97,11 +101,21 @@ const CROWN: readonly Blob[] = [
   { x: 32, y: 17, r: 10 },
 ];
 
-/** A broadleaf tree in its 64x96 frame, the trunk base on TREE.anchor. */
-export function treeSprite(kind: TreeKind): PixelBuffer {
+const treeCache = new Map<string, PixelBuffer>();
+
+/** A tree in its 64x96 frame, the trunk base on TREE.anchor; `color` paints the broadleaf tree's leaves. */
+export function treeSprite(kind: TreeKind, color: string = DEFAULT_TREE_COLOR): PixelBuffer {
+  const key = kind === 'large' ? kind : `${kind}:${color.toLowerCase()}`;
+  const cached = treeCache.get(key);
+  if (cached !== undefined) return cached;
+  const image = kind === 'large' ? largeTreeSprite() : broadleafSprite(color);
+  treeCache.set(key, image);
+  return image;
+}
+
+function broadleafSprite(color: string): PixelBuffer {
   const image = new PixelBuffer(TREE.frame.width, TREE.frame.height);
   const { x: ax, y: ay } = TREE.anchor;
-  shadowEllipse(image, ax, ay - 2, 17, 5);
   for (let y = ay - 30; y < ay; y += 1) {
     const flare = y >= ay - 4 ? 1 : 0;
     for (let x = ax - 3 - flare; x < ax + 3 + flare; x += 1) {
@@ -109,14 +123,119 @@ export function treeSprite(kind: TreeKind): PixelBuffer {
       image.setPixel(x, y, (y + x) % 7 === 0 ? BARK.deep : tone);
     }
   }
-  foliage(image, CROWN, makeRamp(TREE_LEAVES[kind]), periodicNoise(kind === 'oak' ? 31 : 37, 64, 8));
+  foliage(image, CROWN, makeRamp(color), periodicNoise(31, 64, 8));
   image.addOutline(ink);
+  // After the outline, so the ink follows the trunk down to the ground.
+  shadowEllipse(image, ax, ay - 2, 17, 5);
+  return image;
+}
+
+/** Sunlit leaves on the upper left of the crown, cooling to teal on its lower right, like the reference tree. */
+const LARGE_RAMPS: readonly Ramp[] = [makeRamp('#7cb846'), makeRamp('#58a040'), makeRamp('#3c8a50'), makeRamp('#2a7066')];
+/** The crown, about 2 tiles across, hangs from the top of the frame down to about a tile above the ground. */
+const LARGE_CENTER = { x: 32, y: 29.5 } as const;
+const LARGE_RADIUS = { x: 30, y: 28 } as const;
+/** How far the trunk rises from the ground before the crown covers it, about 1.5 tiles. */
+const LARGE_TRUNK_HEIGHT = 52;
+/** Leaf clumps around the rim scallop the silhouette instead of leaving a smooth ellipse. */
+const LARGE_CROWN: readonly Blob[] = [
+  { x: LARGE_CENTER.x, y: LARGE_CENTER.y, r: 1 },
+  ...Array.from({ length: 22 }, (_, k): Blob => {
+    const angle = (2 * Math.PI * k) / 22;
+    return { x: LARGE_CENTER.x + (LARGE_RADIUS.x - 3.5) * Math.cos(angle), y: LARGE_CENTER.y + (LARGE_RADIUS.y - 3.5) * Math.sin(angle), r: 5 };
+  }),
+];
+function insideCrown(px: number, py: number): boolean {
+  const dx = (px - LARGE_CENTER.x) / (LARGE_RADIUS.x - 3.5);
+  const dy = (py - LARGE_CENTER.y) / (LARGE_RADIUS.y - 3.5);
+  if (dx * dx + dy * dy <= 1) return true;
+  return LARGE_CROWN.some((blob) => Math.hypot(px - blob.x, py - blob.y) <= blob.r);
+}
+
+interface Leaf {
+  readonly x: number;
+  readonly y: number;
+  readonly ramp: Ramp;
+}
+
+/** Half the size of one leaf clump, across and down. */
+const LEAF_RX = 5;
+const LEAF_RY = 4;
+
+/**
+ * Leaf clumps scattered over the crown on a jittered grid, sorted top to bottom so each one
+ * overlaps the one above it like a shingle. A clump's color comes from where it sits on the lit
+ * sphere (upper left sunlit, lower right teal), broken up a little so the bands never read as rings.
+ */
+function largeLeaves(): Leaf[] {
+  const rng = createRng(71);
+  const leaves: Leaf[] = [];
+  for (let gy = LARGE_CENTER.y - LARGE_RADIUS.y; gy < LARGE_CENTER.y + LARGE_RADIUS.y + 2; gy += 4) {
+    for (let gx = LARGE_CENTER.x - LARGE_RADIUS.x; gx < LARGE_CENTER.x + LARGE_RADIUS.x + 2; gx += 5) {
+      const x = gx + (rng() - 0.5) * 4;
+      const y = gy + (rng() - 0.5) * 3;
+      const cx = (x - LARGE_CENTER.x) / LARGE_RADIUS.x;
+      const cy = (y - LARGE_CENTER.y) / LARGE_RADIUS.y;
+      const lit = 0.4 * cx + 0.85 * cy + 0.55 * (rng() - 0.5);
+      const index = Math.max(0, Math.min(LARGE_RAMPS.length - 1, Math.floor((lit + 0.6) * 2.4)));
+      leaves.push({ x, y, ramp: LARGE_RAMPS[index] as Ramp });
+    }
+  }
+  return leaves.sort((p, q) => p.y - q.y || p.x - q.x);
+}
+
+/**
+ * The large tree: the same 1x1 base as the others, about 3 tiles tall. A wide trunk, inside its
+ * tile, rises about 1.5 tiles into a tall crown that hangs down to about a tile above the ground,
+ * so the crown covers anyone walking behind it. The crown is shingled with overlapping leaf clumps, each lit on its upper
+ * left with a shadowed lower rim, turning from sunlit green on its upper left to a cool teal on
+ * its lower right.
+ */
+function largeTreeSprite(): PixelBuffer {
+  const image = new PixelBuffer(TREE.frame.width, TREE.frame.height);
+  const { x: ax, y: ay } = TREE.anchor;
+  for (let y = ay - LARGE_TRUNK_HEIGHT; y < ay; y += 1) {
+    // Root flare at the ground, a slight taper toward the crown.
+    const half = y >= ay - 2 ? 11 : y >= ay - 5 ? 10 : y < ay - 34 ? 8 : 9;
+    for (let x = ax - half; x < ax + half; x += 1) {
+      const across = (x + 0.5 - ax) / half;
+      const tone = across < -0.45 ? BARK.light : across > 0.5 ? BARK.shadow : BARK.base;
+      // Bark grooves run up the trunk, broken here and there, never on its edge columns: there a groove would double the outline.
+      const inner = x > ax - half && x < ax + half - 1;
+      const groove = inner && (x - ax + 62) % 5 === 0 && (y * 3 + x) % 13 !== 0;
+      image.setPixel(x, y, groove ? BARK.deep : tone);
+    }
+  }
+  // A dark under-layer fills any gap between clumps.
+  const under = LARGE_RAMPS[LARGE_RAMPS.length - 1] as Ramp;
+  const top = Math.floor(LARGE_CENTER.y - LARGE_RADIUS.y);
+  const bottom = Math.ceil(LARGE_CENTER.y + LARGE_RADIUS.y);
+  for (let y = top; y < bottom; y += 1) {
+    for (let x = 0; x < TREE.frame.width; x += 1) if (insideCrown(x + 0.5, y + 0.5)) image.setPixel(x, y, under.shadow);
+  }
+  for (const leaf of largeLeaves()) {
+    for (let y = Math.floor(leaf.y - LEAF_RY); y <= Math.ceil(leaf.y + LEAF_RY); y += 1) {
+      for (let x = Math.floor(leaf.x - LEAF_RX); x <= Math.ceil(leaf.x + LEAF_RX); x += 1) {
+        const nx = (x + 0.5 - leaf.x) / LEAF_RX;
+        const ny = (y + 0.5 - leaf.y) / LEAF_RY;
+        // A leaf clump comes to a soft point at its bottom.
+        if (nx * nx + ny * ny > 1 - Math.max(0, ny) * Math.abs(nx) * 0.9) continue;
+        if (!insideCrown(x + 0.5, y + 0.5)) continue;
+        const light = -0.6 * nx - 0.8 * ny;
+        const tone = ny > 0.62 ? leaf.ramp.deep : ny > 0.3 ? leaf.ramp.shadow : light > 0.45 ? leaf.ramp.light : leaf.ramp.base;
+        image.setPixel(x, y, tone);
+      }
+    }
+  }
+  image.addOutline(ink);
+  // After the outline, so the ink follows the trunk down to the ground.
+  shadowEllipse(image, ax, ay - 2, 24, 6);
   return image;
 }
 
 // --- Plants ------------------------------------------------------------------------------------
 
-export const PLANT_KINDS = ['ficus'] as const;
+export const PLANT_KINDS = ['ficus', 'bonsai'] as const;
 export type PlantKind = (typeof PLANT_KINDS)[number];
 
 const POT = makeRamp('#b86b45');
@@ -132,6 +251,7 @@ const PLANT_CROWN: readonly Blob[] = [
 
 /** A potted plant in its 32x48 frame, the pot standing on PLANT.anchor. */
 export function plantSprite(kind: PlantKind): PixelBuffer {
+  if (kind === 'bonsai') return bonsaiSprite();
   const image = new PixelBuffer(PLANT.frame.width, PLANT.frame.height);
   const { x: ax, y: ay } = PLANT.anchor;
   shadowEllipse(image, ax, ay - 1, 9, 2.5);
@@ -145,6 +265,59 @@ export function plantSprite(kind: PlantKind): PixelBuffer {
     }
   }
   foliage(image, PLANT_CROWN, PLANT_LEAVES, periodicNoise(kind === 'ficus' ? 41 : 43, 32, 4));
+  image.addOutline(ink);
+  return image;
+}
+
+const BONSAI_POT = makeRamp('#55708f');
+const BONSAI_BARK = makeRamp('#7a5640');
+const MOSS = makeRamp('#7a9a3c');
+const BONSAI_LEAVES = makeRamp('#4c8f3e');
+/** Three flat foliage pads, each a row of small blobs: a low one on the left, one on the right and the crown. */
+const BONSAI_PADS: readonly Blob[] = [
+  { x: 8, y: 31, r: 3.5 },
+  { x: 11.5, y: 30, r: 4 },
+  { x: 15, y: 31, r: 3 },
+  { x: 19, y: 27, r: 3.5 },
+  { x: 22.5, y: 26.5, r: 4 },
+  { x: 25.5, y: 27.5, r: 3 },
+  { x: 12, y: 24, r: 4 },
+  { x: 15.5, y: 23, r: 4.5 },
+  { x: 19, y: 24.5, r: 3.5 },
+];
+
+/**
+ * A bonsai: a shallow glazed pot with moss on top, a short twisting trunk and three flat pads of
+ * foliage, kept low so it reads as a desk-sized plant next to the ficus.
+ */
+function bonsaiSprite(): PixelBuffer {
+  const image = new PixelBuffer(PLANT.frame.width, PLANT.frame.height);
+  const { x: ax, y: ay } = PLANT.anchor;
+  shadowEllipse(image, ax, ay - 1, 11, 2.5);
+  const potTop = ay - 6;
+  for (let y = potTop; y < ay; y += 1) {
+    const foot = y === ay - 1;
+    const half = y === potTop ? 10 : 9;
+    for (let x = ax - half; x < ax + half; x += 1) {
+      if (foot && x >= ax - 6 && x < ax + 6) continue;
+      const tone = y === potTop ? BONSAI_POT.light : x < ax - half + 2 ? BONSAI_POT.light : x >= ax + half - 2 ? BONSAI_POT.shadow : BONSAI_POT.base;
+      image.setPixel(x, y, tone);
+    }
+  }
+  for (let x = ax - 9; x < ax + 9; x += 1) image.setPixel(x, potTop - 1, (x * 5) % 7 < 3 ? MOSS.light : MOSS.base);
+  // The trunk leans left, then curls back right toward the crown, thinning as it rises.
+  for (let y = potTop - 1; y > 23; y -= 1) {
+    const t = (potTop - 1 - y) / (potTop - 24);
+    const center = ax + 1 - 4 * Math.sin(t * Math.PI * 0.9);
+    const half = t < 0.4 ? 2 : 1.5;
+    for (let x = Math.round(center - half); x < Math.round(center + half); x += 1) {
+      image.setPixel(x, y, x < center - 0.5 ? BONSAI_BARK.light : BONSAI_BARK.shadow);
+    }
+  }
+  // Branches out to the two side pads.
+  for (let x = ax - 6; x < ax - 2; x += 1) image.setPixel(x, 32, BONSAI_BARK.shadow);
+  for (let x = ax; x < ax + 6; x += 1) image.setPixel(x, 28 + Math.floor((ax + 6 - x) / 3), BONSAI_BARK.shadow);
+  foliage(image, BONSAI_PADS, BONSAI_LEAVES, periodicNoise(59, 32, 8));
   image.addOutline(ink);
   return image;
 }
