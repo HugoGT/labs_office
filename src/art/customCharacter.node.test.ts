@@ -48,6 +48,7 @@ const SPEC: CustomCharacterSpec = {
 };
 
 describe('curated options', () => {
+
   it('keeps every preset list unique and within its curated size', () => {
     for (const [list, min, max] of [
       [SKIN_TONES, 6, 8],
@@ -191,9 +192,9 @@ describe('toCharacterSpec', () => {
   });
 
   it('pins the hash of a fixed spec, so a new render version or encoding is a visible decision', () => {
-    // Version 5: the seated contact shadow sits under the pelvis. Update only together with the version.
-    expect(CHARACTER_RENDER_VERSION).toBe(5);
-    expect(customCharacterHash(CHARACTER_TEMPLATES[0]!.spec)).toBe('77a9f638ca69c3f77496b582be55e8a2');
+    // Version 6: dress shoes are square. Update only together with the version.
+    expect(CHARACTER_RENDER_VERSION).toBe(6);
+    expect(customCharacterHash(CHARACTER_TEMPLATES[0]!.spec)).toBe('0540dee718cf56f0e6ae905c5b895a09');
   });
 
   it('uses the top color as the shirt itself when there is no jacket', () => {

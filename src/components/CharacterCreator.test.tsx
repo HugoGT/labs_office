@@ -52,9 +52,9 @@ async function pickStyle(user: User, section: string, trigger: RegExp, option: s
   await user.click(screen.getByRole('menuitemradio', { name: option }));
 }
 
-async function pickPreset(user: User, section: string, trigger: RegExp, preset: string): Promise<void> {
-  await user.click(within(part(section)).getByRole('button', { name: trigger }));
-  await user.click(within(screen.getByRole('dialog')).getByRole('button', { name: preset }));
+/** What the browser's color picker reports when a color is chosen in it. */
+function pickColor(section: string, label: string, hex: string): void {
+  fireEvent.input(within(part(section)).getByLabelText(label, { selector: 'input' }), { target: { value: hex } });
 }
 
 function submitted(onSubmit: ReturnType<typeof renderCreator>['onSubmit']): CharacterChoice {
@@ -82,7 +82,7 @@ describe('CharacterCreator', () => {
     });
     const lucia = CHARACTER_TEMPLATES[1]!.spec;
     expect(within(part('Pelo')).getByRole('button', { name: 'Estilo de pelo: Largo liso' })).toHaveAttribute('aria-haspopup', 'menu');
-    expect(within(part('Pelo')).getByRole('button', { name: `Color de pelo: ${lucia.hair.color}` })).toHaveAttribute('aria-haspopup', 'dialog');
+    expect(within(part('Pelo')).getByRole('button', { name: `Color de pelo: ${lucia.hair.color}` })).not.toHaveAttribute('aria-haspopup');
     const skin = SKIN_TONES.find((swatch) => swatch.hex === lucia.skin)!;
     expect(within(part('Piel')).getByRole('button', { name: `Tono de piel: ${skin.label}` })).toBeInTheDocument();
     expect(within(part('Superior')).getByRole('button', { name: 'Estilo de la parte superior: Blazer' })).toBeInTheDocument();
@@ -153,7 +153,7 @@ describe('CharacterCreator', () => {
     const { onSubmit } = renderCreator();
 
     await pickStyle(user, 'Pelo', /^Estilo de pelo/, 'Coleta');
-    await pickPreset(user, 'Pelo', /^Color de pelo/, HAIR_COLORS[4]!.label);
+    pickColor('Pelo', 'Color de pelo', HAIR_COLORS[4]!.hex);
     await pickStyle(user, 'Superior', /^Lentes/, 'Lentes de sol');
     await pickStyle(user, 'Superior', /^Extras/, 'Ninguno');
     await pickStyle(user, 'Inferior', /^Estilo de la parte inferior/, 'Jean');
@@ -180,9 +180,7 @@ describe('CharacterCreator', () => {
     const user = userEvent.setup();
     const { onSubmit } = renderCreator();
 
-    await user.click(within(part('Zapatos')).getByRole('button', { name: /^Color de zapatos/ }));
-    fireEvent.input(screen.getByLabelText('Otro color'), { target: { value: '#12AB34' } });
-    await user.keyboard('{Escape}');
+    pickColor('Zapatos', 'Color de zapatos', '#12AB34');
 
     expect(within(part('Zapatos')).getByRole('button', { name: 'Color de zapatos: #12ab34' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Entrar a la oficina' }));

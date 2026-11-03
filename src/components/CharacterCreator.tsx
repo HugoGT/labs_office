@@ -92,8 +92,8 @@ function specFor(choice: CharacterChoice): CustomCharacterSpec {
  * own. Build and earrings are not offered: they come with the template and
  * stay as they are when other parts change. Styles are picked by looking:
  * `StylePicker` shows each option drawn on the person's own character,
- * cropped to the part it changes; colors come from `ColorPicker`, curated
- * presets plus any RGB. Everything fits one screen with no vertical scroll
+ * cropped to the part it changes; colors come from `ColorPicker`, the
+ * browser's full-spectrum picker. Everything fits one screen with no vertical scroll
  * (narrow phones may still scroll).
  *
  * The preview is the character standing still, big, over the pack's wood

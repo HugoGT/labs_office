@@ -41,7 +41,7 @@ Set unused `inner` to `WHITE_SHIRT`. Without `tie`, the tie falls back to `inner
 | `pants` | Straight trousers | p01, p10, p12 |
 | `widePants` | Wide-leg trousers | p02, p06, p17 |
 | `skirt` | Pencil skirt with bare legs | p04, p11, p16, p18 |
-| `dress` (shoes) | Flat dress shoes | p01, p03 |
+| `dress` (shoes) | Square dress shoes: flat sole, square toe | p01, p03 |
 | `heels` (shoes) | Heels | p02, p04 |
 
 ## Accessory (`accessory`), held in the right hand

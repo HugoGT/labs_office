@@ -38,7 +38,7 @@
           "imageKind": "character-walk",
           "width": 352,
           "height": 416,
-          "sha256": "b0042fee71c26542a745a89844a0a55342c3781440ec4aea52c3b0c3cafe2d82"
+          "sha256": "8e33bef5b605d85ee7f58145f49b2308c070c5e65642525a65da87bf1cc9d952"
         },
         {
           "role": "seated",
@@ -46,7 +46,7 @@
           "imageKind": "character-seated",
           "width": 352,
           "height": 232,
-          "sha256": "8b2ed86f4e6e61b509ca45b2dc1e081018b42c7b62a29fc45a860fce559c58ca"
+          "sha256": "f8bfd98a541ea5aee12dc7b1896a84f541e57e4b3cb0badd5dd912c6aba7a59f"
         }
       ]
     },
@@ -116,7 +116,7 @@
           "imageKind": "character-walk",
           "width": 352,
           "height": 416,
-          "sha256": "38fba18792cbd4c44a3a96e2167e47d762ed82533702ee8ad897625238ccb3e7"
+          "sha256": "c6c06a959debb74e08771de71648eea50046bc7eb9bc85ac63a283624b23a52d"
         },
         {
           "role": "seated",
@@ -124,7 +124,7 @@
           "imageKind": "character-seated",
           "width": 352,
           "height": 232,
-          "sha256": "692926e1039ed56a0d845bd61d05b170efcefad007e095a10562e5ff535996c3"
+          "sha256": "2c98f22fe459a2d77d5cd8f9108b3f0ce708c1346ca4bf16eea4038b8c913c37"
         }
       ]
     },
@@ -194,7 +194,7 @@
           "imageKind": "character-walk",
           "width": 352,
           "height": 416,
-          "sha256": "94f7a6473afe0bdd1602aa0c80f73758d66cdb1c19fab5a8e3bd6ecf8fa1e825"
+          "sha256": "4c9e20aa06cae186e92796b1fd00364add80e59403c7134cac97071b5465402d"
         },
         {
           "role": "seated",
@@ -202,7 +202,7 @@
           "imageKind": "character-seated",
           "width": 352,
           "height": 232,
-          "sha256": "e418b1347f232d69fb24110aa1cae55f58f228e4c4ba6a6c07c4181b4e052176"
+          "sha256": "3213564f1c7e05edd8a11d247eab7956d221b7c8c9ba434b3e56ac4e18ea79cc"
         }
       ]
     },
@@ -272,7 +272,7 @@
           "imageKind": "character-walk",
           "width": 352,
           "height": 416,
-          "sha256": "9891e98cf5db3277fb57766a13620b34eb7893c7b299ae5dcc9460d9f8ccf428"
+          "sha256": "c73a26551a1d31f8c3d6a539d351c603492d7f28cede4ee6141627e58c8d72e6"
         },
         {
           "role": "seated",
@@ -280,7 +280,7 @@
           "imageKind": "character-seated",
           "width": 352,
           "height": 232,
-          "sha256": "21533d7d8af11d0db11d299c2822d3efccf0b19e17a27bd52c6cbb2c9a290c00"
+          "sha256": "8c1aa346a4a8a1931b258cda38f239f45f894e766625d54f05391ac25df2e5d9"
         }
       ]
     },
@@ -311,7 +311,7 @@
           "imageKind": "character-walk",
           "width": 352,
           "height": 416,
-          "sha256": "097cb4f3b12b3e3dec8b8836dad1c99d3b6682a3858dbb5f0b3d080431c5508b"
+          "sha256": "d19e57eb48a31ffd682b8b8f13e6b44eff1e2f7b8d008ba1ceda40d43d158d3b"
         },
         {
           "role": "seated",
@@ -319,7 +319,7 @@
           "imageKind": "character-seated",
           "width": 352,
           "height": 232,
-          "sha256": "0bad4469156455488b87c01e49eac1b9e9a8fa7394f602ced67f01528cc3d096"
+          "sha256": "584410f9f887af01b824c66e43f46c15a3b4cf85e1f3d32619f60d469c2673fa"
         }
       ]
     },
@@ -350,7 +350,7 @@
           "imageKind": "character-walk",
           "width": 352,
           "height": 416,
-          "sha256": "d16a177ba313fdb82beaa3a1836d3d2d22d5c9aae842def43519b9c8a6ed0e0d"
+          "sha256": "b1dac1576c97c06b46451e9b07a8a7467f23d96e34e1b59819d4a07bbbe1b3c3"
         },
         {
           "role": "seated",
@@ -358,7 +358,7 @@
           "imageKind": "character-seated",
           "width": 352,
           "height": 232,
-          "sha256": "7bede39b2632f50f553a9a34d0174eadbc1dc6d36e862192b5f2d125e3646ee9"
+          "sha256": "16025fa72dc68f22c81100047dbc2e16e60436586241d2b1e1f43afdbf3b4ba1"
         }
       ]
     },
@@ -506,7 +506,7 @@
           "imageKind": "character-walk",
           "width": 352,
           "height": 416,
-          "sha256": "f82d0eaaad7a3bcb73f9850410b4e61c8feb6754aaf0bd7c2912bcdd7944ce14"
+          "sha256": "668fc6bc96f2a0613764ba67e7ee8154ff45202e0aa8d189a2871ef8a0f226c8"
         },
         {
           "role": "seated",
@@ -514,7 +514,7 @@
           "imageKind": "character-seated",
           "width": 352,
           "height": 232,
-          "sha256": "a1e600cfc68b1073cd837ac91b84a96d4d65c22f9b34c9015e143a35a8ed2bb8"
+          "sha256": "66260896780545e2833d39170430d4475ab8353e6a0dbabe9482c226aaa40f39"
         }
       ]
     },
@@ -545,7 +545,7 @@
           "imageKind": "character-walk",
           "width": 352,
           "height": 416,
-          "sha256": "ef752f066b2a4866d49cecb39a857e72a5844a692293c7d03b22b65513566e84"
+          "sha256": "f8735b8bfb1054dbc01a79983fe7157da02d045606befcbb99a435227fa8d0f9"
         },
         {
           "role": "seated",
@@ -553,7 +553,7 @@
           "imageKind": "character-seated",
           "width": 352,
           "height": 232,
-          "sha256": "f3efedc311671f527de58f276e65edff88785284e29870e2ec50e46f9bd918c2"
+          "sha256": "731e6d0f8ed731c35e413ef4c00b8b750e0b2c5db037e7781de38e7b0922aece"
         }
       ]
     },
@@ -584,7 +584,7 @@
           "imageKind": "character-walk",
           "width": 352,
           "height": 416,
-          "sha256": "b87835820be1aa9d8162f422f627cbe77b8ecda6558b85f0e2d334369e2d74c4"
+          "sha256": "89a053850b676e449345995a7fd076066d8ca9de5629fe57a0124e9df4b157b2"
         },
         {
           "role": "seated",
@@ -592,7 +592,7 @@
           "imageKind": "character-seated",
           "width": 352,
           "height": 232,
-          "sha256": "1002d4c311a38e52aa9fb86672223647902c3d930597a8d6e8322a534ac3a644"
+          "sha256": "dd9ec39fc708155d87c19265d0d3f377253adb4b25bb69dc2db84098c15ffbc3"
         }
       ]
     },
