@@ -454,9 +454,12 @@ function addLeg(prims: Primitive[], body: Body, side: Side, joints: LegJoints): 
       }),
     );
   } else {
-    const radii = spec.build === 'broad' ? v3(1.75, 1.1, 2.75) : v3(1.5, 1.0, 2.4);
+    // Dress shoes are a box: a flat sole and a square toe, never the rounded tip heels have.
+    const half = spec.build === 'broad' ? v3(1.6, 0.95, 2.6) : v3(1.35, 0.85, 2.25);
+    const reach = half.y * Math.cos(footPitch) + half.z * Math.abs(Math.sin(footPitch));
+    const center = add(ankle, applyBasis(foot, v3(0, -0.65, 0.95)));
     prims.push(
-      ellipsoid(onFloor(add(ankle, applyBasis(foot, v3(0, -0.6, 0.95))), radii, footPitch), radii, {
+      box(add(center, v3(0, Math.max(0, reach - center.y), 0)), half, {
         basis: foot,
         material: (_point, _normal, local) => ({ key: 'shoes', shift: local.y < -0.55 ? -1 : 0 }),
         part,

@@ -37,9 +37,7 @@
 }
 
 .trigger:focus-visible,
-.item:focus-visible,
-.preset:focus-visible,
-.colorInput:focus-visible {
+.item:focus-visible {
   outline: 2px solid #93c5fd;
   outline-offset: 2px;
 }
@@ -67,41 +65,6 @@
   box-shadow: 0 8px 30px #0009;
 }
 
-/* The color popover stacks presets over the free picker instead. */
-.menu[role='dialog'] {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  width: 220px;
-}
-
-.presets {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-}
-
-.preset {
-  display: flex;
-  padding: 3px;
-  background: #1f2937;
-  border: 1px solid #374151;
-  border-radius: var(--radius-control);
-  cursor: pointer;
-}
-
-.preset[aria-pressed='true'] {
-  border-color: #93c5fd;
-  box-shadow: 0 0 0 1px #93c5fd;
-}
-
-.swatch {
-  width: 18px;
-  height: 18px;
-  border-radius: var(--radius-tag);
-  border: 1px solid #0006;
-}
-
 .swatchLarge {
   width: 36px;
   height: 36px;
@@ -109,21 +72,20 @@
   border: 1px solid #0008;
 }
 
-.free {
+/* The color input the swatch opens: the browser anchors its native picker over the swatch. */
+.anchor {
+  position: relative;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  font-size: 12px;
-  color: #d1d5db;
 }
 
+/* Invisible but real, and never in the way of the swatch's clicks. */
 .colorInput {
-  width: 48px;
-  height: 28px;
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   padding: 0;
-  background: none;
-  border: 1px solid #374151;
-  border-radius: var(--radius-control);
-  cursor: pointer;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
 }
