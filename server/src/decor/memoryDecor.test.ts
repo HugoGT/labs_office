@@ -363,7 +363,7 @@ describe('createMemoryDecor: art pack catalog (art migration, step 3)', () => {
       archivedAt: null,
     });
     // Pack plants stay layout pieces: no decor asset for them.
-    expect((await catalog.listAssets()).some((entry) => entry.textureKey === 'art:plant-ficus:sheet')).toBe(false);
+    expect((await catalog.listAssets()).some((entry) => entry.textureKey === 'art:plant-bonsai:sheet')).toBe(false);
   });
 
   it('offers the pack desks as decor tables, three tiles long, once across restarts (Editar espacios)', async () => {
@@ -428,7 +428,7 @@ describe('createMemoryDecor: uploaded pieces (#121)', () => {
   const PACK: ArtPackManifest = JSON.parse(
     readFileSync(new URL('../../../public/assets/pack/manifest.json', import.meta.url), 'utf8'),
   );
-  const FICUS = PACK.pieces.find((piece) => piece.id === 'plant-ficus')!;
+  const FICUS = PACK.pieces.find((piece) => piece.id === 'plant-bonsai')!;
   const UPLOADED: ArtPiece = { ...FICUS, id: 'plant-upload-0123456789abcdef', name: 'Helecho' };
   const UPLOADER = 'id-admin';
 
@@ -493,7 +493,7 @@ describe('createMemoryDecor: contributions and review (#122)', () => {
   const PACK: ArtPackManifest = JSON.parse(
     readFileSync(new URL('../../../public/assets/pack/manifest.json', import.meta.url), 'utf8'),
   );
-  const FICUS = PACK.pieces.find((piece) => piece.id === 'plant-ficus')!;
+  const FICUS = PACK.pieces.find((piece) => piece.id === 'plant-bonsai')!;
   const CHARACTER = PACK.pieces.find((piece) => piece.kind === 'character')!;
   const ANA = 'id-ana';
   const BETO = 'id-beto';
@@ -682,7 +682,7 @@ describe('createMemoryDecor: uploading a retired piece again (#264)', () => {
   const PACK: ArtPackManifest = JSON.parse(
     readFileSync(new URL('../../../public/assets/pack/manifest.json', import.meta.url), 'utf8'),
   );
-  const FICUS = PACK.pieces.find((piece) => piece.id === 'plant-ficus')!;
+  const FICUS = PACK.pieces.find((piece) => piece.id === 'plant-bonsai')!;
   const PIECE: ArtPiece = { ...FICUS, id: 'plant-upload-0123456789abcdef', name: 'Helecho', license: 'office-contribution' };
   const ANA = 'id-ana';
   const BETO = 'id-beto';

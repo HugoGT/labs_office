@@ -301,7 +301,7 @@ describe('parseArtAppearance', () => {
 
 describe('uploaded art (#121)', () => {
   const UPLOADS_URL = 'http://localhost:2567/assets/files/manifest.json';
-  const ficus = () => pack().pieces.find((piece) => piece.id === 'plant-ficus')!;
+  const ficus = () => pack().pieces.find((piece) => piece.id === 'plant-bonsai')!;
   const uploaded = () => ({ ...ficus(), id: 'plant-upload-0123456789abcdef', files: ficus().files.map((file) => ({ ...file, path: `${'a'.repeat(64)}.png` })) });
   const uploads = (): ArtPackManifest => ({ ...pack(), pieces: [uploaded()] });
 
@@ -321,7 +321,7 @@ describe('uploaded art (#121)', () => {
 
     expect(catalog?.manifest.pieces).toHaveLength(pack().pieces.length + 1);
     expect(catalog?.manifest.defaults).toEqual(pack().defaults);
-    expect(catalog?.sourceOf('plant-ficus')).toBe(ART_PACK_MANIFEST_URL);
+    expect(catalog?.sourceOf('plant-bonsai')).toBe(ART_PACK_MANIFEST_URL);
     expect(catalog?.sourceOf('plant-upload-0123456789abcdef')).toBe(UPLOADS_URL);
     expect(pieceLoadRequests(uploaded(), UPLOADS_URL)[0]?.url).toBe(`http://localhost:2567/assets/files/${'a'.repeat(64)}.png`);
   });
@@ -332,8 +332,8 @@ describe('uploaded art (#121)', () => {
       { manifest: pack(), url: ART_PACK_MANIFEST_URL },
       { manifest: clash, url: UPLOADS_URL },
     ]);
-    expect(findPiece(catalog!.manifest, 'plant-ficus')?.name).toBe(ficus().name);
-    expect(catalog?.sourceOf('plant-ficus')).toBe(ART_PACK_MANIFEST_URL);
+    expect(findPiece(catalog!.manifest, 'plant-bonsai')?.name).toBe(ficus().name);
+    expect(catalog?.sourceOf('plant-bonsai')).toBe(ART_PACK_MANIFEST_URL);
 
     expect(combineArtManifests([{ manifest: null, url: ART_PACK_MANIFEST_URL }, { manifest: uploads(), url: UPLOADS_URL }])?.manifest.pieces).toHaveLength(1);
     expect(combineArtManifests([{ manifest: pack(), url: ART_PACK_MANIFEST_URL }, { manifest: null, url: UPLOADS_URL }])?.manifest.pieces).toHaveLength(

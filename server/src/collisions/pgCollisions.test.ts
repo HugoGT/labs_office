@@ -38,7 +38,7 @@ describe('pgCollisions', () => {
       { piece_id: 'tree-oak', rects: [{ x: -8, y: -12, w: 16, h: 12 }] },
       { piece_id: 'desk-wood', rects: [] },
       { piece_id: 'wall-brick', rects: [] },
-      { piece_id: 'plant-ficus', rects: [{ x: 0, y: 0, w: 0, h: 1 }] },
+      { piece_id: 'plant-bonsai', rects: [{ x: 0, y: 0, w: 0, h: 1 }] },
       { piece_id: 'table-x', rects: 'nope' },
     ]);
 

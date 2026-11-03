@@ -8,7 +8,7 @@ import { act, renderHook } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { AdminError } from '../dashboard/adminPort';
 import { createOfficeBridge, type OfficeCommandMap } from '../game/officeBridge';
-import { MAX_DECOR_EDITS, type DecorEdit, type DecorItem, type DecorPieceInfo, type DecorTileRect } from '../game/officeDecor';
+import { MAX_DECOR_EDITS, decorKey, type DecorEdit, type DecorItem, type DecorPieceInfo, type DecorTileRect } from '../game/officeDecor';
 import type { OfficeDecorPort } from '../game/officeDecorPort';
 import { DECOR_AREA_MESSAGE, DECOR_CHAIR_LIMIT_MESSAGE, DECOR_UNDER_PLACEMENT_MESSAGE, useDecorEditor, type DecorPick } from './useDecorEditor';
 
@@ -17,7 +17,7 @@ const at = (tx: number, ty: number): number => ty * WIDTH + tx;
 
 const CHAIR: DecorPick = { id: 'chair-gamer', info: { kind: 'chair', footprint: { w: 1, h: 1 } } };
 const DESK: DecorPick = { id: 'desk-wood', info: { kind: 'desk', footprint: { w: 3, h: 1 } } };
-const PLANT: DecorPick = { id: 'plant-ficus', info: { kind: 'plant', footprint: { w: 1, h: 1 } } };
+const PLANT: DecorPick = { id: 'plant-bonsai', info: { kind: 'plant', footprint: { w: 1, h: 1 } } };
 const TABLE: DecorPick = { id: 'table-meeting', info: { kind: 'table', footprint: { w: 7, h: 5 } } };
 const OVAL: DecorPick = { id: 'table-oval', info: { kind: 'table', footprint: { w: 2, h: 1 } } };
 const PAINTED: DecorPick = { id: 'desk-painted', info: { kind: 'desk', footprint: { w: 3, h: 1 }, colorable: true } };
@@ -160,7 +160,7 @@ describe('useDecorEditor', () => {
     expect(result.current.brush).toMatchObject({ piece: 'desk-wood', rotation: 270 });
   });
 
-  it('never turns a plant, and with nothing picked the map turns nothing', () => {
+  it('mirrors a picked plant either way (#121), and with nothing picked the map turns nothing', () => {
     const { bridge, result } = setup();
     act(() => result.current.enter());
     act(() => bridge.emit('decorrotate', { step: 1 }));
@@ -168,8 +168,9 @@ describe('useDecorEditor', () => {
 
     act(() => result.current.pick(PLANT));
     act(() => bridge.emit('decorrotate', { step: 1 }));
-    expect(result.current.brush).toMatchObject({ piece: 'plant-ficus', rotation: 0 });
-    expect(result.current.rotation).toBe(0);
+    expect(result.current.brush).toMatchObject({ piece: 'plant-bonsai', rotation: 180 });
+    act(() => bridge.emit('decorrotate', { step: -1 }));
+    expect(result.current.brush).toMatchObject({ piece: 'plant-bonsai', rotation: 0 });
   });
 
   it('turns a picked room table between horizontal (0) and vertical (90) either way, and takes the symmetric half of a chair turn', () => {
@@ -655,7 +656,7 @@ describe('useDecorEditor', () => {
       act(() => bridge.emit('decorselect', { index: DESK_AT }));
       act(() => result.current.pick(PLANT));
       expect(result.current.selected).toBeNull();
-      expect(result.current.brush).toMatchObject({ piece: 'plant-ficus' });
+      expect(result.current.brush).toMatchObject({ piece: 'plant-bonsai' });
     });
 
     it('moves the item: the move button turns it into a brush of the same piece, turn and color, and the next click moves it in one batch', async () => {
@@ -891,6 +892,118 @@ describe('useDecorEditor: the wall eraser over decor', () => {
     expect(calls).toEqual([]);
     act(() => void result.current.erase(at(0, 0), at(10, 10)));
     expect(calls.map((call) => call.edits)).toEqual([[{ index: at(10, 10), item: null }]]);
+  });
+});
+
+describe('useDecorEditor: the top layer (#121)', () => {
+  // The desk table on (10, 10) covers (9..11, 10); a plant stands on (9, 10).
+  const DESK_AT = at(10, 10);
+  const DESK_TABLE: DecorItem = { index: DESK_AT, piece: DESK.id, rotation: 0 };
+  const ON_TOP: DecorItem = { index: at(9, 10), piece: PLANT.id, rotation: 0 };
+  const TOP = decorKey(ON_TOP.index, 'top');
+
+  function open(items: readonly DecorItem[] = [DESK_TABLE, ON_TOP]) {
+    const port = deferredPort();
+    const view = setup({ decor: port.decor });
+    act(() => view.bridge.emit('decor', { items }));
+    act(() => view.result.current.enter());
+    return { ...view, calls: port.calls };
+  }
+
+  it('places a top piece on a desk table, its anchor included, and sends a desk table and the piece on its top in one request', async () => {
+    const { bridge, result, calls } = open([]);
+    act(() => result.current.setMultiple(true));
+    act(() => result.current.pick(CHAIR));
+    act(() => bridge.emit('decorpick', { index: at(40, 40) }));
+    act(() => result.current.pick(DESK));
+    act(() => bridge.emit('decorpick', { index: at(30, 30) }));
+    act(() => result.current.pick(PLANT));
+    act(() => bridge.emit('decorpick', { index: at(30, 30) }));
+    await act(async () => calls[0]!.resolve());
+
+    expect(calls.map((call) => call.edits)).toEqual([
+      [{ index: at(40, 40), item: { piece: CHAIR.id, rotation: 0 } }],
+      [
+        { index: at(30, 30), item: { piece: DESK.id, rotation: 180 } },
+        { index: at(30, 30), item: { piece: PLANT.id, rotation: 0 } },
+      ],
+    ]);
+  });
+
+  it('selects, deletes and moves a top piece by its key, never the desk table under it', async () => {
+    const { bridge, result, calls, commands } = open();
+
+    act(() => bridge.emit('decorselect', { index: TOP }));
+    expect(result.current.selected).toBe(TOP);
+    expect(commands.at(-1)).toEqual({ brush: null, area: null, selected: TOP });
+
+    act(() => bridge.emit('decormove', { index: TOP }));
+    expect(result.current.brush).toEqual({ kind: 'piece', piece: PLANT.id, info: PLANT.info, rotation: 0, from: ON_TOP.index });
+    // The release of a drag that moved nothing puts it down, selected by its key again.
+    act(() => bridge.emit('decorputdown', { index: ON_TOP.index }));
+    expect(result.current.brush).not.toBeNull();
+    act(() => bridge.emit('decorputdown', { index: TOP }));
+    expect(result.current.selected).toBe(TOP);
+
+    act(() => bridge.emit('decormove', { index: TOP }));
+    act(() => bridge.emit('decorpick', { index: at(11, 10) }));
+    expect(calls[0]!.edits).toEqual([
+      { index: ON_TOP.index, item: null, layer: 'top' },
+      { index: at(11, 10), item: { piece: PLANT.id, rotation: 0 } },
+    ]);
+    await act(async () => calls[0]!.resolve());
+
+    act(() => bridge.emit('decor', { items: [DESK_TABLE, { ...ON_TOP, index: at(11, 10) }] }));
+    act(() => bridge.emit('decorselect', { index: decorKey(at(11, 10), 'top') }));
+    act(() => bridge.emit('decordelete', { index: decorKey(at(11, 10), 'top') }));
+    expect(calls[1]!.edits).toEqual([{ index: at(11, 10), item: null, layer: 'top' }]);
+  });
+
+  it('removes what stands on a desk table with it, in the same request', () => {
+    const { bridge, calls } = open();
+
+    act(() => bridge.emit('decorselect', { index: DESK_AT }));
+    act(() => bridge.emit('decordelete', { index: DESK_AT }));
+
+    expect(calls.map((call) => call.edits)).toEqual([[{ index: DESK_AT, item: null }, { index: ON_TOP.index, item: null, layer: 'top' }]]);
+  });
+
+  it('moves a desk table with what stands on it, in one request', () => {
+    const { bridge, calls } = open();
+
+    act(() => bridge.emit('decormove', { index: DESK_AT }));
+    act(() => bridge.emit('decorpick', { index: at(10, 14) }));
+
+    expect(calls.map((call) => call.edits)).toEqual([
+      [
+        { index: ON_TOP.index, item: null, layer: 'top' },
+        { index: DESK_AT, item: null },
+        { index: at(9, 14), item: { piece: PLANT.id, rotation: 0 } },
+        { index: at(10, 14), item: { piece: DESK.id, rotation: 0 } },
+      ],
+    ]);
+  });
+
+  it('erases the top piece of a tile first, then the desk table under it, as before', async () => {
+    const { result, calls, bridge } = open();
+    const post = at(0, 0);
+
+    let kept = false;
+    act(() => {
+      kept = result.current.erase(post, ON_TOP.index);
+    });
+    expect(kept).toBe(true);
+    // Still on its way out: the tile stays the piece's and nothing is sent twice.
+    act(() => {
+      kept = result.current.erase(post, ON_TOP.index);
+    });
+    expect(kept).toBe(true);
+    expect(calls.map((call) => call.edits)).toEqual([[{ index: ON_TOP.index, item: null, layer: 'top' }]]);
+    await act(async () => calls[0]!.resolve());
+    act(() => bridge.emit('decor', { items: [DESK_TABLE] }));
+
+    act(() => void result.current.erase(post, ON_TOP.index));
+    expect(calls[1]!.edits).toEqual([{ index: DESK_AT, item: null }]);
   });
 });
 

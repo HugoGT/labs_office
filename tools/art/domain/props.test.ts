@@ -49,14 +49,17 @@ describe('trees', () => {
       expect([tree.width, tree.height], kind).toEqual([TREE.frame.width, TREE.frame.height]);
       expect(corners(tree), kind).toEqual([0, 0, 0, 0]);
       expect(tree.alphaAt(TREE.anchor.x, TREE.anchor.y - 4), `${kind} trunk`).toBe(255);
-      expect(tree.alphaAt(TREE.anchor.x, 36), `${kind} crown`).toBe(255);
-      const shadow = tree.getPixel(TREE.anchor.x + 12, TREE.anchor.y - 1);
+      // The ficus's pot casts a narrower shadow than a trunk's roots.
+      const shadow = kind === 'ficus' ? tree.getPixel(TREE.anchor.x + 8, TREE.anchor.y) : tree.getPixel(TREE.anchor.x + 12, TREE.anchor.y - 1);
       expect(shadow.a > 0 && shadow.a < 255, `${kind} shadow`).toBe(true);
+      expect(countColors(tree), kind).toBeLessThanOrEqual(40);
+      // The ficus is a potted tree, about a character tall (`plants` below).
+      if (kind === 'ficus') continue;
+      expect(tree.alphaAt(TREE.anchor.x, 36), `${kind} crown`).toBe(255);
       const bounds = opaqueBounds(tree);
       // Taller than a character (48px) and wider than its tile.
       expect(bounds.y1 - bounds.y0, kind).toBeGreaterThan(60);
       expect(bounds.x1 - bounds.x0, kind).toBeGreaterThan(ART_TILE);
-      expect(countColors(tree), kind).toBeLessThanOrEqual(40);
     }
   });
 
@@ -119,7 +122,7 @@ describe('trees', () => {
   });
 
   it('draw one tree, green by default, whose leaves take any color while its trunk and silhouette stay', () => {
-    expect([...TREE_KINDS]).toEqual(['oak', 'large']);
+    expect([...TREE_KINDS]).toEqual(['oak', 'large', 'ficus']);
     const green = averageOpaque(treeSprite('oak'), [10, 50]);
     expect(green.g > green.r && green.g > green.b).toBe(true);
     expect(treeSprite('oak', DEFAULT_TREE_COLOR)).toBe(treeSprite('oak'));
@@ -135,7 +138,7 @@ describe('trees', () => {
 describe('plants', () => {
   it('keep the bonsai small: a shallow pot and a low crown, well under the ficus', () => {
     const bonsai = opaqueBounds(plantSprite('bonsai'));
-    const ficus = opaqueBounds(plantSprite('ficus'));
+    const ficus = opaqueBounds(treeSprite('ficus'));
     expect(bonsai.y1 - bonsai.y0).toBeLessThan(ficus.y1 - ficus.y0 - 10);
     expect(bonsai.y1 - bonsai.y0).toBeLessThan(ART_TILE);
     expect(bonsai.y1 - bonsai.y0).toBeGreaterThan(16);
@@ -149,9 +152,34 @@ describe('plants', () => {
       expect(plant.alphaAt(PLANT.anchor.x, PLANT.anchor.y - 4), 'pot').toBe(255);
       const leaves = averageOpaque(plant, [4, 24]);
       expect(leaves.g > leaves.r && leaves.g > leaves.b).toBe(true);
-      // The bonsai is the small one: it stays under a tile tall (below).
-      if (kind !== 'bonsai') expect(opaqueBounds(plant).y0).toBeLessThan(PLANT.anchor.y - ART_TILE);
     }
+  });
+
+  it('give the ficus a rounded pot, shaded round like a trunk', () => {
+    const ficus = treeSprite('ficus');
+    const row = (y: number): number[] => Array.from({ length: ficus.width }, (_, x) => x).filter((x) => ficus.alphaAt(x, y) === 255);
+    const width = (y: number): number => row(y).length;
+    const ay = TREE.anchor.y;
+    // Its belly bulges past the neck under the lip, and its base curves back in.
+    expect(width(ay - 7)).toBeGreaterThan(width(ay - 10));
+    expect(width(ay - 1)).toBeLessThan(width(ay - 7) - 2);
+    // Across the belly, inside the ink: a lit side, the body, its shadow and a deep turn on the far side.
+    const inside = row(ay - 7).slice(1, -1);
+    const tones = new Set(inside.map((x) => JSON.stringify(ficus.getPixel(x, ay - 7))));
+    expect(tones.size).toBeGreaterThanOrEqual(4);
+  });
+
+  it('stand the ficus crown on a brown trunk, and close its pot with ink at the ground', () => {
+    const ficus = treeSprite('ficus');
+    const ay = TREE.anchor.y;
+    // Some rows over the pot's lip, the middle column is bark: red over green, not a leaf.
+    const trunk = ficus.getPixel(TREE.anchor.x, ay - 14);
+    expect(trunk.a).toBe(255);
+    expect(trunk.r).toBeGreaterThan(trunk.g);
+    // The pot's bottom row sits on an ink row, like its sides.
+    const ink = ficus.getPixel(TREE.anchor.x, ay);
+    expect(ink.a).toBe(255);
+    expect(Math.max(ink.r, ink.g, ink.b)).toBeLessThan(80);
   });
 });
 

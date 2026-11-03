@@ -144,13 +144,13 @@ describe('createCollisionRuntime', () => {
     const save = vi.spyOn(store, 'saveCollision').mockRejectedValueOnce(new Error('db down'));
 
     const first = collisions.setRects({ pieceId: tree.piece, rects: [], actorId: null }, NOBODY);
-    const second = collisions.setRects({ pieceId: 'plant-ficus', rects: [], actorId: null }, NOBODY);
+    const second = collisions.setRects({ pieceId: 'plant-bonsai', rects: [], actorId: null }, NOBODY);
 
     await expect(first).rejects.toThrow('db down');
     await second;
     expect(save).toHaveBeenCalledTimes(2);
     expect(collisions.table().has(tree.piece)).toBe(false);
-    expect(collisions.table().get('plant-ficus')).toEqual([]);
+    expect(collisions.table().get('plant-bonsai')).toEqual([]);
   });
 
   it('cannot edit without a store', async () => {

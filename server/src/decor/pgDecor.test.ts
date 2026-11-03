@@ -500,14 +500,14 @@ describe('createPgDecor: uploaded pieces (#121)', () => {
   const PACK: ArtPackManifest = JSON.parse(
     readFileSync(new URL('../../../public/assets/pack/manifest.json', import.meta.url), 'utf8'),
   );
-  const FICUS = PACK.pieces.find((piece) => piece.id === 'plant-ficus')!;
+  const FICUS = PACK.pieces.find((piece) => piece.id === 'plant-bonsai')!;
   const UPLOADED = { ...FICUS, id: 'plant-upload-0123456789abcdef', name: 'Helecho' };
   const UPLOADER = '11111111-1111-4111-8111-111111111111';
   const UPLOADED_ROW = {
     id: UPLOADED.id,
     kind: 'plant',
     name: 'Helecho',
-    material: 'ficus',
+    material: 'bonsai',
     colorable: false,
     default_color: null,
     author: UPLOADED.author,
@@ -546,7 +546,7 @@ describe('createPgDecor: uploaded pieces (#121)', () => {
       UPLOADED.id,
       'plant',
       'Helecho',
-      'ficus',
+      'bonsai',
       false,
       null,
       UPLOADED.author,
@@ -611,7 +611,7 @@ describe('createPgDecor: contributions and review (#122)', () => {
   const PACK: ArtPackManifest = JSON.parse(
     readFileSync(new URL('../../../public/assets/pack/manifest.json', import.meta.url), 'utf8'),
   );
-  const FICUS = PACK.pieces.find((piece) => piece.id === 'plant-ficus')!;
+  const FICUS = PACK.pieces.find((piece) => piece.id === 'plant-bonsai')!;
   const PIECE = { ...FICUS, id: 'plant-upload-0123456789abcdef', name: 'Helecho', license: 'office-contribution' };
   const ANA = '11111111-1111-4111-8111-111111111111';
   const REVIEWER = '22222222-2222-4222-8222-222222222222';
@@ -619,7 +619,7 @@ describe('createPgDecor: contributions and review (#122)', () => {
     id: PIECE.id,
     kind: 'plant',
     name: 'Helecho',
-    material: 'ficus',
+    material: 'bonsai',
     colorable: false,
     default_color: null,
     author: PIECE.author,

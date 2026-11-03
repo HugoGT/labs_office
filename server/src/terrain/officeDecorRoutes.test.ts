@@ -25,7 +25,7 @@ const CATALOG = [
   { id: 'chair-wood', kind: 'chair', retired: false },
   { id: 'desk-wood', kind: 'desk', retired: false },
   { id: 'desk-painted', kind: 'desk', colorable: true, retired: false },
-  { id: 'plant-ficus', kind: 'plant', footprint: { w: 1, h: 1 }, retired: false },
+  { id: 'plant-bonsai', kind: 'plant', footprint: { w: 1, h: 1 }, retired: false },
 ];
 
 function user(overrides: Partial<DirectoryUser> & Pick<DirectoryUser, 'id' | 'uid'>): DirectoryUser {
@@ -99,6 +99,20 @@ describe('handleSetOfficeDecor (POST /admin/decor)', () => {
     expect(await store.loadDecor()).toEqual([{ index: FREE + 2 * W, piece: 'desk-wood', rotation: 90 }]);
   });
 
+  it('stands a piece on top of a desk table, removes it by its layer, answers 409 off a surface and 400 to an unknown layer (#121)', async () => {
+    const { deps, store, terrain } = await harness();
+    const bonsai = { piece: 'plant-bonsai', rotation: 0 };
+
+    expect(await handleSetOfficeDecor(BEARER_ADMIN, { edits: [{ index: FREE + 4, item: bonsai }] }, deps)).toEqual({ status: 409, body: { error: 'terrain-under-placement' } });
+    expect(await handleSetOfficeDecor(BEARER_ADMIN, { edits: [{ index: FREE, item: null, layer: 'roof' }] }, deps)).toMatchObject({ status: 400 });
+    expect(await handleSetOfficeDecor(BEARER_ADMIN, { edits: [{ index: FREE, item: { piece: 'desk-wood', rotation: 0 } }, { index: FREE, item: bonsai }] }, deps)).toEqual({ status: 200, body: { updated: 2 } });
+    expect(store.decorActorOf(FREE, 'top')).toBe(ADMIN.id);
+
+    expect((await handleSetOfficeDecor(BEARER_ADMIN, { edits: [{ index: FREE, item: null, layer: 'top' }] }, deps)).status).toBe(200);
+    expect(terrain.decor()).toEqual([{ index: FREE, piece: 'desk-wood', rotation: 0 }]);
+    expect(await store.loadDecor()).toEqual(terrain.decor());
+  });
+
   it('answers 400 to malformed batches and to pieces the catalog does not offer or turn, without writing anything', async () => {
     const { deps, store } = await harness();
     const tiles = W * BASE_LAYOUT.height;
@@ -109,7 +123,7 @@ describe('handleSetOfficeDecor (POST /admin/decor)', () => {
       { edits: [] },
       { edits: [{ index: tiles, item: CHAIR }] },
       { edits: [{ index: FREE, item: { piece: 'chair-throne', rotation: 0 } }] },
-      { edits: [{ index: FREE, item: { piece: 'plant-ficus', rotation: 90 } }] },
+      { edits: [{ index: FREE, item: { piece: 'plant-bonsai', rotation: 90 } }] },
       { edits: [{ index: FREE, item: { piece: 'desk-wood', rotation: 0, color: '#c83c3c' } }] },
       { edits: [{ index: FREE, item: { piece: 'desk-painted', rotation: 0, color: 'rojo' } }] },
       { edits: [{ index: FREE, item: CHAIR }, { index: FREE, item: null }] },

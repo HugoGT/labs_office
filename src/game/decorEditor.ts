@@ -13,10 +13,16 @@ import { deskOverChairLimit } from './deskDecorRules';
 import {
   decorFootprint,
   decorItemCovering,
+  decorItemKey,
+  decorKey,
+  decorLayerOf,
   decorTiles,
+  diffDecor,
+  fallenTopItems,
   fitsInsideDesk,
   insideMap,
   rectTiles,
+  topItemSupported,
   withDecor,
   type DecorEdit,
   type DecorItem,
@@ -35,7 +41,8 @@ import { tileAreaRect, type TileRect } from './terrainGrid';
  * the piece's info, so the map draws its footprint without a catalog of its
  * own. A brush `from` an anchor moves the item placed there instead: the
  * click takes it off its old tile and puts it on the new one in one batch,
- * and it never replaces another item.
+ * and it never replaces another item. The moved item is the one of the
+ * brush's layer on that anchor (#121: its piece says which).
  */
 export interface DecorBrush {
   readonly kind: 'piece';
@@ -104,7 +111,7 @@ export interface DecorEditCommand {
   /** Edits on their way to the room, applied in order over the live layer. Drawing only. */
   preview?: readonly DecorEdit[];
   /**
-   * The anchor of the placed item selected with no brush picked, or absent:
+   * The key (`decorItemKey`, #121: a floor item's is its anchor) of the placed item selected with no brush picked, or absent:
    * the map outlines it and draws its move and delete buttons (`decormove`,
    * `decordelete`).
    */
@@ -180,6 +187,10 @@ export function decorBrushTarget(index: number, brush: DecorBrush, width: number
  * sides of it on walkable ground and free of other items. The tiles a wall
  * touches do not count for it (its own posts touch them), and it never goes
  * in a desk.
+ *
+ * A top piece (#121) is the room's top rule (`findDecorConflict`): its whole
+ * footprint on the desk tables and room tables the click leaves, off every
+ * other top piece. The floor rules never see the top layer.
  */
 export function decorPlacementAllowed(
   items: readonly DecorItem[],
@@ -195,13 +206,70 @@ export function decorPlacementAllowed(
   if (door && (area !== null || !doorOnWall({ width: ground.width, height: ground.height, walls: ground.walls ?? [] }, { index, rotation: brush.rotation, piece: brush.piece }))) return false;
   if (area !== null && !fitsInsideDesk(target, area)) return false;
   if (!insideMap(target, ground.width, ground.height)) return false;
+  const layer = decorLayerOf(brush.piece);
+  const onLayer = items.filter((item) => decorLayerOf(item.piece) === layer);
   const ignored = brush.from ?? index;
-  const taken = new Set(items.filter((item) => item.index !== ignored).flatMap((item) => decorTiles(item, infoOf(item.piece), ground.width)));
-  if (brush.from !== undefined && index !== brush.from && items.some((item) => item.index === index)) return false;
+  const taken = new Set(onLayer.filter((item) => item.index !== ignored).flatMap((item) => decorTiles(item, infoOf(item.piece), ground.width)));
+  if (brush.from !== undefined && index !== brush.from && onLayer.some((item) => item.index === index)) return false;
   const placed: DecorEdit = { index, item: { piece: brush.piece, rotation: brush.rotation } };
-  const after = withDecor(items, brush.from === undefined || brush.from === index ? [placed] : [{ index: brush.from, item: null }, placed]);
-  if (desks.length > 0 && deskOverChairLimit(items, after, [index], infoOf, desks, ground.width) !== null) return false;
+  const leaving: DecorEdit = layer === 'top' ? { index: brush.from ?? index, item: null, layer } : { index: brush.from ?? index, item: null };
+  const after = withDecor(items, brush.from === undefined || brush.from === index ? [placed] : [leaving, placed]);
+  if (layer === 'top') return topItemSupported({ index, rotation: brush.rotation, piece: brush.piece }, after, infoOf, ground.width) && rectTiles(target, ground.width).every((tile) => !taken.has(tile));
+  const floorOf = (layerItems: readonly DecorItem[]): DecorItem[] => layerItems.filter((item) => decorLayerOf(item.piece) === 'floor');
+  if (desks.length > 0 && deskOverChairLimit(floorOf(items), floorOf(after), [index], infoOf, desks, ground.width) !== null) return false;
   // A door this brush replaces or moves closes its wall again (`wallTilesAfter`, the room's rule too).
   const wallTiles = door ? ground.wallTiles : wallTilesAfter(ground, after);
   return rectTiles(target, ground.width).every((tile) => ground.walkable[tile] === true && (door || wallTiles[tile] !== true) && !taken.has(tile));
+}
+
+/**
+ * The edits of a click (`click`) with the removals of the top pieces it
+ * leaves off their surface (#121, `fallenTopItems`): what the room would take
+ * off in the same save, sent with it so the preview shows them gone too.
+ */
+export function withFallenTopItems(
+  items: readonly DecorItem[],
+  click: readonly DecorEdit[],
+  infoOf: (piece: string) => DecorPieceInfo | null,
+  width: number,
+): DecorEdit[] {
+  const after = withDecor(items, click);
+  const placed = new Set(click.flatMap((edit) => (edit.item === null ? [] : [decorKey(edit.index, decorLayerOf(edit.item.piece))])));
+  const fallen = fallenTopItems(items, after, infoOf, width, placed);
+  return [...click, ...fallen.map((item): DecorEdit => ({ index: item.index, item: null, layer: 'top' }))];
+}
+
+/**
+ * The edits of a move of the item of `placement`'s layer anchored on `from`
+ * to `index`, turned and painted as `placement` says (#121). A desk table or
+ * room table takes along every top piece standing wholly on it, shifted with
+ * it, unless it turns on the way; what it leaves off any surface goes. One
+ * edit per (tile, layer) that changes (`diffDecor`), so a piece landing where
+ * another stood is never sent twice; the removals first.
+ */
+export function decorMoveEdits(
+  items: readonly DecorItem[],
+  infoOf: (piece: string) => DecorPieceInfo | null,
+  width: number,
+  from: number,
+  index: number,
+  placement: NonNullable<DecorEdit['item']>,
+): DecorEdit[] {
+  const layer = decorLayerOf(placement.piece);
+  const moved = items.find((item) => decorItemKey(item) === decorKey(from, layer));
+  if (moved === undefined) return [];
+  const leaving = (item: DecorItem): DecorEdit => (decorLayerOf(item.piece) === 'top' ? { index: item.index, item: null, layer: 'top' } : { index: item.index, item: null });
+  let after = withDecor(items, [leaving(moved), { index, item: placement }]);
+  if (layer === 'floor' && moved.rotation === placement.rotation) {
+    const surface = decorFootprint(moved, infoOf(moved.piece), width);
+    const carried = items.filter((item) => decorLayerOf(item.piece) === 'top' && fitsInsideDesk(decorFootprint(item, infoOf(item.piece), width), surface));
+    // Anchors are row major: one shift moves a whole footprint by the same tiles.
+    const shift = index - from;
+    after = withDecor(withDecor(after, carried.map(leaving)), carried.map(({ index: anchor, ...item }) => ({ index: anchor + shift, item })));
+  }
+  // A top piece moved off any surface is refused (`decorPlacementAllowed`), never dropped here.
+  after = withDecor(after, fallenTopItems(items, after, infoOf, width, new Set(layer === 'top' ? [decorKey(index, layer)] : [])).map(leaving));
+  // Removals first, the order a move's edits always had: off the old tile, onto the new one.
+  const edits = diffDecor(items, after);
+  return [...edits.filter((edit) => edit.item === null), ...edits.filter((edit) => edit.item !== null)];
 }

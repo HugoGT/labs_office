@@ -24,6 +24,10 @@
  * `decormove`, the ghost follows the pointer by the tile it was grabbed by,
  * and the release reports `decorpick` there, or `decorputdown` when it moved
  * nowhere or may not stand there. That release selects nothing.
+ *
+ * An item is named by its key (`decorItemKey`, #121) in every event but
+ * `decorpick` (a tile): a floor item's key is its anchor, a top piece's
+ * tells it apart from the desk table under it, on the same anchor.
  */
 
 import Phaser from 'phaser';
@@ -35,7 +39,7 @@ import { TILE } from './mapData';
 import { INITIAL_WHEEL_STATE, ROTATE_WHEEL_RULES, accumulateWheel, type WheelState } from './mapZoom';
 import type { OfficeBridge } from './officeBridge';
 import { PressHold } from './pressHold';
-import { decorFootprint, isRotatable, type DecorItem, type DecorPieceInfo, type DecorTileRect } from './officeDecor';
+import { decorFootprint, decorItemKey, decorKey, decorKeyIndex, decorLayerOf, isRotatable, type DecorItem, type DecorPieceInfo, type DecorTileRect } from './officeDecor';
 import { SELECTION_BUTTON_PX, SELECTION_DELETE_COLOR, SelectionButtons } from './selectionButtons';
 import { ContextOutlines } from './spaceOutline';
 
@@ -64,11 +68,16 @@ export interface DecorEditLayerDeps {
   ground(): DecorGround;
   /** Draws one item the way the decor layer would (the scene's drawing); the layer makes it a ghost. */
   drawPiece(item: DecorItem): Phaser.GameObjects.GameObject[];
+  /**
+   * How many world pixels an item is drawn off its footprint, negative up: a top
+   * piece lifted onto its surface (#121) is picked and outlined where it shows. 0 by default.
+   */
+  liftOf?(item: DecorItem): number;
   /** Clock for wheel accumulation; injectable so tests do not wait on real time. */
   now?: () => number;
 }
 
-/** An item under a press: how far its anchor's middle is from the pointer. */
+/** An item under a press, by its key (`decorItemKey`): how far its anchor's middle is from the pointer. */
 interface Grab {
   index: number;
   shiftX: number;
@@ -91,7 +100,7 @@ export class DecorEditLayer {
   private wheelState: WheelState = INITIAL_WHEEL_STATE;
   private selection: Phaser.GameObjects.Rectangle | null = null;
   private readonly buttons: SelectionButtons;
-  /** The anchor the outline and buttons stand for, or `null` while none are shown. */
+  /** The key of the item the outline and buttons stand for, or `null` while none are shown. */
   private shownSelection: number | null = null;
   /** Whether the press now down began with nothing picked, so its release may select. */
   private pressSelects = false;
@@ -117,8 +126,9 @@ export class DecorEditLayer {
     if (this.pressSelects) {
       const under = this.pressedItem(pointer);
       if (under !== null) {
-        const shiftX = ((under % this.deps.width) + 0.5) * TILE - pointer.worldX;
-        const shiftY = (Math.floor(under / this.deps.width) + 0.5) * TILE - pointer.worldY;
+        const anchor = decorKeyIndex(under);
+        const shiftX = ((anchor % this.deps.width) + 0.5) * TILE - pointer.worldX;
+        const shiftY = (Math.floor(anchor / this.deps.width) + 0.5) * TILE - pointer.worldY;
         this.hold.start({ index: under, shiftX, shiftY }, this.now());
       }
     }
@@ -242,11 +252,33 @@ export class DecorEditLayer {
     return pointer.camera == null || pointer.camera === this.scene.cameras.main;
   }
 
-  /** The anchor of the item under the pointer, inside the command's area, or `null`. */
+  /** How far the scene draws `item` off its footprint, in world pixels (`liftOf`). */
+  private liftOf(item: DecorItem): number {
+    return this.deps.liftOf?.(item) ?? 0;
+  }
+
+  /**
+   * The key of the item under the pointer, inside the command's area, or `null`. A lifted top piece
+   * (#121) is where its art shows, over the tile above its own: it is found there first, and the tile
+   * under it then belongs to the desk table or room table it stands on.
+   */
   private itemAt(pointer: Phaser.Input.Pointer): number | null {
+    const command = this.command;
+    if (command == null) return null;
+    const infoOf = (piece: string) => this.deps.infoOf(piece);
+    const items = this.deps.items();
+    const lifted = items.filter((item) => decorLayerOf(item.piece) === 'top' && this.liftOf(item) !== 0);
+    for (const item of lifted) {
+      const rect = decorFootprint(item, infoOf(item.piece), this.deps.width);
+      const x = pointer.worldX / TILE - rect.x;
+      const y = (pointer.worldY - this.liftOf(item)) / TILE - rect.y;
+      if (x < 0 || y < 0 || x >= rect.w || y >= rect.h) continue;
+      if (decorPickAt([item], infoOf, this.deps.width, item.index, command.area) !== null) return decorItemKey(item);
+    }
     const tile = this.tileAt(pointer);
-    if (tile === null || this.command == null) return null;
-    return decorPickAt(this.deps.items(), (piece) => this.deps.infoOf(piece), this.deps.width, tile, this.command.area)?.index ?? null;
+    if (tile === null) return null;
+    const item = decorPickAt(items.filter((candidate) => !lifted.includes(candidate)), infoOf, this.deps.width, tile, command.area);
+    return item === null ? null : decorItemKey(item);
   }
 
   /** Starts the drag of what a press grabbed: React turns it into a move, like the move button. */
@@ -262,11 +294,12 @@ export class DecorEditLayer {
   private resolveDrop(): void {
     const { dragging, drop, command } = this;
     const brush = command?.brush;
-    if (dragging === null || drop === null || command == null || brush == null || brush.from !== dragging.index) return;
+    if (dragging === null || drop === null || command == null || brush == null || brush.from === undefined) return;
+    if (decorKey(brush.from, decorLayerOf(brush.piece)) !== dragging.index) return;
     this.dragging = null;
     this.drop = null;
     const anchor = this.tileAtWorld(drop.worldX + dragging.shiftX, drop.worldY + dragging.shiftY);
-    const allowed = anchor !== null && anchor !== dragging.index &&
+    const allowed = anchor !== null && anchor !== brush.from &&
       decorPlacementAllowed(this.deps.items(), (piece) => this.deps.infoOf(piece), this.deps.ground(), command.area ?? null, anchor, brush, command.desks);
     if (allowed) this.bridge.emit('decorpick', { index: anchor });
     else this.bridge.emit('decorputdown', { index: dragging.index });
@@ -343,13 +376,13 @@ export class DecorEditLayer {
   }
 
   /** The selected item, if it is still on the layer and nothing is picked; `null` otherwise. */
-  private selectedFootprint(): { index: number; rect: DecorTileRect } | null {
+  private selectedFootprint(): { index: number; rect: DecorTileRect; liftY: number } | null {
     const command = this.command;
     const index = command?.selected ?? null;
     if (command == null || command.brush !== null || index === null) return null;
-    const item = this.deps.items().find((candidate) => candidate.index === index);
+    const item = this.deps.items().find((candidate) => decorItemKey(candidate) === index);
     if (item === undefined) return null;
-    return { index, rect: decorFootprint(item, this.deps.infoOf(item.piece), this.deps.width) };
+    return { index, rect: decorFootprint(item, this.deps.infoOf(item.piece), this.deps.width), liftY: this.liftOf(item) };
   }
 
   /** Outlines the selected item and puts its two buttons under it (over it at the map's bottom edge). */
@@ -361,14 +394,15 @@ export class DecorEditLayer {
       this.buttons.hide();
       return;
     }
-    const { rect } = selected;
+    const { rect, liftY } = selected;
     this.selection ??= this.scene.add.rectangle(0, 0, TILE, TILE).setFillStyle().setDepth(LAYOUT_GHOST_DEPTH + 1).setName(DECOR_SELECTION_NAME);
+    // A lifted top piece is outlined where its art shows (#121).
     this.selection
       .setSize(rect.w * TILE, rect.h * TILE)
       .setStrokeStyle(STROKE_WIDTH, DECOR_SELECTION_COLOR)
-      .setPosition((rect.x + rect.w / 2) * TILE, (rect.y + rect.h / 2) * TILE)
+      .setPosition((rect.x + rect.w / 2) * TILE, (rect.y + rect.h / 2) * TILE + liftY)
       .setVisible(true);
 
-    this.buttons.show(rect, this.deps.height);
+    this.buttons.show(rect, this.deps.height, liftY);
   }
 }

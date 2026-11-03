@@ -94,8 +94,8 @@ describe('office entry art readiness', () => {
     await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
     const art = (scene as unknown as { art: ArtPackLoader }).art;
     const manifest = art.manifest!;
-    const ficus = manifest.pieces.find((piece) => piece.id === 'plant-ficus')!;
-    const alias = { ...ficus, id: 'plant-ficus-entry', files: ficus.files.map((file) => ({ ...file, path: broken ? 'entry-missing.png' : file.path })) };
+    const ficus = manifest.pieces.find((piece) => piece.id === 'plant-bonsai')!;
+    const alias = { ...ficus, id: 'plant-bonsai-entry', files: ficus.files.map((file) => ({ ...file, path: broken ? 'entry-missing.png' : file.path })) };
     art.adoptManifest({ ...manifest, pieces: [...manifest.pieces, alias] });
     const index = 40 * BASE_LAYOUT.width + 30;
 
@@ -106,7 +106,7 @@ describe('office entry art readiness', () => {
     await vi.waitFor(() => expect(entry).toHaveBeenCalledWith({ state: 'ready' }), LOOP_WAIT);
     expect(entry).not.toHaveBeenCalledWith({ state: 'failed' });
     expect(art.status(alias.id)).toBe(broken ? 'failed' : 'ready');
-    const plant = scene.children.getByName(decorObjectName(index)) as Phaser.GameObjects.Image | null;
+    const plant = scene.children.getByName(decorObjectName(index, 'top')) as Phaser.GameObjects.Image | null;
     if (broken) expect(plant).toBeNull();
     else expect(plant!.texture.key).toBe(artSheetKey(alias.id, 'sheet'));
   });
@@ -126,7 +126,7 @@ describe('office entry art readiness', () => {
 
     await vi.waitFor(() => expect(entry).toHaveBeenCalledWith({ state: 'ready' }), LOOP_WAIT);
     expect(entry).not.toHaveBeenCalledWith({ state: 'failed' });
-    expect(scene.children.getByName(decorObjectName(index))).toBeNull();
+    expect(scene.children.getByName(decorObjectName(index, 'top'))).toBeNull();
   });
 
   it('never reveals after a denied join and removes its render listener when stopped', async () => {

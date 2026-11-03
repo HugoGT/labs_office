@@ -150,7 +150,6 @@ describe('materialCatalogFrom: walls', () => {
 describe('materialCatalogFrom: plants and room tables (#208)', () => {
   it('offers every plant and room table of the pack, never colorable, for the decor palette', () => {
     expect(catalog().plant.map((option) => [option.id, option.kind, option.name])).toEqual([
-      ['plant-ficus', 'plant', 'Ficus'],
       ['plant-bonsai', 'plant', 'Bonsái'],
     ]);
     expect(catalog().table.map((option) => [option.id, option.kind])).toEqual([
@@ -160,7 +159,7 @@ describe('materialCatalogFrom: plants and room tables (#208)', () => {
       ['table-round', 'table'],
     ]);
     expect([...catalog().plant, ...catalog().table].every((option) => !option.colorable && option.defaultColor === null)).toBe(true);
-    expect(catalog().plant[0]!.sheetUrl).toBe('assets/pack/plant/ficus.png');
+    expect(catalog().plant[0]!.sheetUrl).toBe('assets/pack/plant/bonsai.png');
   });
 
   it('a plant previews its one frame, a room table the part of its horizontal frame its footprint and lifted top cover', () => {

@@ -8,7 +8,7 @@ import {
   withWalls,
   type LayoutMaterial,
 } from '../../../src/game/officeLayout.ts';
-import { MAX_DECOR_EDITS, type DecorItem, type DecorPieceInfo } from '../../../src/game/officeDecor.ts';
+import { MAX_DECOR_EDITS, decorKey, type DecorItem, type DecorPieceInfo } from '../../../src/game/officeDecor.ts';
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_TERRAIN as BASE_TERRAIN, LEGACY_SEATS as BASE_MAP_SEATS } from '../../../src/test/legacyOffice.ts';
 import {
   InvalidTerrainEditError,
@@ -353,6 +353,40 @@ describe('parseDecorBatch', () => {
     ]);
   });
 
+  it('takes a floor item and a top item on one tile, and a removal naming the top layer (#121)', () => {
+    expect(
+      parseDecorBatch(
+        {
+          edits: [
+            { index: 3, item: { piece: 'desk-wood', rotation: 0 } },
+            { index: 3, item: { piece: 'plant-bonsai', rotation: 0 } },
+            { index: 4, item: null, layer: 'top' },
+            { index: 4, item: null },
+            { index: 5, item: null, layer: 'floor' },
+            { index: 6, item: { piece: 'plant-bonsai', rotation: 0 }, layer: 'top' },
+          ],
+        },
+        TILES,
+      ),
+    ).toEqual([
+      { index: 3, item: { piece: 'desk-wood', rotation: 0 } },
+      { index: 3, item: { piece: 'plant-bonsai', rotation: 0 } },
+      { index: 4, item: null, layer: 'top' },
+      { index: 4, item: null },
+      { index: 5, item: null },
+      { index: 6, item: { piece: 'plant-bonsai', rotation: 0 } },
+    ]);
+  });
+
+  it.each([
+    ['one tile of the top layer twice', { edits: [{ index: 3, item: { piece: 'plant-bonsai', rotation: 0 } }, { index: 3, item: null, layer: 'top' }] }],
+    ['an unknown layer', { edits: [{ index: 3, item: null, layer: 'roof' }] }],
+    ['a top piece on the floor layer', { edits: [{ index: 3, item: { piece: 'plant-bonsai', rotation: 0 }, layer: 'floor' }] }],
+    ['a floor piece on the top layer', { edits: [{ index: 3, item: { piece: 'desk-wood', rotation: 0 }, layer: 'top' }] }],
+  ])('refuses %s (#121)', (_name, body) => {
+    expect(() => parseDecorBatch(body, TILES)).toThrow(InvalidTerrainEditError);
+  });
+
   it('caps a batch at MAX_DECOR_EDITS tiles', () => {
     const edits = (count: number) => Array.from({ length: count }, (_, index) => ({ index, item: null }));
     expect(parseDecorBatch({ edits: edits(MAX_DECOR_EDITS) }, TILES)).toHaveLength(MAX_DECOR_EDITS);
@@ -461,5 +495,50 @@ describe('findDecorConflict', () => {
     expect(conflict([table, { index: free + W, piece: 'chair-wood', rotation: 0 }], [free + W])).toBeNull();
     // Two stored items that overlap already (kept at load) never veto an edit elsewhere.
     expect(conflict([table, { index: free + 1, piece: 'chair-wood', rotation: 0 }, { index: free + 5 * W, piece: 'chair-wood', rotation: 0 }], [free + 5 * W])).toBeNull();
+  });
+
+  describe('the top layer (#121)', () => {
+    const TOP_INFO: Record<string, DecorPieceInfo> = {
+      ...INFO,
+      'plant-bonsai': { kind: 'plant', footprint: { w: 1, h: 1 } },
+      'plant-wide': { kind: 'plant', footprint: { w: 2, h: 1 } },
+    };
+    const topInfo = (piece: string) => TOP_INFO[piece] ?? null;
+    const check = (after: DecorItem[], placed: number[], snapshot = BASE_TERRAIN) => findDecorConflict(after, new Set(placed), topInfo, snapshot, STATIC);
+    // The desk table on `free` covers (66..68, 22).
+    const desk: DecorItem = { index: free, piece: 'desk-wood', rotation: 0 };
+    const plant = (index: number, piece = 'plant-bonsai'): DecorItem => ({ index, piece, rotation: 0 });
+    const top = (index: number) => decorKey(index, 'top');
+
+    it('stands a top item on any tile of a desk table or a room table, its anchor tile included', () => {
+      expect(check([desk, plant(free)], [top(free)])).toBeNull();
+      expect(check([desk, plant(free - 1)], [top(free - 1)])).toBeNull();
+      const meeting: DecorItem = { index: at(70, 30), piece: 'table-meeting', rotation: 0 };
+      expect(check([meeting, plant(at(67, 28))], [top(at(67, 28))])).toBeNull();
+    });
+
+    it('refuses a top item off a surface or hanging over its edge, on a chair, or over another top item', () => {
+      expect(check([plant(free)], [top(free)])).toBe('placement');
+      expect(check([desk, plant(free + 2)], [top(free + 2)])).toBe('placement');
+      // 2x1 centered on (69, 22) covers (68..69, 22): one tile off the desk.
+      expect(check([desk, plant(free + 2, 'plant-wide')], [top(free + 2)])).toBe('placement');
+      expect(check([desk, plant(free + 1, 'plant-wide')], [top(free + 1)])).toBeNull();
+      const chair: DecorItem = { index: at(67, 26), piece: 'chair-wood', rotation: 0 };
+      expect(check([chair, plant(chair.index)], [top(chair.index)])).toBe('placement');
+      expect(check([desk, plant(free, 'plant-wide'), plant(free - 1)], [top(free - 1)])).toBe('placement');
+      expect(check([desk, plant(free - 1, 'plant-wide'), plant(free + 1)], [top(free + 1)])).toBeNull();
+    });
+
+    it('keeps the floor rules blind to the top layer, and refuses a floor item over another floor item as before', () => {
+      // A chair placed next to the desk is not refused for a plant on the desk, nor the desk for the plant on it.
+      expect(check([desk, plant(free + 1), { index: free + W, piece: 'chair-wood', rotation: 0 }], [free + W])).toBeNull();
+      expect(check([desk, plant(free + 1)], [free])).toBeNull();
+      expect(check([desk, plant(free + 1), { index: free + 1, piece: 'chair-wood', rotation: 0 }], [free + 1])).toBe('placement');
+    });
+
+    it('judges a top item against the surface the batch leaves: one on a desk table removed with it is refused', () => {
+      expect(check([plant(free)], [top(free)])).toBe('placement');
+      expect(check([desk, { index: free + 3, piece: 'desk-wood', rotation: 0 }, plant(free + 2, 'plant-wide')], [top(free + 2)])).toBeNull();
+    });
   });
 });

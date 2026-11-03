@@ -8,16 +8,18 @@ import { describe, expect, it } from 'vitest';
 import {
   decorBrushTarget,
   decorColorKey,
+  decorMoveEdits,
   decorOutlines,
   decorPickAt,
   decorPlacementAllowed,
   decorSizeLabel,
   fitsDeskArea,
   sameDecorBrush,
+  withFallenTopItems,
   type DecorBrush,
   type DecorGround,
 } from './decorEditor';
-import type { DecorItem, DecorPieceInfo } from './officeDecor';
+import { decorKey, type DecorItem, type DecorPieceInfo } from './officeDecor';
 import { wallFootprintRects } from './officeLayout';
 import { coveredTiles } from './pieceCollisions';
 
@@ -296,8 +298,8 @@ describe('decorPlacementAllowed: doors (#223, #233)', () => {
     const wetEnd = [...wet.walkable];
     wetEnd[at(4, 3)] = false;
     expect(decorPlacementAllowed(none, infoOf, { ...wet, walkable: wetEnd }, null, at(2, 4), doubleBrush(0))).toBe(false);
-    expect(decorPlacementAllowed([{ index: at(3, 3), piece: 'plant-ficus', rotation: 0 }], infoOf, walled(), null, at(3, 4), doorBrush(0))).toBe(false);
-    expect(decorPlacementAllowed([{ index: at(4, 4), piece: 'plant-ficus', rotation: 0 }], infoOf, walled(), null, at(3, 4), doorBrush(0))).toBe(false);
+    expect(decorPlacementAllowed([{ index: at(3, 3), piece: 'chair-wood', rotation: 0 }], infoOf, walled(), null, at(3, 4), doorBrush(0))).toBe(false);
+    expect(decorPlacementAllowed([{ index: at(4, 4), piece: 'chair-wood', rotation: 0 }], infoOf, walled(), null, at(3, 4), doorBrush(0))).toBe(false);
     expect(decorPlacementAllowed(none, infoOf, walled(), { x: 2, y: 3, w: 3, h: 3 }, at(3, 4), doorBrush(0))).toBe(false);
   });
 
@@ -349,5 +351,105 @@ describe('decorOutlines (#216)', () => {
 
   it('is only the own desk for whoever decorates one, not the others nor the rooms', () => {
     expect(decorOutlines(desks[1]!, desks, rooms)).toEqual([{ x0: 10, y0: 3, x1: 13, y1: 6 }]);
+  });
+});
+
+describe('the top layer (#121)', () => {
+  // The desk table on (4, 4) covers (3..5, 4); the 3x3 room table on (7, 5) covers (6..8, 4..6).
+  const desk: DecorItem = { index: at(4, 4), piece: 'desk-wood', rotation: 0 };
+  const room: DecorItem = { index: at(7, 5), piece: 'table-cafe', rotation: 0 };
+  const plant = (index: number, piece = 'plant-bonsai'): DecorItem => ({ index, piece, rotation: 0 });
+  const topInfo = (piece: string): DecorPieceInfo | null =>
+    piece === 'table-cafe' ? { kind: 'table', footprint: { w: 3, h: 3 } } : piece === 'plant-wide' ? { kind: 'plant', footprint: { w: 2, h: 1 } } : infoOf(piece);
+  const plantBrush = (from?: number): DecorBrush => ({ kind: 'piece', piece: 'plant-bonsai', info: PLANT, rotation: 0, ...(from === undefined ? {} : { from }) });
+  const allowed = (items: readonly DecorItem[], index: number, brush: DecorBrush, area: { x: number; y: number; w: number; h: number } | null = null) =>
+    decorPlacementAllowed(items, topInfo, ground(), area, index, brush);
+
+  it('takes a top piece on any tile of a desk table or room table, the anchor of the desk table included', () => {
+    expect(allowed([desk], at(4, 4), plantBrush())).toBe(true);
+    expect(allowed([desk], at(3, 4), plantBrush())).toBe(true);
+    expect(allowed([room], at(8, 6), plantBrush())).toBe(true);
+    // Its desk keeps a desk-scoped brush inside, as on the floor.
+    expect(allowed([desk], at(5, 4), plantBrush(), { x: 3, y: 3, w: 3, h: 3 })).toBe(true);
+    expect(allowed([room], at(6, 6), plantBrush(), { x: 3, y: 3, w: 3, h: 3 })).toBe(false);
+  });
+
+  it('refuses a top piece on the floor, on a chair, hanging off a surface or over another top piece; replacing the one anchored there is fine', () => {
+    expect(allowed([], at(4, 4), plantBrush())).toBe(false);
+    expect(allowed([{ index: at(2, 2), piece: 'chair-wood', rotation: 0 }], at(2, 2), plantBrush())).toBe(false);
+    expect(allowed([desk], at(6, 4), plantBrush())).toBe(false);
+    const wide: DecorBrush = { kind: 'piece', piece: 'plant-wide', info: { kind: 'plant', footprint: { w: 2, h: 1 } }, rotation: 0 };
+    expect(allowed([desk], at(4, 4), wide)).toBe(true);
+    expect(allowed([desk], at(3, 4), wide)).toBe(false);
+    expect(allowed([desk, plant(at(3, 4))], at(4, 4), wide)).toBe(false);
+    expect(allowed([desk, plant(at(4, 4))], at(4, 4), plantBrush())).toBe(true);
+  });
+
+  it('keeps the floor blind to the top layer: a desk table replaced under a plant, a chair beside it', () => {
+    const items = [desk, plant(at(4, 4)), plant(at(5, 4))];
+    expect(allowed(items, at(4, 4), deskBrush(180))).toBe(true);
+    expect(allowed(items, at(4, 5), chairBrush())).toBe(true);
+    expect(allowed(items, at(5, 4), chairBrush())).toBe(false);
+  });
+
+  it('moves a top piece across its surface, never onto another top anchor nor off the surface', () => {
+    const items = [desk, plant(at(3, 4)), plant(at(5, 4))];
+    expect(allowed(items, at(4, 4), plantBrush(at(3, 4)))).toBe(true);
+    expect(allowed(items, at(5, 4), plantBrush(at(3, 4)))).toBe(false);
+    expect(allowed(items, at(4, 6), plantBrush(at(3, 4)))).toBe(false);
+    // A desk table moved off the anchor of a plant is not blocked by that plant.
+    expect(allowed([desk, plant(at(4, 4))], at(4, 6), { ...deskBrush(), from: at(4, 4) })).toBe(true);
+  });
+
+  it('takes along what a click leaves off its surface: the removal of a desk table removes what stands on it, and nothing else', () => {
+    const stray = plant(at(1, 1));
+    const items = [desk, plant(at(3, 4)), room, plant(at(7, 5)), stray];
+    expect(withFallenTopItems(items, [{ index: desk.index, item: null }], topInfo, WIDTH)).toEqual([
+      { index: desk.index, item: null },
+      { index: at(3, 4), item: null, layer: 'top' },
+    ]);
+    expect(withFallenTopItems(items, [{ index: desk.index, item: { piece: 'desk-glass', rotation: 180 } }], topInfo, WIDTH)).toEqual([
+      { index: desk.index, item: { piece: 'desk-glass', rotation: 180 } },
+    ]);
+  });
+
+  it('moves what stands on a desk table along with it, in one set of edits, and lets fall what it cannot carry', () => {
+    const onDesk = plant(at(3, 4));
+    const onAnchor = plant(at(4, 4));
+    const items = [onDesk, desk, onAnchor];
+    // One row down: every piece shifts with it; the anchor's own plant keeps its anchor in a new place.
+    expect(decorMoveEdits(items, topInfo, WIDTH, desk.index, at(4, 5), { piece: 'desk-wood', rotation: 0 })).toEqual([
+      { index: at(3, 4), item: null, layer: 'top' },
+      { index: desk.index, item: null },
+      { index: at(4, 4), item: null, layer: 'top' },
+      { index: at(3, 5), item: { piece: 'plant-bonsai', rotation: 0 } },
+      { index: at(4, 5), item: { piece: 'desk-wood', rotation: 0 } },
+      { index: at(4, 5), item: { piece: 'plant-bonsai', rotation: 0 } },
+    ]);
+    // One tile right: a plant lands where the same plant stood, so that tile has nothing to send.
+    expect(decorMoveEdits(items, topInfo, WIDTH, desk.index, at(5, 4), { piece: 'desk-wood', rotation: 0 })).toEqual([
+      { index: at(3, 4), item: null, layer: 'top' },
+      { index: desk.index, item: null },
+      { index: at(5, 4), item: { piece: 'desk-wood', rotation: 0 } },
+      { index: at(5, 4), item: { piece: 'plant-bonsai', rotation: 0 } },
+    ]);
+    // Turned on the way, the desk table leaves what it held behind, off any surface: it goes.
+    expect(decorMoveEdits(items, topInfo, WIDTH, desk.index, at(4, 6), { piece: 'desk-wood', rotation: 90 })).toEqual([
+      { index: at(3, 4), item: null, layer: 'top' },
+      { index: desk.index, item: null },
+      { index: at(4, 4), item: null, layer: 'top' },
+      { index: at(4, 6), item: { piece: 'desk-wood', rotation: 90 } },
+    ]);
+    // A top piece moves alone, on its own layer.
+    expect(decorMoveEdits(items, topInfo, WIDTH, at(3, 4), at(5, 4), { piece: 'plant-bonsai', rotation: 0 })).toEqual([
+      { index: at(3, 4), item: null, layer: 'top' },
+      { index: at(5, 4), item: { piece: 'plant-bonsai', rotation: 0 } },
+    ]);
+    expect(decorKey(at(3, 4), 'top')).toBeLessThan(0);
+  });
+
+  it('picks the top piece over the desk table under it', () => {
+    expect(decorPickAt([desk, plant(at(4, 4))], topInfo, WIDTH, at(4, 4), null)).toEqual(plant(at(4, 4)));
+    expect(decorPickAt([desk, plant(at(4, 4))], topInfo, WIDTH, at(3, 4), null)).toEqual(desk);
   });
 });

@@ -24,13 +24,13 @@ describe('DecorPalette', () => {
   it('offers every decor piece of the catalog by its full Spanish name, grouped by kind, none pressed, and no eraser', () => {
     render(<DecorPalette value={null} catalog={catalog} onPick={() => {}} preview={noPreview()} />);
 
-    expect(screen.getAllByRole('group').map((group) => group.getAttribute('aria-label'))).toEqual(['Sillas', 'Mesas de escritorio', 'Muebles de sala', 'Plantas', 'Árboles', 'Puertas']);
+    expect(screen.getAllByRole('group').map((group) => group.getAttribute('aria-label'))).toEqual(['Mi espacio', 'Escritorios', 'Sillas', 'Sala', 'Árboles', 'Puertas']);
     expect(names('Puertas')).toEqual(['Puerta simple', 'Puerta doble']);
     // The chairs and desk tables that take a color come first, each kind otherwise in catalog order.
     expect(names('Sillas')).toEqual(['Silla gamer', 'Sillón tapizado', 'Puff', 'Silla de madera', 'Silla de metal', 'Silla de cuero', 'Silla de oficina', 'Silla giratoria', 'Silla de comedor']);
-    expect(names('Mesas de escritorio')).toEqual(['Escritorio pintado', 'Escritorio gamer', 'Escritorio de vidrio', 'Escritorio de metal', 'Escritorio de madera', 'Escritorio curvo']);
+    expect(names('Escritorios')).toEqual(['Escritorio pintado', 'Escritorio gamer', 'Escritorio de vidrio', 'Escritorio de metal', 'Escritorio de madera', 'Escritorio curvo']);
     // A room's furniture together: its tables, then its sofas.
-    expect(names('Muebles de sala')).toEqual([
+    expect(names('Sala')).toEqual([
       'Mesa de reuniones',
       'Mesa de cafetería',
       'Mesa ovalada',
@@ -40,14 +40,14 @@ describe('DecorPalette', () => {
       'Sofá tapizado (2 plazas)',
       'Sofá tapizado (3 plazas)',
     ]);
-    expect(names('Plantas')).toEqual(['Ficus', 'Bonsái']);
-    expect(names('Árboles')).toEqual(['Árbol', 'Árbol grande']);
+    expect(names('Mi espacio')).toEqual(['Bonsái']);
+    expect(names('Árboles')).toEqual(['Árbol', 'Árbol grande', 'Ficus']);
     expect(screen.queryByRole('button', { name: 'Quitar' })).not.toBeInTheDocument();
     expect(screen.getAllByRole('button').filter((button) => button.getAttribute('aria-pressed') === 'true')).toEqual([]);
   });
 
   it('leaves a retired upload out, while an active upload is offered (#264)', () => {
-    const ficus = catalog.plant.find((option) => option.id === 'plant-ficus')!;
+    const ficus = catalog.plant.find((option) => option.id === 'plant-bonsai')!;
     const plant = [
       ...catalog.plant,
       { ...ficus, id: 'plant-upload-0123456789abcdef', name: 'Monstera' },
@@ -55,13 +55,13 @@ describe('DecorPalette', () => {
     ];
     render(<DecorPalette value={null} catalog={{ ...catalog, plant }} onPick={() => {}} preview={noPreview()} />);
 
-    expect(names('Plantas')).toEqual(['Ficus', 'Bonsái', 'Monstera']);
+    expect(names('Mi espacio')).toEqual(['Bonsái', 'Monstera']);
   });
 
   it('writes on a tile only the size of a room table or a sofa, the full name kept for its title and accessible name', () => {
     render(<DecorPalette value={null} catalog={catalog} onPick={() => {}} preview={noPreview()} />);
 
-    for (const group of ['Sillas', 'Mesas de escritorio', 'Plantas', 'Puertas']) {
+    for (const group of ['Sillas', 'Escritorios', 'Mi espacio', 'Puertas']) {
       for (const button of within(screen.getByRole('group', { name: group })).getAllByRole('button')) expect(button.textContent).toBe('');
     }
     expect(screen.getByRole('button', { name: 'Silla de madera' })).toHaveAttribute('title', 'Silla de madera');
@@ -72,7 +72,7 @@ describe('DecorPalette', () => {
   it('shows the size of each room table and sofa on its tile, the horizontal one, and in its title', () => {
     render(<DecorPalette value={null} catalog={catalog} onPick={() => {}} preview={noPreview()} />);
 
-    const room = within(screen.getByRole('group', { name: 'Muebles de sala' })).getAllByRole('button');
+    const room = within(screen.getByRole('group', { name: 'Sala' })).getAllByRole('button');
     expect(room.map((button) => button.textContent)).toEqual(['7x5', '5x3', '2x1', '1x1', '2x1', '3x1', '2x1', '3x1']);
     expect(room.map((button) => button.getAttribute('title'))).toEqual([
       'Mesa de reuniones (7x5)',
@@ -207,10 +207,10 @@ describe('DecorPalette', () => {
 
   it('offers only what fits a desk when asked: desk tables, never a room table (#116)', () => {
     render(<DecorPalette value={null} catalog={catalog} offers={fitsDeskArea} onPick={() => {}} preview={noPreview()} />);
-    expect(screen.getByRole('group', { name: 'Mesas de escritorio' })).toBeInTheDocument();
-    expect(screen.queryByRole('group', { name: 'Muebles de sala' })).not.toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Escritorios' })).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Sala' })).not.toBeInTheDocument();
     expect(screen.getByRole('group', { name: 'Sillas' })).toBeInTheDocument();
-    expect(screen.getByRole('group', { name: 'Plantas' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Mi espacio' })).toBeInTheDocument();
     // Doors open walls, which only an admin edits (#223); sofas furnish the office, not a desk.
     expect(screen.queryByRole('group', { name: 'Puertas' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^Sofá/ })).not.toBeInTheDocument();

@@ -986,8 +986,8 @@ describe('connectOfficeRoom: seats (art migration, step 6)', () => {
     await waitFor(() => seen.length > 0);
     expect(seen[0]!.get('tree-oak')).toEqual([]);
 
-    await server.collisions.setRects({ pieceId: 'plant-ficus', rects: [{ x: -4, y: -8, w: 8, h: 8 }], actorId: null }, () => []);
-    await waitFor(() => seen.at(-1)?.has('plant-ficus') === true);
+    await server.collisions.setRects({ pieceId: 'plant-bonsai', rects: [{ x: -4, y: -8, w: 8, h: 8 }], actorId: null }, () => []);
+    await waitFor(() => seen.at(-1)?.has('plant-bonsai') === true);
     expect(seen.at(-1)!.get('tree-oak')).toEqual([]);
   });
 });

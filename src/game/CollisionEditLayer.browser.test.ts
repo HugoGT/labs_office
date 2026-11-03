@@ -49,7 +49,7 @@ const INSTANCES: CollisionInstance[] = [
     { piece: 'table-meeting', kind: 'table', tx: 2, ty: 6, w: 3, h: 2, collision: 'solid', facing: null },
   ]),
   // A decor plant on tile (11, 11), the middle of the old desk area.
-  ...officeDecorInstances([{ index: 11 * 100 + 11, piece: 'plant-ficus', rotation: 0 }], () => ({ kind: 'plant', footprint: { w: 1, h: 1 } }), 100),
+  ...officeDecorInstances([{ index: 11 * 100 + 11, piece: 'plant-bonsai', rotation: 0 }], () => ({ kind: 'plant', footprint: { w: 1, h: 1 } }), 100),
 ];
 
 function boot(table: CollisionTable = new Map()) {

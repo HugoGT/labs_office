@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { describeAdminError } from '../dashboard/adminErrors';
 import { AdminError } from '../dashboard/adminPort';
-import { decorBrushTarget, decorColorKey, decorPickAt, type DecorBrush } from '../game/decorEditor';
+import { decorBrushTarget, decorColorKey, decorMoveEdits, decorPickAt, withFallenTopItems, type DecorBrush } from '../game/decorEditor';
 import { deskOverChairLimit, displacedDeskTables } from '../game/deskDecorRules';
 import { isEditableElementFocused } from '../game/inputFocusGuard';
 import { MAP_W } from '../game/mapData';
@@ -9,8 +9,12 @@ import type { OfficeBridge } from '../game/officeBridge';
 import type { TileRect } from '../game/terrainGrid';
 import {
   MAX_DECOR_EDITS,
+  decorEditKey,
   decorFootprint,
   decorInfoFromPieceId,
+  decorItemKey,
+  decorKey,
+  decorLayerOf,
   decorRotationFor,
   defaultDecorRotation,
   fitsInsideDesk,
@@ -44,6 +48,12 @@ import { usePersistedColors } from './usePersistedColors';
  * the new one, so its own place never blocks it). Trash, Supr or Backspace
  * deletes it. Escape cancels a move (back to the item selected), then
  * deselects, then leaves.
+ *
+ * A tile holds a floor item and a top item (#121): selection, move and
+ * delete name an item by its key (`decorItemKey`, a floor item's is its
+ * anchor), a click takes along the top pieces it leaves off their surface
+ * (`withFallenTopItems`), and a desk table or room table moved carries what
+ * stands on it (`decorMoveEdits`).
  *
  * Edits go to the server one request at a time, in click order, each request
  * carrying every click queued meanwhile (the server checks a batch as a
@@ -113,7 +123,7 @@ export interface DecorEditor {
   items: readonly DecorItem[];
   /** The palette entry picked (or the item being moved, `brush.from`), or `null`. */
   brush: DecorBrush | null;
-  /** The anchor of the placed item selected with nothing picked, or `null`. */
+  /** The key (`decorItemKey`) of the placed item selected with nothing picked, or `null`. */
   selected: number | null;
   /** The way the next rotatable piece turns; R or the wheel on the map turns it. */
   rotation: DecorRotation;
@@ -137,8 +147,9 @@ export interface DecorEditor {
   unpick(): void;
   /**
    * The wall eraser on a post, with the tile under the pointer: takes off the
-   * chair, table, desk or plant on that tile (the smallest where they stack,
-   * inside the area), else the doors standing on the post (#232), and says
+   * chair, table, desk or plant on that tile (the top piece first, #121, then
+   * the smallest where they stack, inside the area), else the doors standing
+   * on the post (#232), and says
    * whether any stands there, live or still on its way out. What it finds
    * goes first and the post stays, like a door's, which is never erased
    * under it so the wall stays closed.
@@ -154,7 +165,7 @@ interface PendingEdit extends DecorEdit {
 
 /**
  * The unsent edits that leave together with the first one: whole clicks,
- * distinct tiles, at most `MAX_DECOR_EDITS`.
+ * distinct (tile, layer) keys, at most `MAX_DECOR_EDITS`.
  */
 function nextBatch(edits: readonly PendingEdit[]): PendingEdit[] {
   const batch: PendingEdit[] = [];
@@ -165,9 +176,9 @@ function nextBatch(edits: readonly PendingEdit[]): PendingEdit[] {
     while (end < unsent.length && unsent[end]!.group === unsent[start]!.group) end += 1;
     const click = unsent.slice(start, end);
     // The server refuses one tile twice in a request; the next request carries the rest.
-    if (click.some((edit) => tiles.has(edit.index)) || batch.length + click.length > MAX_DECOR_EDITS) break;
+    if (click.some((edit) => tiles.has(decorEditKey(edit))) || batch.length + click.length > MAX_DECOR_EDITS) break;
     for (const edit of click) {
-      tiles.add(edit.index);
+      tiles.add(decorEditKey(edit));
       batch.push(edit);
     }
     start = end;
@@ -248,7 +259,7 @@ export function useDecorEditor({
     try {
       for (let batch = nextBatch(editsRef.current); batch.length > 0; batch = nextBatch(editsRef.current)) {
         try {
-          await decor.setDecor(batch.map(({ index, item }) => ({ index, item })));
+          await decor.setDecor(batch.map(({ sent: _sent, group: _group, ...edit }) => edit));
           setEdits(editsRef.current.map((candidate) => (batch.includes(candidate) ? { ...candidate, sent: true } : candidate)));
         } catch (cause) {
           refuse(cause);
@@ -278,21 +289,30 @@ export function useDecorEditor({
    * Queues one click placing on `placed` after the desk rules: the desk
    * tables it displaces leave in the same click (so the preview shows the
    * table gone), and a click that would put a fourth chair on a desk is
-   * refused here. Returns whether it queued.
+   * refused here. The desk rules count the floor alone, and a top piece
+   * (`placed` null) takes no part in them. What the click leaves off its
+   * surface leaves with it (#121). Returns whether it queued.
    */
-  function queuePlacement(after: readonly DecorItem[], click: DecorEdit[], placed: number): boolean {
-    if (desks.length > 0) {
+  function queuePlacement(after: readonly DecorItem[], click: DecorEdit[], placed: number | null): boolean {
+    if (desks.length > 0 && placed !== null) {
+      const floor = (layer: readonly DecorItem[]): DecorItem[] => layer.filter((item) => decorLayerOf(item.piece) === 'floor');
       const placedLayer = withDecor(after, click);
-      const removals = displacedDeskTables(placedLayer, [placed], infoOf, desks, MAP_W).map((index): DecorEdit => ({ index, item: null }));
-      if (deskOverChairLimit(after, withDecor(placedLayer, removals), [placed], infoOf, desks, MAP_W) !== null) {
+      const removals = displacedDeskTables(floor(placedLayer), [placed], infoOf, desks, MAP_W).map((index): DecorEdit => ({ index, item: null }));
+      if (deskOverChairLimit(floor(after), floor(withDecor(placedLayer, removals)), [placed], infoOf, desks, MAP_W) !== null) {
         setError(DECOR_CHAIR_LIMIT_MESSAGE);
         return false;
       }
       click.push(...removals);
     }
-    queue(...click);
+    queue(...withFallenTopItems(after, click, infoOf, MAP_W));
     return true;
   }
+
+  /** The floor anchor a placement on `index` takes part in the desk rules with, or `null` for a top piece. */
+  const deskRuled = (index: number, piece: string): number | null => (decorLayerOf(piece) === 'floor' ? index : null);
+  /** The item of `layer` anchored on `index` in `items`. */
+  const anchoredOn = (items: readonly DecorItem[], index: number, piece: string): DecorItem | undefined =>
+    items.find((item) => decorItemKey(item) === decorKey(index, decorLayerOf(piece)));
 
   function placeAt(index: number): void {
     if (blockedRef.current || brush === null) return;
@@ -307,10 +327,10 @@ export function useDecorEditor({
       moveTo(brush.from, index, after);
       return;
     }
-    const anchored = after.find((item) => item.index === index);
+    const anchored = anchoredOn(after, index, brush.piece);
     if (anchored !== undefined && anchored.piece === brush.piece && anchored.rotation === brush.rotation && anchored.color === brush.color) return;
     // A refused click keeps the brush, like one that placed nothing.
-    if (!queuePlacement(after, [{ index, item: placementOf(brush) }], index)) return;
+    if (!queuePlacement(after, [{ index, item: placementOf(brush) }], deskRuled(index, brush.piece))) return;
     // A click that placed nothing keeps the brush; one that did ends it unless "Múltiple" is on.
     // A refusal arriving later only drops that edit: the brush is never touched by it.
     if (!multiple) setBrush(null);
@@ -320,44 +340,45 @@ export function useDecorEditor({
    * The click of a move: one move, whatever "Múltiple" says. Onto its own
    * anchor it only turns (or does nothing); elsewhere it leaves its old
    * anchor and takes the new one in one request, so the room judges the
-   * move as a whole and refuses it whole. It never replaces another item.
+   * move as a whole and refuses it whole. It never replaces another item of
+   * its layer. A desk table or room table takes what stands on it along.
    */
   function moveTo(from: number, index: number, after: readonly DecorItem[]): void {
     if (brush === null) return;
     setBrush(null);
-    const moved = after.find((item) => item.index === from);
+    const moved = anchoredOn(after, from, brush.piece);
     if (moved === undefined) return;
     if (index === from) {
-      if (moved.rotation !== brush.rotation || moved.color !== brush.color) queuePlacement(after, [{ index, item: placementOf(brush) }], index);
+      if (moved.rotation !== brush.rotation || moved.color !== brush.color) queuePlacement(after, [{ index, item: placementOf(brush) }], deskRuled(index, brush.piece));
       return;
     }
-    if (after.some((item) => item.index === index)) {
+    if (anchoredOn(after, index, brush.piece) !== undefined) {
       setError(DECOR_UNDER_PLACEMENT_MESSAGE);
       return;
     }
-    queuePlacement(after, [{ index: from, item: null }, { index, item: placementOf(brush) }], index);
+    queuePlacement(after, decorMoveEdits(after, infoOf, MAP_W, from, index, placementOf(brush)), deskRuled(index, brush.piece));
   }
 
-  /** Selects the item anchored on `index` if this editor may act on it (inside its area), else nothing. */
-  function select(index: number | null): void {
+  /** Selects the item of `key` (`decorItemKey`) if this editor may act on it (inside its area), else nothing. */
+  function select(key: number | null): void {
     if (brush !== null) return;
-    if (index === null) {
+    if (key === null) {
       setSelected(null);
       return;
     }
-    const item = layerAfter().find((candidate) => candidate.index === index);
+    const item = layerAfter().find((candidate) => decorItemKey(candidate) === key);
     const reachable = item !== undefined && (area === null || fitsInsideDesk(decorFootprint(item, infoOf(item.piece), MAP_W), area));
-    setSelected(reachable ? index : null);
+    setSelected(reachable ? key : null);
   }
 
-  function startMove(index: number): void {
+  function startMove(key: number): void {
     if (blockedRef.current) return;
-    const item = layerAfter().find((candidate) => candidate.index === index);
+    const item = layerAfter().find((candidate) => decorItemKey(candidate) === key);
     const info = item === undefined ? null : infoOf(item.piece);
     if (item === undefined || info === null) return;
     setSelected(null);
     setError(null);
-    setBrush({ kind: 'piece', piece: item.piece, info, rotation: item.rotation, ...(item.color === undefined ? {} : { color: item.color }), from: index });
+    setBrush({ kind: 'piece', piece: item.piece, info, rotation: item.rotation, ...(item.color === undefined ? {} : { color: item.color }), from: item.index });
   }
 
   function removeDoorsOn(post: number): boolean {
@@ -377,25 +398,32 @@ export function useDecorEditor({
       decorPickAt(items.filter((item) => !isDoorPiece(item.piece)), infoOf, MAP_W, tile, area);
     const leaving = pieceOn(layerAfter());
     if (leaving !== null) {
-      remove(leaving.index);
+      remove(decorItemKey(leaving));
       return true;
     }
     // Until the room shows a piece gone, its tile is still the piece's.
     return pieceOn(itemsRef.current) !== null || removeDoorsOn(post);
   }
 
-  function remove(index: number): void {
+  /** Removes the item of `key`, and what stood on it (#121). */
+  function remove(key: number): void {
     if (blockedRef.current) return;
     setSelected(null);
-    if (!layerAfter().some((item) => item.index === index)) return;
-    queue({ index, item: null });
+    const after = layerAfter();
+    const item = after.find((candidate) => decorItemKey(candidate) === key);
+    if (item === undefined) return;
+    const removal: DecorEdit = decorLayerOf(item.piece) === 'top' ? { index: item.index, item: null, layer: 'top' } : { index: item.index, item: null };
+    queue(...withFallenTopItems(after, [removal], infoOf, MAP_W));
   }
+
+  /** The key of the item a move brush moves, or `null`: the item of its piece's layer on its `from` anchor. */
+  const movedKey = (moving: DecorBrush | null): number | null => (moving?.from === undefined ? null : decorKey(moving.from, decorLayerOf(moving.piece)));
 
   /** Puts the brush down; a cancelled move goes back to its item selected, where it still is. */
   function putDown(): void {
     setBrush(null);
-    const from = brush?.from;
-    if (from !== undefined && layerAfter().some((item) => item.index === from)) setSelected(from);
+    const key = movedKey(brush);
+    if (key !== null && layerAfter().some((item) => decorItemKey(item) === key)) setSelected(key);
   }
 
   function turn(step: 1 | -1): void {
@@ -417,7 +445,7 @@ export function useDecorEditor({
         if (editsRef.current.some((edit) => edit.sent)) setEdits(editsRef.current.filter((edit) => !edit.sent));
         // A selected item someone else removed or moved is gone from the selection too.
         const after = withDecor(payload.items, editsRef.current);
-        setSelected((current) => (current !== null && after.some((item) => item.index === current) ? current : null));
+        setSelected((current) => (current !== null && after.some((item) => decorItemKey(item) === current) ? current : null));
       }),
     [bridge],
   );
@@ -431,8 +459,9 @@ export function useDecorEditor({
       bridge.on('decorselect', ({ index }) => select(index)),
       bridge.on('decormove', ({ index }) => startMove(index)),
       bridge.on('decordelete', ({ index }) => remove(index)),
+      // Map events name an item by its key (`decorItemKey`), a floor item's being its anchor.
       bridge.on('decorputdown', ({ index }) => {
-        if (brush?.from === index) putDown();
+        if (movedKey(brush) === index) putDown();
       }),
     ];
     return () => {
@@ -478,7 +507,7 @@ export function useDecorEditor({
     return () => window.removeEventListener('keydown', onKeyDown, true);
   });
 
-  const preview = useMemo<DecorEdit[] | null>(() => (edits.length === 0 ? null : edits.map(({ index, item }) => ({ index, item }))), [edits]);
+  const preview = useMemo<DecorEdit[] | null>(() => (edits.length === 0 ? null : edits.map(({ sent: _sent, group: _group, ...edit }) => edit)), [edits]);
   const holdingPicker = brush !== null && pickingColor;
   const commandKey = JSON.stringify([brush, area, selected, preview, desks, outlines, holdingPicker]);
 

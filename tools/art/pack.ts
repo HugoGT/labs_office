@@ -102,8 +102,8 @@ const FLOOR_DEFAULT_COLORS: Readonly<Partial<Record<Terrain, string>>> = { plain
 
 const WALL_NAMES: Readonly<Record<WallMaterial, string>> = { brick: 'Ladrillo', stone: 'Piedra', plaster: 'Yeso', glass: 'Vidrio' };
 
-const TREE_NAMES: Readonly<Record<TreeKind, string>> = { oak: 'Árbol', large: 'Árbol grande' };
-const PLANT_NAMES: Readonly<Record<PlantKind, string>> = { ficus: 'Ficus', bonsai: 'Bonsái' };
+const TREE_NAMES: Readonly<Record<TreeKind, string>> = { oak: 'Árbol', large: 'Árbol grande', ficus: 'Ficus' };
+const PLANT_NAMES: Readonly<Record<PlantKind, string>> = { bonsai: 'Bonsái' };
 const TABLES: Readonly<Record<RoomTable, { readonly name: string; readonly material: string }>> = {
   meeting: { name: 'Mesa de reuniones', material: 'walnut' },
   cafeteria: { name: 'Mesa de cafetería', material: 'beech' },

@@ -7,6 +7,7 @@ import {
   SPACE_SHADE_DEPTH,
   avatarDepth,
   chairLayerDepth,
+  onTopDepth,
   seatedAvatarDepth,
   worldAssetDepth,
 } from './depthLayers';
@@ -85,5 +86,17 @@ describe('depthLayers: chairs and sitters (art migration, step 6)', () => {
     // The highest a desk chair can be is its area's top row, one tile in.
     expect(DESK_ZONE_DEPTH).toBeLessThan(chairLayerDepth(TILE, 'back'));
     expect(DESK_ZONE_DEPTH).toBeLessThan(seatedAvatarDepth(TILE));
+  });
+});
+
+describe('depthLayers: what stands on top of a desk table or room table (#121)', () => {
+  it('draws over the surface it stands on and under someone walking on that surface\'s front row', () => {
+    const front = 10 * TILE + 7;
+    expect(onTopDepth(front)).toBeGreaterThan(worldAssetDepth(front));
+    expect(onTopDepth(front)).toBeGreaterThan(chairLayerDepth(front, 'front'));
+    expect(onTopDepth(front)).toBeLessThan(avatarDepth(front));
+    // Someone a row behind it is covered, like by the surface itself.
+    expect(onTopDepth(front)).toBeGreaterThan(avatarDepth(front - 1));
+    expect(onTopDepth(WORLD_H + 500)).toBeLessThan(SPACE_SHADE_DEPTH);
   });
 });

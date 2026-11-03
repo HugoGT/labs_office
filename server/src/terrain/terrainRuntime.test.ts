@@ -512,7 +512,7 @@ describe('createTerrainRuntime decor', () => {
     { id: 'chair-gamer', kind: 'chair', colorable: true, retired: false },
     { id: 'desk-wood', kind: 'desk', retired: false },
     { id: 'desk-painted', kind: 'desk', colorable: true, retired: false },
-    { id: 'plant-ficus', kind: 'plant', footprint: { w: 1, h: 1 }, retired: false },
+    { id: 'plant-bonsai', kind: 'plant', footprint: { w: 1, h: 1 }, retired: false },
     { id: 'table-meeting', kind: 'table', footprint: { w: 7, h: 5 }, retired: false },
     { id: 'plant-gone', kind: 'plant', footprint: { w: 1, h: 1 }, retired: true },
     { id: 'bridge-wood', kind: 'bridge', footprint: { w: 1, h: 1 }, retired: false },
@@ -596,7 +596,7 @@ describe('createTerrainRuntime decor', () => {
     ['an unknown piece', { piece: 'chair-throne', rotation: 0 }],
     ['a retired piece', { piece: 'plant-gone', rotation: 0 }],
     ['a piece the layer does not place', { piece: 'bridge-wood', rotation: 0 }],
-    ['a turned plant', { piece: 'plant-ficus', rotation: 90 }],
+    ['a turned plant', { piece: 'plant-bonsai', rotation: 90 }],
     ['a room table turned 180 (symmetric: only 0 and 90)', { piece: 'table-meeting', rotation: 180 }],
     ['a room table turned 270', { piece: 'table-meeting', rotation: 270 }],
     ['a color on a piece that takes none', { piece: 'desk-wood', rotation: 0, color: '#c83c3c' }],
@@ -672,7 +672,7 @@ describe('createTerrainRuntime decor', () => {
     await runtime.load();
 
     expect(runtime.decor()).toEqual([{ index: FREE, piece: 'plant-gone', rotation: 0 }]);
-    await runtime.setDecor([{ index: FREE, item: null }], null);
+    await runtime.setDecor([{ index: FREE, item: null, layer: 'top' }], null);
     expect(runtime.decor()).toEqual([]);
   });
 
@@ -1418,5 +1418,116 @@ describe('createTerrainRuntime carry', () => {
 
     expect(write).toHaveBeenCalledTimes(3);
     expect(write).toHaveBeenCalledWith({ width: W, walls: runtime.walls(), decor: runtime.decor() });
+  });
+});
+
+describe('createTerrainRuntime top layer (#121)', () => {
+  const W = BASE_LAYOUT.width;
+  const at = (tx: number, ty: number) => ty * W + tx;
+  /** A free lawn desk area; its desk table on (67, 22) covers (66..68, 22). */
+  const DESK = { x: 66, y: 21, w: 3, h: 3 };
+  const TABLE = { index: at(67, 22), piece: 'desk-wood', rotation: 0 } as const;
+  const BONSAI = { piece: 'plant-bonsai', rotation: 0 } as const;
+  const CATALOG = [
+    { id: 'chair-wood', kind: 'chair', retired: false },
+    { id: 'desk-wood', kind: 'desk', retired: false },
+    { id: 'desk-glass', kind: 'desk', retired: false },
+    { id: 'plant-bonsai', kind: 'plant', footprint: { w: 1, h: 1 }, retired: false },
+    { id: 'plant-wide', kind: 'plant', footprint: { w: 2, h: 1 }, retired: false },
+    // A catalog piece of a top kind whose id says the floor: no such piece may be placed.
+    { id: 'chair-pot', kind: 'plant', footprint: { w: 1, h: 1 }, retired: false },
+  ];
+  const runtimeWith = (store = createMemoryTerrain([], [], [TABLE])) =>
+    createTerrainRuntime({ layout: BASE_LAYOUT, store, seats: BASE_MAP_SEATS, decorPieces: async () => CATALOG });
+
+  it('stands a piece on top of a desk table, on the desk table own anchor too, saved on its own layer', async () => {
+    const store = createMemoryTerrain([], [], [TABLE]);
+    const runtime = runtimeWith(store);
+    await runtime.load();
+
+    await runtime.setDecor([{ index: TABLE.index, item: BONSAI }, { index: at(66, 22), item: BONSAI }], 'user-1');
+
+    expect(runtime.decor()).toEqual([{ index: at(66, 22), ...BONSAI }, TABLE, { index: TABLE.index, ...BONSAI }]);
+    expect(await store.loadDecor()).toEqual(runtime.decor());
+    expect(store.decorActorOf(TABLE.index, 'top')).toBe('user-1');
+    expect(store.decorActorOf(TABLE.index)).toBeNull();
+  });
+
+  it('refuses a top piece off any surface, over another top piece, or of a top kind on the floor, saving nothing', async () => {
+    const store = createMemoryTerrain([], [], [TABLE, { index: at(66, 22), ...BONSAI }]);
+    const saveDecor = vi.spyOn(store, 'saveDecor');
+    const runtime = runtimeWith(store);
+    await runtime.load();
+
+    await expect(runtime.setDecor([{ index: at(70, 22), item: BONSAI }], null)).rejects.toThrow(TerrainProtectedError);
+    // 2x1 on (67, 22) covers (66..67, 22), over the bonsai; on (69, 22), (68..69, 22), off the desk table's end.
+    await expect(runtime.setDecor([{ index: at(67, 22), item: { piece: 'plant-wide', rotation: 0 } }], null)).rejects.toThrow(TerrainProtectedError);
+    await expect(runtime.setDecor([{ index: at(69, 22), item: { piece: 'plant-wide', rotation: 0 } }], null)).rejects.toThrow(TerrainProtectedError);
+    await expect(runtime.setDecor([{ index: at(70, 22), item: { piece: 'chair-pot', rotation: 0 } }], null)).rejects.toThrow(InvalidTerrainEditError);
+    expect(saveDecor).not.toHaveBeenCalled();
+  });
+
+  it('takes off what stands on a desk table removed or turned, in the same save, and keeps it on one replaced in place', async () => {
+    const onTop = { index: at(66, 22), ...BONSAI };
+    const elsewhere = { index: at(80, 22), piece: 'desk-wood', rotation: 0 } as const;
+    const store = createMemoryTerrain([], [], [TABLE, onTop, elsewhere, { index: at(80, 22), ...BONSAI }]);
+    const saveDecor = vi.spyOn(store, 'saveDecor');
+    const runtime = runtimeWith(store);
+    await runtime.load();
+    const listener = vi.fn();
+    runtime.subscribe(listener);
+
+    // Another desk table of the same footprint keeps it standing.
+    await runtime.setDecor([{ index: TABLE.index, item: { piece: 'desk-glass', rotation: 180 } }], null);
+    expect(runtime.decor()).toContainEqual(onTop);
+
+    // Turned vertical it covers (67, 21..23): the piece on (66, 22) falls with the turn.
+    await runtime.setDecor([{ index: TABLE.index, item: { piece: 'desk-glass', rotation: 90 } }], 'admin-1');
+    expect(saveDecor).toHaveBeenLastCalledWith([{ index: TABLE.index, item: { piece: 'desk-glass', rotation: 90 } }, { index: onTop.index, item: null, layer: 'top' }], 'admin-1');
+    expect(runtime.decor()).not.toContainEqual(onTop);
+
+    await runtime.setDecor([{ index: elsewhere.index, item: null }], null);
+    expect(runtime.decor()).toEqual([{ index: TABLE.index, piece: 'desk-glass', rotation: 90 }]);
+    expect(await store.loadDecor()).toEqual(runtime.decor());
+    expect(listener).toHaveBeenCalledTimes(3);
+  });
+
+  it('removes a top piece alone when the edit names its layer, and the floor item alone when it names none', async () => {
+    const store = createMemoryTerrain([], [], [TABLE, { index: TABLE.index, ...BONSAI }]);
+    const runtime = runtimeWith(store);
+    await runtime.load();
+
+    await runtime.setDecor([{ index: TABLE.index, item: null, layer: 'top' }], null);
+    expect(runtime.decor()).toEqual([TABLE]);
+    await runtime.setDecor([{ index: TABLE.index, item: BONSAI }], null);
+    await runtime.setDecor([{ index: TABLE.index, item: null }], null);
+    // The floor item goes, and with it what stood on it.
+    expect(runtime.decor()).toEqual([]);
+  });
+
+  it('takes off what stood on a desk table another one displaces from the desk', async () => {
+    const store = createMemoryTerrain([], [], [TABLE, { index: at(66, 22), ...BONSAI }]);
+    const runtime = runtimeWith(store);
+    await runtime.load();
+
+    await runtime.setDecor([{ index: at(67, 23), item: { piece: 'desk-wood', rotation: 0 } }], null, undefined, async () => [DESK]);
+
+    expect(runtime.decor()).toEqual([{ index: at(67, 23), piece: 'desk-wood', rotation: 0 }]);
+  });
+
+  it('carries what stands on a desk table with the desk, and drops what stood across onto a desk table left behind', async () => {
+    const neighbour = { index: at(70, 22), piece: 'desk-wood', rotation: 0 } as const;
+    const across = { index: at(69, 22), piece: 'plant-wide', rotation: 0 } as const;
+    const onTop = { index: TABLE.index, ...BONSAI };
+    const store = createMemoryTerrain([], [], [TABLE, onTop, neighbour, across]);
+    const runtime = runtimeWith(store);
+    await runtime.load();
+
+    await expect(runtime.carry(async () => ({ from: DESK, dx: 0, dy: -8 }), 'admin-1', NONE, async () => 'moved')).resolves.toBe('moved');
+
+    const up = (index: number) => index - 8 * W;
+    expect(runtime.decor()).toEqual([{ ...TABLE, index: up(TABLE.index) }, { ...onTop, index: up(onTop.index) }, neighbour]);
+    expect(await store.loadDecor()).toEqual(runtime.decor());
+    expect(store.decorActorOf(up(onTop.index), 'top')).toBe('admin-1');
   });
 });
