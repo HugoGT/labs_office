@@ -79,3 +79,15 @@ export function seatedAvatarDepth(groundY: number): number {
  * under the zone labels (2), so it never veils the desk's sitter.
  */
 export const DESK_ZONE_DEPTH = 1.75;
+
+/**
+ * A top piece (#121) sorts with the surface it stands on (`surfaceDepthY`,
+ * the y that desk table or room table sorts by): over that surface and a
+ * chair's front layer on the same row, under someone walking on that row,
+ * so a person in front of the desk still covers what stands on it.
+ */
+const ON_TOP_BIAS = 0.6;
+
+export function onTopDepth(surfaceDepthY: number): number {
+  return worldAssetDepth(surfaceDepthY) + ON_TOP_BIAS;
+}

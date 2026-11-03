@@ -23,7 +23,7 @@
 
 import { AVATAR_BODY_CENTER_OFFSET, physicalBodyRect } from './avatarGeometry.ts';
 import { tableFacing, tableFloorRect } from './deskTable.ts';
-import { decorChairFacing, decorFootprint, decorRotationFor, type DecorItem, type DecorPieceInfo } from './officeDecor.ts';
+import { decorChairFacing, decorFootprint, decorRotationFor, isOnTopKind, type DecorItem, type DecorPieceInfo } from './officeDecor.ts';
 
 /** Same as `TILE` in mapData.ts (pinned by a test). */
 export const COLLISION_TILE = 32;
@@ -372,7 +372,8 @@ export function officeDecorInstances(
       continue;
     }
     const [prop] = layoutPropInstances([{ piece: item.piece, kind: info.kind, tx: rect.x, ty: rect.y, w: rect.w, h: rect.h, collision: 'solid', facing: null }]);
-    instances.push(info.kind === 'plant' ? { ...prop!, defaults: [] } : prop!);
+    // What stands on top of a desk table or room table (#121) never blocks: the surface under it already does.
+    instances.push(isOnTopKind(info.kind) ? { ...prop!, defaults: [] } : prop!);
   }
   return instances;
 }
@@ -536,9 +537,10 @@ function sameInstance(a: CollisionInstance, b: CollisionInstance): boolean {
 /**
  * The instance under a point, by its pick box or one of its rectangles. The
  * smallest hit wins, so a decor plant is picked over the desk it stands on.
- * Decor stacks freely, so a desk table can lie under a chair and plants on
- * every tile (#213): clicking again where `current` is picked goes one step
- * down the stack, and back to the top after the last.
+ * Pieces stack: a chair stands at a room table, and every tile of a desk
+ * table or room table may hold a top piece (#121, its own layer of the
+ * decor), so clicking again where `current` is picked goes one step down the
+ * stack, and back to the top after the last.
  */
 export function pickInstance(
   instances: readonly CollisionInstance[],

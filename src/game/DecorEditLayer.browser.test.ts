@@ -22,7 +22,7 @@ import { LAYOUT_GHOST_DEPTH, LAYOUT_OUTLINE_DEPTH } from './depthLayers';
 import { TILE } from './mapData';
 import { createOfficeBridge } from './officeBridge';
 import { HOLD_TO_MOVE_MS } from './pressHold';
-import type { DecorItem, DecorPieceInfo } from './officeDecor';
+import { decorKey, type DecorItem, type DecorPieceInfo } from './officeDecor';
 import { LAYOUT_OUTLINE_NAME, OUTLINE_STROKE_COLOR } from './spaceOutline';
 
 /**
@@ -341,11 +341,12 @@ describe('DecorEditLayer', () => {
   });
 
   describe('selecting a placed item with nothing picked (#208)', () => {
-    // A 7x5 room table centered on (10, 7), tiles 7..13 by 5..9, a chair on (10, 9) at it, a plant on (3, 3).
+    // A 7x5 room table centered on (10, 7), tiles 7..13 by 5..9, a chair on (10, 9) at it, another chair on (3, 3).
+    // (A plant stands on top of a desk table or room table since #121: the lone 1x1 piece is a chair.)
     const placed: DecorItem[] = [
       { index: at(10, 7), piece: 'table-meeting', rotation: 0 },
       { index: at(10, 9), piece: 'chair-wood', rotation: 0 },
-      { index: at(3, 3), piece: 'plant-bonsai', rotation: 0 },
+      { index: at(3, 3), piece: 'chair-metal', rotation: 0 },
     ];
 
     function selections(bridge: ReturnType<typeof createOfficeBridge>): (number | null)[] {
@@ -521,7 +522,7 @@ describe('DecorEditLayer', () => {
       bridge.emitCommand('decoredit', { brush: null, area: null, selected: at(3, 3) });
       expect(claims(mid(3), mid(3))).toBe(true);
       const trash = named<Phaser.GameObjects.Rectangle>(scene, DECOR_DELETE_BUTTON_NAME)!;
-      items.push({ index: at(Math.floor(trash.x / TILE), Math.floor(trash.y / TILE)), piece: 'plant-bonsai', rotation: 0 });
+      items.push({ index: at(Math.floor(trash.x / TILE), Math.floor(trash.y / TILE)), piece: 'chair-metal', rotation: 0 });
       expect(claims(trash.x, trash.y)).toBe(false);
     });
 
@@ -555,7 +556,7 @@ describe('DecorEditLayer', () => {
 
         clock.now += 1;
         frame(scene);
-        moving(at(3, 3), plant);
+        moving(at(3, 3), chair);
         scene.input.emit('pointerup', pointerAt(mid(3) + 2, mid(3)));
         frame(scene);
         frame(scene);
@@ -589,7 +590,7 @@ describe('DecorEditLayer', () => {
         scene.input.emit('pointerup', pointerAt(mid(5), mid(4), 0, 100));
         frame(scene);
         expect(events).toHaveLength(1);
-        moving(at(3, 3), plant);
+        moving(at(3, 3), chair);
         frame(scene);
         expect(events.at(-1)).toEqual(['pick', { index: at(5, 4) }]);
       });
@@ -600,7 +601,7 @@ describe('DecorEditLayer', () => {
         scene.input.emit('pointerdown', pointerAt(mid(3), mid(3)));
         clock.now += HOLD_TO_MOVE_MS;
         frame(scene);
-        moving(at(3, 3), plant);
+        moving(at(3, 3), chair);
         // Column 0 is water.
         scene.input.emit('pointerup', pointerAt(mid(0), mid(3), 0, 100));
         frame(scene);
@@ -632,6 +633,69 @@ describe('DecorEditLayer', () => {
         expect(seen).toEqual([at(3, 3), null]);
       });
     });
+  });
+});
+
+describe('DecorEditLayer: the top layer (#121)', () => {
+  // A desk table on (5, 5) covers (4..6, 5); a plant stands on its anchor tile.
+  const items: DecorItem[] = [
+    { index: at(5, 5), piece: 'desk-wood', rotation: 0 },
+    { index: at(5, 5), piece: 'plant-bonsai', rotation: 0 },
+  ];
+  const TOP = decorKey(at(5, 5), 'top');
+
+  it('names a top piece by its key and the desk table under it by its anchor, the top first where they stack', async () => {
+    const scene = await bootHostScene();
+    const { bridge } = layer(scene, items);
+    const seen: (number | null)[] = [];
+    bridge.on('decorselect', ({ index }) => seen.push(index));
+    bridge.emitCommand('decoredit', { brush: null, area: null });
+
+    clickAt(scene, mid(5), mid(5));
+    clickAt(scene, mid(4), mid(5));
+
+    expect(seen).toEqual([TOP, at(5, 5)]);
+  });
+
+  it('outlines the selected top piece on its own footprint, and its buttons ask for it by its key', async () => {
+    const scene = await bootHostScene();
+    const { bridge } = layer(scene, items);
+    const deletes: number[] = [];
+    bridge.on('decordelete', ({ index }) => deletes.push(index));
+    bridge.emitCommand('decoredit', { brush: null, area: null, selected: TOP });
+
+    const outline = named<Phaser.GameObjects.Rectangle>(scene, DECOR_SELECTION_NAME)!;
+    expect([outline.x, outline.y, outline.width, outline.height]).toEqual([5.5 * TILE, 5.5 * TILE, TILE, TILE]);
+    const trash = named<Phaser.GameObjects.Rectangle>(scene, DECOR_DELETE_BUTTON_NAME)!;
+    clickAt(scene, trash.x, trash.y);
+    expect(deletes).toEqual([TOP]);
+  });
+
+  it('drags a top piece by its key: dropped on its surface it lands there, off it it is put down', async () => {
+    const scene = await bootHostScene();
+    const clock = { now: 1000 };
+    const { bridge } = layer(scene, items, clock);
+    const events: unknown[] = [];
+    bridge.on('decormove', (value) => events.push(['move', value]));
+    bridge.on('decorpick', (value) => events.push(['pick', value]));
+    bridge.on('decorputdown', (value) => events.push(['putdown', value]));
+    bridge.emitCommand('decoredit', { brush: null, area: null });
+    const frame = () => scene.events.emit(Phaser.Scenes.Events.POST_UPDATE);
+    const drag = (toX: number) => {
+      scene.input.emit('pointerdown', pointerAt(mid(5), mid(5)));
+      clock.now += HOLD_TO_MOVE_MS;
+      frame();
+      bridge.emitCommand('decoredit', { brush: { ...plant, from: at(5, 5) }, area: null });
+      scene.input.emit('pointermove', pointerAt(mid(toX), mid(5), 0, 300));
+      scene.input.emit('pointerup', pointerAt(mid(toX), mid(5), 0, 300));
+      frame();
+      bridge.emitCommand('decoredit', { brush: null, area: null });
+    };
+
+    drag(6);
+    drag(8);
+
+    expect(events).toEqual([['move', { index: TOP }], ['pick', { index: at(6, 5) }], ['move', { index: TOP }], ['putdown', { index: TOP }]]);
   });
 });
 

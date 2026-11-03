@@ -7,9 +7,14 @@
 
 import { isLayoutMaterial, isTerrainColor, isWallPieceId, type LayoutMaterial, type WallPieceId } from '../../../src/game/officeLayout.ts';
 import { isTerrainFloorPieceId } from '../../../src/game/terrainFloors.ts';
-import { isDecorColor, isDecorPieceId, isDecorRotation, type DecorItem } from '../../../src/game/officeDecor.ts';
+import { decorEditLayer, decorLayerOf, isDecorColor, isDecorPieceId, isDecorRotation, type DecorEdit, type DecorItem } from '../../../src/game/officeDecor.ts';
 import type { DirectoryPool } from '../directory/pgDirectory.ts';
 import type { TerrainStore } from './terrainPort.ts';
+
+/** The rows a decor batch writes, each on its layer (#121): a placement its piece's, a removal the one it names. */
+function decorEntries(edits: readonly DecorEdit[]): { index: number; layer: string; piece: string | null; rotation: number | null; color: string | null }[] {
+  return edits.map((edit) => ({ index: edit.index, layer: decorEditLayer(edit), piece: edit.item?.piece ?? null, rotation: edit.item?.rotation ?? null, color: edit.item?.color ?? null }));
+}
 
 export function createPgTerrain(pool: DirectoryPool): TerrainStore {
   return {
@@ -109,46 +114,46 @@ export function createPgTerrain(pool: DirectoryPool): TerrainStore {
     },
 
     async loadDecor() {
-      const result = await pool.query('SELECT tile_index, piece_id, rotation, color FROM office_decor');
+      const result = await pool.query('SELECT tile_index, layer, piece_id, rotation, color FROM office_decor');
       const items: DecorItem[] = [];
-      // Same as the walls: an unreadable row is skipped, not fatal.
+      // Same as the walls: an unreadable row is skipped, not fatal. A row whose layer is not its piece's
+      // (#121) would read as an item of the other layer, one no edit could reach: skipped too.
       for (const row of result.rows) {
         const color: unknown = row.color ?? null;
         if (!Number.isInteger(row.tile_index) || !isDecorPieceId(row.piece_id) || !isDecorRotation(row.rotation)) continue;
         if (color !== null && !isDecorColor(color)) continue;
+        if (row.layer !== decorLayerOf(row.piece_id)) continue;
         items.push({ index: row.tile_index as number, piece: row.piece_id, rotation: row.rotation, ...(color === null ? {} : { color }) });
       }
-      return items.sort((a, b) => a.index - b.index);
+      return items.sort((a, b) => a.index - b.index || Number(decorLayerOf(a.piece) === 'top') - Number(decorLayerOf(b.piece) === 'top'));
     },
     async saveDecor(edits, actorId) {
       // One statement, like the walls: removals and placements commit
-      // together, and the tiles of a batch are distinct.
-      const entries = edits.map(({ index, item }) => ({ index, piece: item?.piece ?? null, rotation: item?.rotation ?? null, color: item?.color ?? null }));
+      // together, and the (tile, layer) rows of a batch are distinct.
       await pool.query(
         `WITH entries AS (
-           SELECT entry.index, entry.piece, entry.rotation, entry.color FROM jsonb_to_recordset($1::jsonb) AS entry(index integer, piece text, rotation smallint, color text)
+           SELECT entry.index, entry.layer, entry.piece, entry.rotation, entry.color FROM jsonb_to_recordset($1::jsonb) AS entry(index integer, layer text, piece text, rotation smallint, color text)
          ),
          removed AS (
-           DELETE FROM office_decor WHERE tile_index IN (SELECT index FROM entries WHERE piece IS NULL)
+           DELETE FROM office_decor WHERE (tile_index, layer) IN (SELECT index, layer FROM entries WHERE piece IS NULL)
          )
-         INSERT INTO office_decor (tile_index, piece_id, rotation, color, updated_by)
-         SELECT index, piece, rotation, color, $2::uuid FROM entries WHERE piece IS NOT NULL
-         ON CONFLICT (tile_index) DO UPDATE
+         INSERT INTO office_decor (tile_index, layer, piece_id, rotation, color, updated_by)
+         SELECT index, layer, piece, rotation, color, $2::uuid FROM entries WHERE piece IS NOT NULL
+         ON CONFLICT (tile_index, layer) DO UPDATE
            SET piece_id = EXCLUDED.piece_id, rotation = EXCLUDED.rotation, color = EXCLUDED.color, updated_by = EXCLUDED.updated_by, updated_at = now()`,
-        [JSON.stringify(entries), actorId],
+        [JSON.stringify(decorEntries(edits)), actorId],
       );
     },
     async saveWallsAndDecor(walls, decor, actorId) {
       // One statement, so a desk or room never lands with half its contents:
       // `saveWalls` and `saveDecor` as data-modifying CTEs. A carry saves one
       // edit per tile of each table, so no two halves touch one row.
-      const decorEntries = decor.map(({ index, item }) => ({ index, piece: item?.piece ?? null, rotation: item?.rotation ?? null, color: item?.color ?? null }));
       await pool.query(
         `WITH wall_entries AS (
            SELECT entry.index, entry.piece FROM jsonb_to_recordset($1::jsonb) AS entry(index integer, piece text)
          ),
          decor_entries AS (
-           SELECT entry.index, entry.piece, entry.rotation, entry.color FROM jsonb_to_recordset($2::jsonb) AS entry(index integer, piece text, rotation smallint, color text)
+           SELECT entry.index, entry.layer, entry.piece, entry.rotation, entry.color FROM jsonb_to_recordset($2::jsonb) AS entry(index integer, layer text, piece text, rotation smallint, color text)
          ),
          walls_removed AS (
            DELETE FROM terrain_walls WHERE tile_index IN (SELECT index FROM wall_entries WHERE piece IS NULL)
@@ -160,13 +165,13 @@ export function createPgTerrain(pool: DirectoryPool): TerrainStore {
              SET piece_id = EXCLUDED.piece_id, updated_by = EXCLUDED.updated_by, updated_at = now()
          ),
          decor_removed AS (
-           DELETE FROM office_decor WHERE tile_index IN (SELECT index FROM decor_entries WHERE piece IS NULL)
+           DELETE FROM office_decor WHERE (tile_index, layer) IN (SELECT index, layer FROM decor_entries WHERE piece IS NULL)
          )
-         INSERT INTO office_decor (tile_index, piece_id, rotation, color, updated_by)
-         SELECT index, piece, rotation, color, $3::uuid FROM decor_entries WHERE piece IS NOT NULL
-         ON CONFLICT (tile_index) DO UPDATE
+         INSERT INTO office_decor (tile_index, layer, piece_id, rotation, color, updated_by)
+         SELECT index, layer, piece, rotation, color, $3::uuid FROM decor_entries WHERE piece IS NOT NULL
+         ON CONFLICT (tile_index, layer) DO UPDATE
            SET piece_id = EXCLUDED.piece_id, rotation = EXCLUDED.rotation, color = EXCLUDED.color, updated_by = EXCLUDED.updated_by, updated_at = now()`,
-        [JSON.stringify(walls), JSON.stringify(decorEntries), actorId],
+        [JSON.stringify(walls), JSON.stringify(decorEntries(decor)), actorId],
       );
     },
   };

@@ -179,10 +179,10 @@ describe('pgTerrain', () => {
 
   it('loads every stored decor item sorted by tile, skipping a row it cannot read', async () => {
     const pool = fakePool([
-      { tile_index: 40, piece_id: 'table-meeting', rotation: 0, color: null },
-      { tile_index: 3, piece_id: 'chair-wood', rotation: 270, color: null },
-      { tile_index: 12, piece_id: 'desk-painted', rotation: 90, color: '#c83c3c' },
-      { tile_index: 13, piece_id: 'desk-painted', rotation: 0, color: 'rojo' },
+      { tile_index: 40, layer: 'floor', piece_id: 'table-meeting', rotation: 0, color: null },
+      { tile_index: 3, layer: 'floor', piece_id: 'chair-wood', rotation: 270, color: null },
+      { tile_index: 12, layer: 'floor', piece_id: 'desk-painted', rotation: 90, color: '#c83c3c' },
+      { tile_index: 13, layer: 'floor', piece_id: 'desk-painted', rotation: 0, color: 'rojo' },
       { tile_index: 'x', piece_id: 'chair-wood', rotation: 0 },
       { tile_index: 7, piece_id: 'chair:wood', rotation: 0 },
       { tile_index: 8, piece_id: 'chair-metal', rotation: 45 },
@@ -195,7 +195,22 @@ describe('pgTerrain', () => {
       { index: 12, piece: 'desk-painted', rotation: 90, color: '#c83c3c' },
       { index: 40, piece: 'table-meeting', rotation: 0 },
     ]);
-    expect(squash(pool.queries[0]!.text)).toBe('select tile_index, piece_id, rotation, color from office_decor');
+    expect(squash(pool.queries[0]!.text)).toBe('select tile_index, layer, piece_id, rotation, color from office_decor');
+  });
+
+  it('loads a floor item and a top item of one tile, floor first, skipping a row whose layer is not its piece kind (#121)', async () => {
+    const pool = fakePool([
+      { tile_index: 12, layer: 'top', piece_id: 'plant-bonsai', rotation: 0, color: null },
+      { tile_index: 12, layer: 'floor', piece_id: 'desk-wood', rotation: 0, color: null },
+      { tile_index: 14, layer: 'floor', piece_id: 'plant-bonsai', rotation: 0, color: null },
+      { tile_index: 15, layer: 'top', piece_id: 'desk-wood', rotation: 0, color: null },
+      { tile_index: 16, layer: 'roof', piece_id: 'chair-wood', rotation: 0, color: null },
+    ]);
+
+    expect(await createPgTerrain(pool).loadDecor()).toEqual([
+      { index: 12, piece: 'desk-wood', rotation: 0 },
+      { index: 12, piece: 'plant-bonsai', rotation: 0 },
+    ]);
   });
 
   it('places, turns and removes a whole decor batch in one atomic statement', async () => {
@@ -208,19 +223,37 @@ describe('pgTerrain', () => {
 
     expect(pool.queries).toHaveLength(1);
     const sql = squash(pool.queries[0]!.text);
-    expect(sql).toContain('from jsonb_to_recordset($1::jsonb) as entry(index integer, piece text, rotation smallint, color text)');
-    // The insert reads color from entries, so the CTE must carry it.
-    expect(sql).toContain('select entry.index, entry.piece, entry.rotation, entry.color from jsonb_to_recordset');
-    expect(sql).toContain('delete from office_decor where tile_index in (select index from entries where piece is null)');
-    expect(sql).toContain('insert into office_decor (tile_index, piece_id, rotation, color, updated_by)');
+    expect(sql).toContain('from jsonb_to_recordset($1::jsonb) as entry(index integer, layer text, piece text, rotation smallint, color text)');
+    // The insert reads color and layer from entries, so the CTE must carry them.
+    expect(sql).toContain('select entry.index, entry.layer, entry.piece, entry.rotation, entry.color from jsonb_to_recordset');
+    expect(sql).toContain('delete from office_decor where (tile_index, layer) in (select index, layer from entries where piece is null)');
+    expect(sql).toContain('insert into office_decor (tile_index, layer, piece_id, rotation, color, updated_by) select index, layer, piece, rotation, color, $2::uuid from entries where piece is not null');
     expect(sql).toContain(
-      'on conflict (tile_index) do update set piece_id = excluded.piece_id, rotation = excluded.rotation, color = excluded.color, updated_by = excluded.updated_by, updated_at = now()',
+      'on conflict (tile_index, layer) do update set piece_id = excluded.piece_id, rotation = excluded.rotation, color = excluded.color, updated_by = excluded.updated_by, updated_at = now()',
     );
     expect(pool.queries[0]!.values).toEqual([
       JSON.stringify([
-        { index: 3, piece: 'desk-wood', rotation: 90, color: null },
-        { index: 4, piece: null, rotation: null, color: null },
-        { index: 5, piece: 'desk-painted', rotation: 0, color: '#c83c3c' },
+        { index: 3, layer: 'floor', piece: 'desk-wood', rotation: 90, color: null },
+        { index: 4, layer: 'floor', piece: null, rotation: null, color: null },
+        { index: 5, layer: 'floor', piece: 'desk-painted', rotation: 0, color: '#c83c3c' },
+      ]),
+      'user-1',
+    ]);
+  });
+
+  it('saves each edit on its own layer: a top piece on the top, a removal on the layer it names (#121)', async () => {
+    const pool = fakePool();
+
+    await createPgTerrain(pool).saveDecor(
+      [{ index: 3, item: { piece: 'plant-bonsai', rotation: 0 } }, { index: 3, item: null }, { index: 4, item: null, layer: 'top' }],
+      'user-1',
+    );
+
+    expect(pool.queries[0]!.values).toEqual([
+      JSON.stringify([
+        { index: 3, layer: 'top', piece: 'plant-bonsai', rotation: 0, color: null },
+        { index: 3, layer: 'floor', piece: null, rotation: null, color: null },
+        { index: 4, layer: 'top', piece: null, rotation: null, color: null },
       ]),
       'user-1',
     ]);
@@ -231,7 +264,7 @@ describe('pgTerrain', () => {
 
     await createPgTerrain(pool).saveWallsAndDecor(
       [{ index: 3, piece: null }, { index: 7, piece: 'wall-glass' }],
-      [{ index: 4, item: null }, { index: 8, item: { piece: 'desk-painted', rotation: 90, color: '#c83c3c' } }],
+      [{ index: 4, item: null }, { index: 8, item: { piece: 'desk-painted', rotation: 90, color: '#c83c3c' } }, { index: 8, item: { piece: 'plant-bonsai', rotation: 0 } }, { index: 9, item: null, layer: 'top' }],
       'user-1',
     );
 
@@ -240,13 +273,16 @@ describe('pgTerrain', () => {
     expect(sql).toContain('delete from terrain_walls where tile_index in (select index from wall_entries where piece is null)');
     expect(sql).toContain('insert into terrain_walls (tile_index, piece_id, updated_by) select index, piece, $3::uuid from wall_entries where piece is not null');
     expect(sql).toContain('on conflict (tile_index) do update set piece_id = excluded.piece_id, updated_by = excluded.updated_by, updated_at = now()');
-    expect(sql).toContain('delete from office_decor where tile_index in (select index from decor_entries where piece is null)');
-    expect(sql).toContain('insert into office_decor (tile_index, piece_id, rotation, color, updated_by) select index, piece, rotation, color, $3::uuid from decor_entries where piece is not null');
+    expect(sql).toContain('delete from office_decor where (tile_index, layer) in (select index, layer from decor_entries where piece is null)');
+    expect(sql).toContain('insert into office_decor (tile_index, layer, piece_id, rotation, color, updated_by) select index, layer, piece, rotation, color, $3::uuid from decor_entries where piece is not null');
+    expect(sql).toContain('on conflict (tile_index, layer) do update set piece_id = excluded.piece_id');
     expect(pool.queries[0]!.values).toEqual([
       JSON.stringify([{ index: 3, piece: null }, { index: 7, piece: 'wall-glass' }]),
       JSON.stringify([
-        { index: 4, piece: null, rotation: null, color: null },
-        { index: 8, piece: 'desk-painted', rotation: 90, color: '#c83c3c' },
+        { index: 4, layer: 'floor', piece: null, rotation: null, color: null },
+        { index: 8, layer: 'floor', piece: 'desk-painted', rotation: 90, color: '#c83c3c' },
+        { index: 8, layer: 'top', piece: 'plant-bonsai', rotation: 0, color: null },
+        { index: 9, layer: 'top', piece: null, rotation: null, color: null },
       ]),
       'user-1',
     ]);

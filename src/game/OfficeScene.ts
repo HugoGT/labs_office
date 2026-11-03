@@ -31,12 +31,14 @@ import {
   DESK_ZONE_DEPTH,
   MINIMAP_MARKER_DEPTH,
   SPACE_SHADE_DEPTH,
+  onTopDepth,
   worldAssetDepth,
 } from './depthLayers';
 import { deskAt, deskZoneName } from './deskLayout';
 import { SPACE_SHADE_ALPHA, SPACE_SHADE_NAME, shadeAround, shadeKey } from './spaceFocus';
 import { tableFacing, tableFloorRect } from './deskTable';
-import { decorChairFacing, decorChairs, decorFootprint, decorSeats, encodeOfficeDecor, isDecorChairPiece, isDecorSofaPiece, withDecor, type DecorEdit, type DecorItem, type DecorTileRect } from './officeDecor';
+import { decorChairFacing, decorChairs, decorFootprint, decorLayerOf, decorSeats, encodeOfficeDecor, isDecorChairPiece, isDecorSofaPiece, withDecor, type DecorEdit, type DecorItem, type DecorLayer, type DecorTileRect } from './officeDecor';
+import { deskSurface, onTopGround, tableSurface, type DecorSurface } from './decorTop';
 import { doorEdge, doorHingeStops, doorLeaves, doorOpenings, doorSpan, doorStepOf, doorSwingRotation, keptSwings, moveDoors, openDoorLeaves, type DoorLeaf, type DoorMotion } from './officeDoors';
 import { deskEntryRefused, isOnDesk } from './deskDecorRules';
 import { lockedBehindDoor, lockedDoorAhead, lockedSpaceEntered } from './spaceLocks';
@@ -159,9 +161,13 @@ const PROXIMITY_TICK_MS = 250;
 /** Suavizado de `startFollow` (#53): compartido entre `setupCameras` y el `resumeFollow` de `CameraPanLayer`. */
 const FOLLOW_LERP = 0.12;
 /** A piece that cannot be drawn yet (or ever) still shows where it goes. */
-/** Name of what the decor layer draws for the non-chair item anchored on `index` (chairs are `CHAIR_OBJECT_NAME`). */
-export function decorObjectName(index: number): string {
-  return `decor:${index}`;
+/**
+ * Name of what the decor layer draws for the non-chair item anchored on
+ * `index` (chairs are `CHAIR_OBJECT_NAME`), one per (anchor, layer): a top
+ * piece (#121) shares its anchor with the desk table under it.
+ */
+export function decorObjectName(index: number, layer: DecorLayer = 'floor'): string {
+  return layer === 'top' ? `decor:top:${index}` : `decor:${index}`;
 }
 const ART_FALLBACK_COLOR = 0x6b7280;
 const ART_FALLBACK_ALPHA = 0.6;
@@ -853,7 +859,8 @@ export class OfficeScene extends Phaser.Scene {
       items: () => (this.decorPreview === null ? this.officeDecor : withDecor(this.officeDecor, this.decorPreview)),
       infoOf: (piece) => decorInfoFromManifest(this.art.manifest)(piece),
       ground: () => this.terrain,
-      drawPiece: (item) => this.drawDecorPiece(item),
+      // The ghost of a top piece stands on the surfaces of the layer it is judged against.
+      drawPiece: (item) => this.drawDecorPiece(item, this.decorPreview === null ? this.officeDecor : withDecor(this.officeDecor, this.decorPreview)),
     });
     this.unsubscribeDecorEdit = this.bridge.onCommand('decoredit', (command) => {
       const opening = command !== null && !this.decorEditing;
@@ -1705,13 +1712,22 @@ export class OfficeScene extends Phaser.Scene {
    * tree the same, on its 1x1 base, its crown y-sorted over whoever walks behind it.
    * While its sheet is not loaded a placeholder covers its footprint (the
    * floor under its top for a desk table), and the sheet's arrival redraws
-   * the decor.
+   * the decor. A top piece (#121) stands lifted onto the surfaces of `items`
+   * under it (`onTopGround`) and sorts just over them (`onTopDepth`).
    */
-  private drawDecorItem(item: DecorItem): Phaser.GameObjects.GameObject[] {
+  private drawDecorItem(item: DecorItem, items: readonly DecorItem[]): Phaser.GameObjects.GameObject[] {
     const width = this.layout.width;
     const kind = item.piece.slice(0, item.piece.indexOf('-'));
     const infoOf = decorInfoFromManifest(this.art.manifest);
     const rect = decorFootprint(item, infoOf(item.piece), width);
+    const name = decorObjectName(item.index, decorLayerOf(item.piece));
+    // Floor pieces stand on the bottom of their footprint; a top piece on the surface under it.
+    const footprintBottom = (rect.y + rect.h) * TILE;
+    // With no surface left under it (a stored row) a top piece is drawn as on the floor, as before the layers.
+    const surfaces = decorLayerOf(item.piece) === 'top' ? this.decorSurfacesUnder(rect, items) : [];
+    const lift = surfaces.length === 0 ? null : onTopGround(footprintBottom, surfaces);
+    const dy = lift === null ? 0 : lift.y - footprintBottom;
+    const depthOf = (depthY: number): number => (lift === null ? worldAssetDepth(depthY) : onTopDepth(lift.depthY));
     if (kind === 'desk') {
       const anchor = { x: ((item.index % width) + 0.5) * TILE, y: (Math.floor(item.index / width) + 0.5) * TILE };
       // A painted desk table in its own color; without one, its manifest default (the exported sheet).
@@ -1735,15 +1751,41 @@ export class OfficeScene extends Phaser.Scene {
     if (sheet === null || (sheet.piece.kind !== 'plant' && sheet.piece.kind !== 'tree' && sheet.piece.kind !== 'table')) {
       return [
         this.add
-          .rectangle((rect.x + rect.w / 2) * TILE, (rect.y + rect.h / 2) * TILE, rect.w * TILE, rect.h * TILE, ART_FALLBACK_COLOR, ART_FALLBACK_ALPHA)
-          .setDepth(worldAssetDepth((rect.y + rect.h) * TILE))
-          .setName(decorObjectName(item.index)),
+          .rectangle((rect.x + rect.w / 2) * TILE, (rect.y + rect.h / 2) * TILE + dy, rect.w * TILE, rect.h * TILE, ART_FALLBACK_COLOR, ART_FALLBACK_ALPHA)
+          .setDepth(depthOf(footprintBottom))
+          .setName(name),
       ];
     }
     // A room table standing vertical is its sheet's second frame, anchored on its swapped footprint.
     const placement = propPlacement({ anchor: sheet.piece.anchor, footprint: { w: rect.w, h: rect.h } }, rect.x, rect.y);
     const frame = sheet.piece.kind === 'table' ? tableFrameIndex(item.rotation) : 0;
-    return [putArtSprite(this, sheet.key, { ...placement, frame }, worldAssetDepth(placement.depthY)).setName(decorObjectName(item.index))];
+    return [putArtSprite(this, sheet.key, { ...placement, y: placement.y + dy, frame }, depthOf(placement.depthY)).setName(name)];
+  }
+
+  /**
+   * The tops of the desk tables and room tables of `items` sharing a tile
+   * with `rect` (#121): where a top piece on `rect` stands. A desk table's
+   * front edge is its art's ground point once its sheet is loaded, the y it
+   * sorts by, so what stands on it sorts with it either way.
+   */
+  private decorSurfacesUnder(rect: DecorTileRect, items: readonly DecorItem[]): DecorSurface[] {
+    const width = this.layout.width;
+    const infoOf = decorInfoFromManifest(this.art.manifest);
+    const surfaces: DecorSurface[] = [];
+    for (const item of items) {
+      const info = infoOf(item.piece);
+      if (info === null || (info.kind !== 'desk' && info.kind !== 'table') || decorLayerOf(item.piece) !== 'floor') continue;
+      const under = decorFootprint(item, info, width);
+      if (under.x >= rect.x + rect.w || rect.x >= under.x + under.w || under.y >= rect.y + rect.h || rect.y >= under.y + under.h) continue;
+      if (info.kind === 'table') {
+        surfaces.push(tableSurface(under));
+        continue;
+      }
+      const sheet = this.artSheet({ materialId: item.piece, color: item.color ?? null }, 'desk', this.redrawDecor);
+      const ground = sheet !== null && sheet.piece.kind === 'desk' ? sheet.piece.facings[tableFacing(item.rotation)].ground : null;
+      surfaces.push(deskSurface(item.index, item.rotation, width, ground));
+    }
+    return surfaces;
   }
 
   /**
@@ -2116,7 +2158,7 @@ export class OfficeScene extends Phaser.Scene {
     for (const object of this.decorObjects) object.destroy();
     const items = this.decorPreview === null ? this.officeDecor : withDecor(this.officeDecor, this.decorPreview);
     this.doorLeaves = new Map(doorLeaves(items, this.layout.width).map((leaf) => [leaf.index, leaf]));
-    this.decorObjects = items.flatMap((item) => this.drawDecorPiece(item));
+    this.decorObjects = items.flatMap((item) => this.drawDecorPiece(item, items));
     const doorNamed = new Map([...this.doorLeaves.keys()].map((index) => [decorObjectName(index), index]));
     this.doorImages = new Map();
     for (const object of this.decorObjects) {
@@ -2130,11 +2172,11 @@ export class OfficeScene extends Phaser.Scene {
    * (`placeChairs`), a sofa in both layers over its footprint (`placeSofa`),
    * anything else by `drawDecorItem`.
    */
-  private drawDecorPiece(item: DecorItem): Phaser.GameObjects.GameObject[] {
+  private drawDecorPiece(item: DecorItem, items: readonly DecorItem[]): Phaser.GameObjects.GameObject[] {
     // A piece in no catalog, or whose file is missing, is not in the office: not even its placeholder.
     if (this.art.status(item.piece) === 'failed') return [];
     if (isDecorSofaPiece(item.piece)) return this.drawSofa(item);
-    if (!isDecorChairPiece(item.piece)) return this.drawDecorItem(item);
+    if (!isDecorChairPiece(item.piece)) return this.drawDecorItem(item, items);
     const [chair] = decorChairs([item]);
     if (chair === undefined) return [];
     // A contributed chair approved after this page loaded is not in the boot preload: ask for it (a no-op once

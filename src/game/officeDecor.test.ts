@@ -3,6 +3,17 @@ import exportedManifest from '../../public/assets/pack/manifest.json?raw';
 import {
   DECOR_ROTATIONS,
   MAX_DECOR_EDITS,
+  ON_TOP_KINDS,
+  decorEditKey,
+  decorItemKey,
+  decorKey,
+  decorKeyIndex,
+  decorKeyLayer,
+  decorLayerOf,
+  diffDecor,
+  fallenTopItems,
+  isOnTopKind,
+  topItemSupported,
   decodeOfficeDecor,
   decorChairFacing,
   decorChairs,
@@ -263,7 +274,7 @@ describe('officeDecor: edits and wire form', () => {
       { index: 2, item: { piece: 'plant-bonsai', rotation: 0 } },
     ]);
     expect(placed.map(({ index }) => index)).toEqual([2, 9]);
-    const replaced = withDecor(placed, [{ index: 9, item: { piece: 'desk-wood', rotation: 90 } }, { index: 2, item: null }, { index: 50, item: null }]);
+    const replaced = withDecor(placed, [{ index: 9, item: { piece: 'desk-wood', rotation: 90 } }, { index: 2, item: null, layer: 'top' }, { index: 50, item: null }]);
     expect(replaced).toEqual([{ index: 9, piece: 'desk-wood', rotation: 90 }]);
   });
 
@@ -299,7 +310,7 @@ describe('officeDecor: edits and wire form', () => {
     expect(decodeOfficeDecor(encoded, tiles)).toEqual(items);
     expect(encodeOfficeDecor([])).toBe('');
     expect(decodeOfficeDecor('', tiles)).toEqual([]);
-    for (const garbage of ['3', '3:chair-wood', '3:chair-wood:45', `${tiles}:chair-wood:0`, '3:chair-wood:0,3:plant-bonsai:0', '3:Chair:0', '-1:chair-wood:0']) {
+    for (const garbage of ['3', '3:chair-wood', '3:chair-wood:45', `${tiles}:chair-wood:0`, '3:chair-wood:0,3:desk-wood:0', '3:plant-bonsai:0,3:plant-ficus:0', '3:Chair:0', '-1:chair-wood:0']) {
       expect(decodeOfficeDecor(garbage, tiles), garbage).toBeNull();
     }
     expect(decodeOfficeDecor(42, tiles)).toBeNull();
@@ -421,5 +432,119 @@ describe('officeDecor: sofas', () => {
     ]);
     // The chairs alone, as `decorChairs` draws them, are what they were.
     expect(decorChairs(items)).toEqual([{ index: at(4, 5), piece: 'chair-wood', facing: 'right' }]);
+  });
+});
+
+describe('officeDecor: the top layer (#121)', () => {
+  const DESK_AT = at(5, 5);
+  // A desk table turned 0 covers (4..6, 5); the room table 7x5 centered on (14, 10) covers (11..17, 8..12).
+  const desk: DecorItem = { index: DESK_AT, piece: 'desk-wood', rotation: 0 };
+  const meeting: DecorItem = { index: at(14, 10), piece: 'table-meeting', rotation: 0 };
+  const LAPTOP: DecorPieceInfo = { kind: 'plant', footprint: { w: 2, h: 1 } };
+  const topInfo = (piece: string): DecorPieceInfo | null => (piece === 'plant-wide' ? LAPTOP : infoOf(piece));
+
+  it('puts plants on top and every other kind on the floor, by the kind its id starts with', () => {
+    expect([...ON_TOP_KINDS]).toEqual(['plant']);
+    expect(isOnTopKind('plant')).toBe(true);
+    for (const kind of ['chair', 'desk', 'table', 'door', 'sofa', 'tree', 'nope']) expect(isOnTopKind(kind), kind).toBe(false);
+    expect(decorLayerOf('plant-bonsai')).toBe('top');
+    expect(decorLayerOf('plant-upload-0123456789abcdef')).toBe('top');
+    for (const piece of ['desk-wood', 'chair-wood', 'table-meeting', 'tree-ficus', 'door-wood', 'sofa-fabric-2']) expect(decorLayerOf(piece), piece).toBe('floor');
+  });
+
+  it('keys an item by its anchor and layer: a floor key is its anchor, a top key never collides with any floor key', () => {
+    expect(decorKey(7, 'floor')).toBe(7);
+    expect(decorItemKey({ index: 7, piece: 'desk-wood' })).toBe(7);
+    const top = decorItemKey({ index: 7, piece: 'plant-bonsai' });
+    expect(top).toBe(decorKey(7, 'top'));
+    expect(top).toBeLessThan(0);
+    expect(decorKey(0, 'top')).toBeLessThan(0);
+    for (const key of [decorKey(0, 'floor'), decorKey(0, 'top'), decorKey(41, 'top'), decorKey(41, 'floor')]) {
+      expect(decorKey(decorKeyIndex(key), decorKeyLayer(key))).toBe(key);
+    }
+    expect(decorKeyIndex(top)).toBe(7);
+    expect(decorKeyLayer(top)).toBe('top');
+    // A placement keys by its piece; a removal by its layer, absent the floor.
+    expect(decorEditKey({ index: 7, item: { piece: 'plant-bonsai', rotation: 0 } })).toBe(top);
+    expect(decorEditKey({ index: 7, item: null, layer: 'top' })).toBe(top);
+    expect(decorEditKey({ index: 7, item: null })).toBe(7);
+  });
+
+  it('holds a floor item and a top item on one tile: each edit replaces or removes its own layer only', () => {
+    const both = withDecor([], [
+      { index: DESK_AT, item: { piece: 'plant-bonsai', rotation: 0 } },
+      { index: DESK_AT, item: { piece: 'desk-wood', rotation: 0 } },
+    ]);
+    // Sorted by anchor, the floor item before the top one.
+    expect(both).toEqual([desk, { index: DESK_AT, piece: 'plant-bonsai', rotation: 0 }]);
+    expect(withDecor(both, [{ index: DESK_AT, item: { piece: 'plant-ficus', rotation: 0 } }])).toEqual([desk, { index: DESK_AT, piece: 'plant-ficus', rotation: 0 }]);
+    expect(withDecor(both, [{ index: DESK_AT, item: null, layer: 'top' }])).toEqual([desk]);
+    expect(withDecor(both, [{ index: DESK_AT, item: null }])).toEqual([{ index: DESK_AT, piece: 'plant-bonsai', rotation: 0 }]);
+    // Replace-on-anchor still holds on the floor.
+    expect(withDecor([desk], [{ index: DESK_AT, item: { piece: 'chair-wood', rotation: 90 } }])).toEqual([{ index: DESK_AT, piece: 'chair-wood', rotation: 90 }]);
+  });
+
+  it('carries both layers of a tile on the wire, floor first, in the entries it always had', () => {
+    const tiles = WIDTH * WIDTH;
+    const items: DecorItem[] = [desk, { index: DESK_AT, piece: 'plant-bonsai', rotation: 0 }];
+    const encoded = encodeOfficeDecor([...items].reverse());
+    expect(encoded).toBe(`${DESK_AT}:desk-wood:0,${DESK_AT}:plant-bonsai:0`);
+    expect(decodeOfficeDecor(encoded, tiles)).toEqual(items);
+    expect(decodeOfficeDecor(`${DESK_AT}:plant-bonsai:0,${DESK_AT}:desk-wood:0`, tiles)).toEqual(items);
+    // Two items of one layer on one anchor are still malformed.
+    expect(decodeOfficeDecor(`${DESK_AT}:desk-wood:0,${DESK_AT}:chair-wood:0`, tiles)).toBeNull();
+  });
+
+  it('stands a top item only where floor desk tables or room tables cover its whole footprint', () => {
+    const plantAt = (index: number, piece = 'plant-bonsai'): DecorItem => ({ index, piece, rotation: 0 });
+    expect(topItemSupported(plantAt(at(4, 5)), [desk], topInfo, WIDTH)).toBe(true);
+    expect(topItemSupported(plantAt(at(6, 5)), [desk], topInfo, WIDTH)).toBe(true);
+    expect(topItemSupported(plantAt(at(7, 5)), [desk], topInfo, WIDTH)).toBe(false);
+    expect(topItemSupported(plantAt(at(11, 8)), [meeting], topInfo, WIDTH)).toBe(true);
+    expect(topItemSupported(plantAt(at(4, 5)), [], topInfo, WIDTH)).toBe(false);
+    // A chair is no surface, nor is another top item.
+    expect(topItemSupported(plantAt(at(2, 2)), [{ index: at(2, 2), piece: 'chair-wood', rotation: 0 }], topInfo, WIDTH)).toBe(false);
+    expect(topItemSupported(plantAt(at(2, 2)), [plantAt(at(2, 2), 'plant-wide')], topInfo, WIDTH)).toBe(false);
+    // A 2x1 piece centered on (6, 5) covers (5..6, 5): on the desk; on (7, 5) it hangs off its end.
+    expect(topItemSupported(plantAt(at(6, 5), 'plant-wide'), [desk], topInfo, WIDTH)).toBe(true);
+    expect(topItemSupported(plantAt(at(7, 5), 'plant-wide'), [desk], topInfo, WIDTH)).toBe(false);
+    // Two desk tables side by side hold it across their seam.
+    const next: DecorItem = { index: at(8, 5), piece: 'desk-wood', rotation: 0 };
+    expect(topItemSupported(plantAt(at(7, 5), 'plant-wide'), [desk, next], topInfo, WIDTH)).toBe(true);
+  });
+
+  it('lets fall the top items a change leaves off their surface, never one that already stood on nothing or one the batch placed', () => {
+    const onDesk: DecorItem = { index: at(4, 5), piece: 'plant-bonsai', rotation: 0 };
+    const onTable: DecorItem = { index: at(12, 9), piece: 'plant-bonsai', rotation: 0 };
+    const stray: DecorItem = { index: at(1, 1), piece: 'plant-bonsai', rotation: 0 };
+    const before = [desk, meeting, onDesk, onTable, stray];
+    expect(fallenTopItems(before, [meeting, onDesk, onTable, stray], infoOf, WIDTH)).toEqual([onDesk]);
+    expect(fallenTopItems(before, before, infoOf, WIDTH)).toEqual([]);
+    // Turned vertical, the desk table covers (5, 4..6): the plant on (4, 5) falls.
+    expect(fallenTopItems(before, [{ ...desk, rotation: 90 }, meeting, onDesk, onTable, stray], infoOf, WIDTH)).toEqual([onDesk]);
+    const placed = { index: at(9, 9), piece: 'plant-bonsai', rotation: 0 } as const;
+    // Placed off any surface: the batch's own placement is the rules' to refuse, not the cascade's to drop.
+    expect(fallenTopItems(before, [...before, placed], infoOf, WIDTH, new Set([decorItemKey(placed)]))).toEqual([]);
+    expect(fallenTopItems(before, [...before, placed], infoOf, WIDTH)).toEqual([placed]);
+  });
+
+  it('diffs two layers into the edits between them, naming the layer of a top removal', () => {
+    const top: DecorItem = { index: DESK_AT, piece: 'plant-bonsai', rotation: 0 };
+    expect(diffDecor([desk, top], [desk, top])).toEqual([]);
+    expect(diffDecor([desk, top], [desk])).toEqual([{ index: DESK_AT, item: null, layer: 'top' }]);
+    expect(diffDecor([desk, top], [top])).toEqual([{ index: DESK_AT, item: null }]);
+    expect(diffDecor([desk], [{ ...desk, rotation: 180 }, top])).toEqual([
+      { index: DESK_AT, item: { piece: 'desk-wood', rotation: 180 } },
+      { index: DESK_AT, item: { piece: 'plant-bonsai', rotation: 0 } },
+    ]);
+  });
+
+  it('picks the top item over the floor item it stands on', () => {
+    const top: DecorItem = { index: DESK_AT, piece: 'plant-wide', rotation: 0 };
+    const wideDesk: DecorPieceInfo = { kind: 'desk', footprint: { w: 3, h: 1 } };
+    const sameSize = (piece: string): DecorPieceInfo | null => (piece === 'plant-wide' ? { kind: 'plant', footprint: { w: 3, h: 1 } } : piece === 'desk-wood' ? wideDesk : null);
+    // Same footprint as the desk: the top one still wins, it is drawn over it.
+    expect(decorItemCovering([desk, top], sameSize, WIDTH, at(4, 5))).toEqual(top);
+    expect(decorItemCovering([desk], sameSize, WIDTH, at(4, 5))).toEqual(desk);
   });
 });

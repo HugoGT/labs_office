@@ -27,6 +27,65 @@ export const DECOR_ROTATIONS: readonly DecorRotation[] = [0, 90, 180, 270];
 export type DecorKind = 'chair' | 'desk' | 'plant' | 'table' | 'door' | 'sofa' | 'tree';
 export const DECOR_KINDS: readonly DecorKind[] = ['chair', 'desk', 'plant', 'table', 'door', 'sofa', 'tree'];
 
+/**
+ * The two layers of the decor (#121): the floor, where furniture stands and
+ * no two items share a tile, and the top, the surface of the desk tables and
+ * room tables, where a "Mi espacio" piece stands. A tile may hold one item of
+ * each. An item's layer is its kind's (`decorLayerOf`), so the wire entries
+ * and every stored row written before the layers existed read the same.
+ */
+export type DecorLayer = 'floor' | 'top';
+
+/** The kinds that stand on top of a desk table or room table, never on the floor. */
+export const ON_TOP_KINDS: ReadonlySet<DecorKind> = new Set<DecorKind>(['plant']);
+
+/** The floor kinds whose surface holds the top layer. */
+const SURFACE_KINDS: ReadonlySet<DecorKind> = new Set<DecorKind>(['desk', 'table']);
+
+export function isOnTopKind(kind: string): boolean {
+  return ON_TOP_KINDS.has(kind as DecorKind);
+}
+
+export function isDecorLayer(value: unknown): value is DecorLayer {
+  return value === 'floor' || value === 'top';
+}
+
+/** The layer of a piece, by the kind its id starts with (piece ids are prefixed by kind, `decorInfoFromPieceId`). */
+export function decorLayerOf(piece: string): DecorLayer {
+  return isOnTopKind(piece.slice(0, piece.indexOf('-'))) ? 'top' : 'floor';
+}
+
+/**
+ * One number per (anchor, layer): a floor item's key is its anchor, so every
+ * caller that knew items by anchor keeps working for the floor, and a top
+ * item's is negative (`-1 - index`), never any floor key. The decor editor
+ * passes it through the bridge where it used to pass the anchor.
+ */
+export function decorKey(index: number, layer: DecorLayer): number {
+  return layer === 'top' ? -1 - index : index;
+}
+
+export function decorKeyIndex(key: number): number {
+  return key < 0 ? -1 - key : key;
+}
+
+export function decorKeyLayer(key: number): DecorLayer {
+  return key < 0 ? 'top' : 'floor';
+}
+
+export function decorItemKey(item: Pick<DecorItem, 'index' | 'piece'>): number {
+  return decorKey(item.index, decorLayerOf(item.piece));
+}
+
+/** The layer an edit touches: a placement its piece's, a removal the one it names, the floor when it names none. */
+export function decorEditLayer(edit: DecorEdit): DecorLayer {
+  return edit.item === null ? (edit.layer ?? 'floor') : decorLayerOf(edit.item.piece);
+}
+
+export function decorEditKey(edit: DecorEdit): number {
+  return decorKey(edit.index, decorEditLayer(edit));
+}
+
 /** The most items one request may set, like the placed chairs before them. */
 export const MAX_DECOR_EDITS = 500;
 
@@ -50,10 +109,16 @@ export interface DecorItem {
   readonly color?: string;
 }
 
-/** One tile of a decor edit: the piece to anchor there, or `null` to remove the one anchored there. */
+/**
+ * One tile of a decor edit: the piece to anchor there, or `null` to remove the
+ * one anchored there. A placement lands on its piece's layer; a removal of a
+ * top item names it (`layer: 'top'`), absent it removes the floor item, as
+ * every edit did before the layers.
+ */
 export interface DecorEdit {
   readonly index: number;
   readonly item: { readonly piece: string; readonly rotation: DecorRotation; readonly color?: string } | null;
+  readonly layer?: DecorLayer;
 }
 
 /**
@@ -253,7 +318,8 @@ export function findDecorOverlap(items: readonly DecorItem[], infoOf: (piece: st
  * The item whose footprint covers `tile`, the one a click on that tile is
  * about, or `null`. Where footprints stack (a chair at a room table) the
  * smallest wins, like the collision editor's pick: it is drawn over the
- * other and could not be reached any other way.
+ * other and could not be reached any other way. A top item (#121) wins over
+ * any floor item for the same reason, whatever their sizes.
  */
 export function decorItemCovering(
   items: readonly DecorItem[],
@@ -262,12 +328,14 @@ export function decorItemCovering(
   tile: number,
 ): DecorItem | null {
   let best: DecorItem | null = null;
-  let bestArea = Number.POSITIVE_INFINITY;
+  let bestRank = Number.POSITIVE_INFINITY;
   for (const item of items) {
     const rect = decorFootprint(item, infoOf(item.piece), width);
-    if (!rectTiles(rect, width).includes(tile) || rect.w * rect.h >= bestArea) continue;
+    // Every top item ranks under every floor one: no footprint covers the whole map.
+    const rank = rect.w * rect.h - (decorLayerOf(item.piece) === 'top' ? width * width * width : 0);
+    if (!rectTiles(rect, width).includes(tile) || rank >= bestRank) continue;
     best = item;
-    bestArea = rect.w * rect.h;
+    bestRank = rank;
   }
   return best;
 }
@@ -334,31 +402,98 @@ export function decorChairs(items: readonly DecorItem[]): { index: number; piece
   );
 }
 
-/** A copy of `items` with every edit applied in order, sorted by anchor. */
+/** Anchor order, and on one anchor the floor item before the top one: the order of the layer everywhere. */
+function byAnchor(a: DecorItem, b: DecorItem): number {
+  return a.index - b.index || Number(decorLayerOf(a.piece) === 'top') - Number(decorLayerOf(b.piece) === 'top');
+}
+
+/** A copy of `items` with every edit applied in order, each on its own layer (`decorEditKey`), sorted by anchor. */
 export function withDecor(items: readonly DecorItem[], edits: readonly DecorEdit[]): DecorItem[] {
-  const byTile = new Map(items.map((item) => [item.index, item]));
-  for (const { index, item } of edits) {
-    if (item === null) byTile.delete(index);
-    else byTile.set(index, { index, piece: item.piece, rotation: item.rotation, ...(item.color === undefined ? {} : { color: item.color }) });
+  const byKey = new Map(items.map((item) => [decorItemKey(item), item]));
+  for (const edit of edits) {
+    const { index, item } = edit;
+    if (item === null) byKey.delete(decorEditKey(edit));
+    else byKey.set(decorEditKey(edit), { index, piece: item.piece, rotation: item.rotation, ...(item.color === undefined ? {} : { color: item.color }) });
   }
-  return [...byTile.values()].sort((a, b) => a.index - b.index);
+  return [...byKey.values()].sort(byAnchor);
+}
+
+/** The edits that turn `before` into `after`, one per (anchor, layer) that differs, a top removal naming its layer. */
+export function diffDecor(before: readonly DecorItem[], after: readonly DecorItem[]): DecorEdit[] {
+  const old = new Map(before.map((item) => [decorItemKey(item), item]));
+  const changes: DecorEdit[] = [];
+  for (const item of after) {
+    const key = decorItemKey(item);
+    const current = old.get(key);
+    old.delete(key);
+    if (current !== undefined && current.piece === item.piece && current.rotation === item.rotation && current.color === item.color) continue;
+    changes.push({ index: item.index, item: { piece: item.piece, rotation: item.rotation, ...(item.color === undefined ? {} : { color: item.color }) } });
+  }
+  for (const item of old.values()) changes.push(decorLayerOf(item.piece) === 'top' ? { index: item.index, item: null, layer: 'top' } : { index: item.index, item: null });
+  return changes;
+}
+
+/**
+ * Whether the floor desk tables and room tables of `items` cover every tile
+ * of `item`'s footprint: the only place a top item stands (#121). It may
+ * span several of them, side by side.
+ */
+export function topItemSupported(
+  item: DecorPlacement,
+  items: readonly DecorItem[],
+  infoOf: (piece: string) => DecorPieceInfo | null,
+  width: number,
+): boolean {
+  const surface = new Set<number>();
+  for (const candidate of items) {
+    const info = infoOf(candidate.piece);
+    if (info === null || !SURFACE_KINDS.has(info.kind) || decorLayerOf(candidate.piece) !== 'floor') continue;
+    for (const tile of decorTiles(candidate, info, width)) surface.add(tile);
+  }
+  return decorTiles(item, item.piece === undefined ? null : infoOf(item.piece), width).every((tile) => surface.has(tile));
+}
+
+/**
+ * The top items of `after` a change leaves off their surface: what goes in
+ * the same save as the desk table or room table removed, replaced, turned or
+ * moved from under them. One that already stood on nothing in `before`
+ * (a stored row, kept like every other) is no change's doing and stays, and
+ * so do the `placed` ones (keys): the batch's own placements are judged, not
+ * dropped.
+ */
+export function fallenTopItems(
+  before: readonly DecorItem[],
+  after: readonly DecorItem[],
+  infoOf: (piece: string) => DecorPieceInfo | null,
+  width: number,
+  placed: ReadonlySet<number> = new Set(),
+): DecorItem[] {
+  const old = new Map(before.map((item) => [decorItemKey(item), item]));
+  return after.filter((item) => {
+    const key = decorItemKey(item);
+    if (decorLayerOf(item.piece) !== 'top' || placed.has(key) || topItemSupported(item, after, infoOf, width)) return false;
+    const was = old.get(key);
+    const unchanged = was !== undefined && was.piece === item.piece && was.rotation === item.rotation;
+    return !(unchanged && !topItemSupported(was, before, infoOf, width));
+  });
 }
 
 /**
  * The wire form of the layer, a replicated string of the room state:
  * `<index>:<piece>:<rotation>[:<color>]` per item joined by commas, sorted by
- * anchor, empty for none; the color only on a painted piece, so entries
+ * anchor (the floor item before the top one on a shared anchor, #121; the
+ * layer is the piece's, so no entry spells it), empty for none; the color only on a painted piece, so entries
  * written before colors existed read the same. Piece ids never hold a `:` or
  * a `,` (`isDecorPieceId`), and colors are `#rrggbb`.
  */
 export function encodeOfficeDecor(items: readonly DecorItem[]): string {
   return [...items]
-    .sort((a, b) => a.index - b.index)
+    .sort(byAnchor)
     .map(({ index, piece, rotation, color }) => `${index}:${piece}:${rotation}${color === undefined ? '' : `:${color}`}`)
     .join(',');
 }
 
-/** The items of a wire string, sorted by anchor, or `null` unless every entry is well formed and on a distinct tile of the map. */
+/** The items of a wire string, sorted by anchor, or `null` unless every entry is well formed and on a distinct (tile, layer) of the map. */
 export function decodeOfficeDecor(raw: unknown, tileCount: number): DecorItem[] | null {
   if (typeof raw !== 'string') return null;
   if (raw === '') return [];
@@ -370,9 +505,9 @@ export function decodeOfficeDecor(raw: unknown, tileCount: number): DecorItem[] 
     const piece = match[2] as string;
     const rotation = Number(match[3]);
     const color = match[4];
-    if (index >= tileCount || !isDecorPieceId(piece) || !isDecorRotation(rotation) || items.has(index)) return null;
+    if (index >= tileCount || !isDecorPieceId(piece) || !isDecorRotation(rotation) || items.has(decorKey(index, decorLayerOf(piece)))) return null;
     if (color !== undefined && !isDecorColor(color)) return null;
-    items.set(index, { index, piece, rotation, ...(color === undefined ? {} : { color }) });
+    items.set(decorKey(index, decorLayerOf(piece)), { index, piece, rotation, ...(color === undefined ? {} : { color }) });
   }
-  return [...items.values()].sort((a, b) => a.index - b.index);
+  return [...items.values()].sort(byAnchor);
 }

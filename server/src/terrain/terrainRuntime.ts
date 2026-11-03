@@ -15,7 +15,11 @@
  * relocates whoever a wall now overlaps exactly like after a block edit.
  *
  * And the office decor layer (#208, `officeDecor.ts`): every chair, desk
- * table, plant and room table, one item per anchor tile, in the same queue.
+ * table, plant and room table, one item per anchor tile and layer (#121: the
+ * floor, and the top of the desk tables and room tables), in the same queue.
+ * What stands on top goes with its surface: off when the surface goes or
+ * turns from under it (`fallenTopItems`), along when a desk or room carries
+ * it.
  * It is not part of the snapshot (it never changes walkability; its pieces'
  * rectangles collide through the collision runtime), but every tile of every
  * item is protected like a static seat: no water, void or wall may land on
@@ -60,11 +64,17 @@ import {
 import { BASE_MAP_SEATS, type MapSeat } from '../../../src/game/seating.ts';
 import { TERRAIN_FLOOR_BASE, isTerrainFloorPieceId, withTerrainFloors, type TerrainFloors } from '../../../src/game/terrainFloors.ts';
 import {
+  decorEditKey,
   decorFootprint,
   decorInfoFromPieceId,
+  decorItemKey,
+  decorLayerOf,
   decorPieceInfo,
   decorTiles,
   decorRotationsOf,
+  diffDecor,
+  fallenTopItems,
+  isOnTopKind,
   fitsInsideDesk,
   withDecor,
   type DecorEdit,
@@ -233,18 +243,17 @@ export interface DecorCatalogPiece {
   readonly retired: boolean;
 }
 
-/** The edits that turn `before` into `after`, one per anchor that differs: what a decor batch saves. */
-function decorChanges(before: readonly DecorItem[], after: readonly DecorItem[]): DecorEdit[] {
-  const old = new Map(before.map((item) => [item.index, item]));
-  const changes: DecorEdit[] = [];
-  for (const item of after) {
-    const current = old.get(item.index);
-    old.delete(item.index);
-    if (current !== undefined && current.piece === item.piece && current.rotation === item.rotation && current.color === item.color) continue;
-    changes.push({ index: item.index, item: { piece: item.piece, rotation: item.rotation, ...(item.color === undefined ? {} : { color: item.color }) } });
-  }
-  for (const index of old.keys()) changes.push({ index, item: null });
-  return changes;
+/** The edits that turn `before` into `after`, one per (anchor, layer) that differs: what a decor batch saves. */
+const decorChanges = diffDecor;
+
+/** The removal of an item, on its own layer. */
+function removalOf(item: DecorItem): DecorEdit {
+  return decorLayerOf(item.piece) === 'top' ? { index: item.index, item: null, layer: 'top' } : { index: item.index, item: null };
+}
+
+/** The floor items alone: the desk rules (`deskDecorRules.ts`) know one item per anchor, and only the floor counts for them. */
+function floorOf(items: readonly DecorItem[]): DecorItem[] {
+  return items.filter((item) => decorLayerOf(item.piece) === 'floor');
 }
 
 export function createTerrainRuntime({
@@ -435,9 +444,10 @@ export function createTerrainRuntime({
     if (!store) throw new Error('no terrain store: the decor cannot be edited');
     parseDecorBatch({ edits }, layout.width * layout.height);
     await readCatalog();
-    const byTile = new Map(decor.map((item) => [item.index, item]));
-    const changed = edits.filter(({ index, item }) => {
-      const current = byTile.get(index);
+    const byKey = new Map(decor.map((item) => [decorItemKey(item), item]));
+    const changed = edits.filter((edit) => {
+      const { item } = edit;
+      const current = byKey.get(decorEditKey(edit));
       if (item === null) return current !== undefined;
       return current === undefined || current.piece !== item.piece || current.rotation !== item.rotation || current.color !== item.color;
     });
@@ -449,6 +459,8 @@ export function createTerrainRuntime({
       const known = catalog.get(item.piece);
       const info = decorPieces ? (known === undefined || known.retired ? null : decorPieceInfo(known)) : decorInfoFromPieceId(item.piece);
       if (info === null) throw new InvalidTerrainEditError('unknown decor piece');
+      // The layer is the id's (`decorLayerOf`): a catalog kind that stands on top under a floor id would land on the floor.
+      if (isOnTopKind(info.kind) !== (decorLayerOf(item.piece) === 'top')) throw new InvalidTerrainEditError('this piece stands on another layer');
       // A room table is symmetric: only its horizontal (0) and vertical (90) frames exist.
       if (!decorRotationsOf(info.kind).includes(item.rotation)) throw new InvalidTerrainEditError('this piece does not turn that way');
       // A colorable piece without a color draws in its manifest default; any other piece takes none.
@@ -463,23 +475,26 @@ export function createTerrainRuntime({
     if (area !== undefined) {
       const inside = (item: Pick<DecorItem, 'index' | 'piece' | 'rotation'>): boolean =>
         fitsInsideDesk(decorFootprint(item, decorInfo(item.piece), layout.width), area);
-      for (const { index, item } of changed) {
-        const current = byTile.get(index);
+      for (const edit of changed) {
+        const current = byKey.get(decorEditKey(edit));
         if (current !== undefined && !inside(current)) throw new DecorOutsideAreaError();
-        if (item !== null && !inside({ index, ...item })) throw new DecorOutsideAreaError();
+        if (edit.item !== null && !inside({ index: edit.index, ...edit.item })) throw new DecorOutsideAreaError();
       }
     }
-    const placedInOrder = changed.flatMap(({ index, item }) => (item === null ? [] : [index]));
+    const placedInOrder = changed.flatMap((edit) => (edit.item === null ? [] : [decorEditKey(edit)]));
     let next = withDecor(decor, changed);
     const deskAreas = desks === undefined ? [] : await desks();
     if (deskAreas.length > 0) {
-      // One desk table per desk: the ones a placement displaces leave in the same save.
-      const displaced = displacedDeskTables(next, placedInOrder, decorInfo, deskAreas, layout.width);
+      // One desk table per desk: the ones a placement displaces leave in the same save. A floor key is its anchor.
+      const floorPlaced = placedInOrder.filter((key) => key >= 0);
+      const displaced = displacedDeskTables(floorOf(next), floorPlaced, decorInfo, deskAreas, layout.width);
       next = withDecor(next, displaced.map((index) => ({ index, item: null })));
-      if (deskOverChairLimit(decor, next, placedInOrder, decorInfo, deskAreas, layout.width) !== null) throw new DeskChairLimitError();
+      if (deskOverChairLimit(floorOf(decor), floorOf(next), floorPlaced, decorInfo, deskAreas, layout.width) !== null) throw new DeskChairLimitError();
     }
-    const nextAnchors = new Set(next.map(({ index }) => index));
-    const placed = new Set(placedInOrder.filter((index) => nextAnchors.has(index)));
+    const nextKeys = new Set(next.map(decorItemKey));
+    const placed = new Set(placedInOrder.filter((key) => nextKeys.has(key)));
+    // What stood on a desk table or room table the batch took off, turned or displaced leaves with it (#121).
+    next = withDecor(next, fallenTopItems(decor, next, decorInfo, layout.width, placed).map(removalOf));
     const conflict = findDecorConflict(next, placed, decorInfo, snapshot, staticTiles);
     if (conflict !== null) throw new TerrainProtectedError(conflict);
     const saved = decorChanges(decor, next);
@@ -515,8 +530,10 @@ export function createTerrainRuntime({
     // Only painted posts: the store cannot remove one the layout itself draws, so it would come back at load.
     const posts = walls.flatMap((piece, post) => (piece != null && layout.walls[post] == null && onOutline(post) ? [post] : []));
     const items = carriedDecor(decor, from, decorInfo, width);
-    // What stood where the area lands goes: what it holds replaces it.
-    const replaced = replacedDecor(decor, items, { ...from, x: from.x + dx, y: from.y + dy }, decorInfo, width);
+    // What stood where the area lands goes: what it holds replaces it. Told apart by key, not anchor: a top
+    // item shares its anchor with the floor item under it (#121).
+    const carriedKeys = new Set(items.map(decorItemKey));
+    const replaced = replacedDecor(decor.filter((item) => !carriedKeys.has(decorItemKey(item))), [], { ...from, x: from.x + dx, y: from.y + dy }, decorInfo, width);
     if (posts.length === 0 && items.length === 0 && replaced.length === 0) return write({ width, walls, decor });
     if (!store) throw new Error('no terrain store: the walls and decor cannot be moved');
     // Posts and anchors share the grid's row-major indexing, so one shift serves both.
@@ -532,10 +549,13 @@ export function createTerrainRuntime({
     const lifted = [...walls];
     for (const post of posts) lifted[post] = null;
     posts.forEach((post, at) => { lifted[placedPosts[at]!] = walls[post]!; });
-    const nextDecor = withDecor(
-      withDecor(decor, [...items, ...replaced].map(({ index }) => ({ index, item: null }))),
+    const moved = withDecor(
+      withDecor(decor, [...items, ...replaced].map(removalOf)),
       placed.map(({ index, ...item }) => ({ index, item })),
     );
+    // A carried top item that stood across onto a surface left behind falls instead of stopping the move,
+    // like one left behind whose surface went (#121).
+    const nextDecor = withDecor(moved, fallenTopItems(decor, moved, decorInfo, width).map(removalOf));
     // A replaced door takes the wall behind it along, like the eraser (#233); a carried post stays.
     const landed = new Set(placedPosts);
     for (const post of wallsUnderLeftDoors(replaced, nextDecor, lifted, width)) if (!landed.has(post)) lifted[post] = null;
@@ -543,9 +563,10 @@ export function createTerrainRuntime({
     const nextWalls = withWalls(walls, wallEdits);
     const nextOrder = withWallOrder(wallOrder, walls, wallEdits);
     const nextSnapshot = snapshotOf(blocks, nextWalls, nextDecor, nextOrder);
-    const anchors = new Set(placed.map(({ index }) => index));
+    const kept = new Set(nextDecor.map(decorItemKey));
+    const anchors = new Set(placed.map(decorItemKey).filter((key) => kept.has(key)));
     // What moves keeps its place against what moves with it; only what stays can be in the way.
-    const stays = nextDecor.filter(({ index }) => !anchors.has(index));
+    const stays = nextDecor.filter((item) => !anchors.has(decorItemKey(item)));
     const guarded = new Set([...staticTiles, ...stays.flatMap((item) => decorTiles(item, decorInfo(item.piece), width))]);
     const removed = wallEdits.flatMap(({ index, piece }) => (piece === null ? [index] : []));
     const guards = placedPosts.length > 0 ? await protections() : { placements: [], players: [] };

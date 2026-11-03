@@ -106,7 +106,7 @@ describe('office entry art readiness', () => {
     await vi.waitFor(() => expect(entry).toHaveBeenCalledWith({ state: 'ready' }), LOOP_WAIT);
     expect(entry).not.toHaveBeenCalledWith({ state: 'failed' });
     expect(art.status(alias.id)).toBe(broken ? 'failed' : 'ready');
-    const plant = scene.children.getByName(decorObjectName(index)) as Phaser.GameObjects.Image | null;
+    const plant = scene.children.getByName(decorObjectName(index, 'top')) as Phaser.GameObjects.Image | null;
     if (broken) expect(plant).toBeNull();
     else expect(plant!.texture.key).toBe(artSheetKey(alias.id, 'sheet'));
   });
@@ -126,7 +126,7 @@ describe('office entry art readiness', () => {
 
     await vi.waitFor(() => expect(entry).toHaveBeenCalledWith({ state: 'ready' }), LOOP_WAIT);
     expect(entry).not.toHaveBeenCalledWith({ state: 'failed' });
-    expect(scene.children.getByName(decorObjectName(index))).toBeNull();
+    expect(scene.children.getByName(decorObjectName(index, 'top'))).toBeNull();
   });
 
   it('never reveals after a denied join and removes its render listener when stopped', async () => {

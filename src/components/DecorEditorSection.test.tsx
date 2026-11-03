@@ -9,6 +9,7 @@ import type { ArtPreviewCache } from '../game/artPreview';
 import { MAP_W } from '../game/mapData';
 import { createOfficeBridge, type OfficeCommandMap } from '../game/officeBridge';
 import { BASE_LAYOUT, withWalls } from '../game/officeLayout';
+import { decorKey } from '../game/officeDecor';
 import type { OfficeDecorPort } from '../game/officeDecorPort';
 import { DecorEditorSection } from './DecorEditorSection';
 
@@ -71,6 +72,17 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
     act(() => bridge.emit('decorpick', { index: at(40, 40) }));
     // The gamer chair takes a color: picked from its tile it is in hand in the color it has, its red by default.
     await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(40, 40), item: { piece: 'chair-gamer', rotation: 0, color: '#d8433b' } }]));
+  });
+
+  it('names the selected piece on top of a desk table, and the desk table when that is selected (#121)', async () => {
+    const { bridge } = renderSection({ initiallyActive: true });
+    await screen.findByRole('button', { name: 'Silla gamer' });
+    act(() => bridge.emit('decor', { items: [{ index: at(40, 40), piece: 'desk-wood', rotation: 0 }, { index: at(40, 40), piece: 'plant-bonsai', rotation: 0 }] }));
+
+    act(() => bridge.emit('decorselect', { index: decorKey(at(40, 40), 'top') }));
+    expect(screen.getByText('Seleccionado: Bonsái')).toBeInTheDocument();
+    act(() => bridge.emit('decorselect', { index: at(40, 40) }));
+    expect(screen.getByText('Seleccionado: Escritorio de madera')).toBeInTheDocument();
   });
 
   it('a click on a colorable tile keeps the rail while its picker is open and follows the color live; one Escape closes the picker keeping the color, a second puts the piece down', async () => {

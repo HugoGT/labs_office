@@ -3,7 +3,7 @@ import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import type { ArtPreviewCache } from '../game/artPreview';
 import { decorOutlines, fitsDeskArea, type DecorBrush } from '../game/decorEditor';
 import type { OfficeBridge } from '../game/officeBridge';
-import { decorInfoFromPieceId, type DecorTileRect } from '../game/officeDecor';
+import { decorInfoFromPieceId, decorItemKey, type DecorTileRect } from '../game/officeDecor';
 import type { OfficeDecorPort } from '../game/officeDecorPort';
 import { useDecorEditor } from '../hooks/useDecorEditor';
 import { useMaterialCatalog, type LoadMaterials } from '../hooks/useMaterialCatalog';
@@ -162,7 +162,8 @@ export function DecorEditorSection({
     return `${brush.from === undefined ? 'Poniendo' : 'Moviendo'} ${names.get(brush.piece) ?? brush.piece}`;
   }
 
-  const selectedItem = editor.selected === null ? undefined : editor.items.find((item) => item.index === editor.selected);
+  // `selected` is a key (`decorItemKey`, #121): a top piece shares its anchor with the desk table under it.
+  const selectedItem = editor.selected === null ? undefined : editor.items.find((item) => decorItemKey(item) === editor.selected);
 
   const header = (
     <div className={styles.header}>

@@ -5,7 +5,7 @@ import { TILE } from './mapData';
 import { BASE_MAP_CHAIR } from './mapBuilder';
 import { AVATAR_BODY_CENTER_OFFSET, BASE_LAYOUT, type LayoutProp } from './officeLayout';
 import { BASE_MAP_SEATS } from './seating';
-import type { DecorPieceInfo } from './officeDecor';
+import { ON_TOP_KINDS, type DecorPieceInfo } from './officeDecor';
 import {
   BASE_CHAIR_PIECE,
   COLLISION_BODY_CENTER_OFFSET,
@@ -281,6 +281,14 @@ describe('pieceCollisions: instances', () => {
     const [layoutPlant] = layoutPropInstances([prop({ piece: 'plant-bonsai', kind: 'plant', tx: 6, ty: 4 })]);
     const edit = new Map([['plant-bonsai', [{ x: -8, y: -12, w: 16, h: 12 }]]]);
     expect(worldRectsOf(plant!, edit)).toEqual(worldRectsOf(layoutPlant!, edit));
+  });
+
+  it('lets everyone walk through every piece that stands on top of a desk table or room table until an admin edits it (#121)', () => {
+    // A desk table blocks the floor under its top, and nobody walks over the top of it.
+    for (const kind of ON_TOP_KINDS) {
+      const [top] = officeDecorInstances([{ index: 4 * 20 + 6, piece: `${kind}-thing`, rotation: 0 }], () => ({ kind, footprint: { w: 1, h: 1 } }), 20);
+      expect(worldRectsOf(top!, NO_EDITS), kind).toEqual([]);
+    }
   });
 
   it('blocks a placed tree\'s 1x1 base by default, like the layout tree on the same tile, whatever its crown covers', () => {

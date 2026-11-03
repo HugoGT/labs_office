@@ -99,6 +99,20 @@ describe('handleSetOfficeDecor (POST /admin/decor)', () => {
     expect(await store.loadDecor()).toEqual([{ index: FREE + 2 * W, piece: 'desk-wood', rotation: 90 }]);
   });
 
+  it('stands a piece on top of a desk table, removes it by its layer, answers 409 off a surface and 400 to an unknown layer (#121)', async () => {
+    const { deps, store, terrain } = await harness();
+    const bonsai = { piece: 'plant-bonsai', rotation: 0 };
+
+    expect(await handleSetOfficeDecor(BEARER_ADMIN, { edits: [{ index: FREE + 4, item: bonsai }] }, deps)).toEqual({ status: 409, body: { error: 'terrain-under-placement' } });
+    expect(await handleSetOfficeDecor(BEARER_ADMIN, { edits: [{ index: FREE, item: null, layer: 'roof' }] }, deps)).toMatchObject({ status: 400 });
+    expect(await handleSetOfficeDecor(BEARER_ADMIN, { edits: [{ index: FREE, item: { piece: 'desk-wood', rotation: 0 } }, { index: FREE, item: bonsai }] }, deps)).toEqual({ status: 200, body: { updated: 2 } });
+    expect(store.decorActorOf(FREE, 'top')).toBe(ADMIN.id);
+
+    expect((await handleSetOfficeDecor(BEARER_ADMIN, { edits: [{ index: FREE, item: null, layer: 'top' }] }, deps)).status).toBe(200);
+    expect(terrain.decor()).toEqual([{ index: FREE, piece: 'desk-wood', rotation: 0 }]);
+    expect(await store.loadDecor()).toEqual(terrain.decor());
+  });
+
   it('answers 400 to malformed batches and to pieces the catalog does not offer or turn, without writing anything', async () => {
     const { deps, store } = await harness();
     const tiles = W * BASE_LAYOUT.height;

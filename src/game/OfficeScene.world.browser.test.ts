@@ -11,7 +11,7 @@ import {
   LEGACY_SEATS as BASE_MAP_SEATS,
   LEGACY_SPACES as BUILT_IN_SPACES,
 } from '../test/legacyOffice';
-import { avatarDepth, chairLayerDepth, worldAssetDepth } from './depthLayers';
+import { avatarDepth, chairLayerDepth, onTopDepth, worldAssetDepth } from './depthLayers';
 import { feetOf, positionForFeet } from './avatarGeometry';
 import { chairSeatId, mapSeatId } from './seating';
 import { artSheetKey, recoloredSheetKey } from './artPack';
@@ -1405,13 +1405,43 @@ describe('OfficeScene: the office decor layer (#208)', () => {
     ]);
 
     await vi.waitFor(() => {
-      const plant = image(scene, at(30, 20));
+      // A plant is a top piece (#121): with no surface under it, it stands on its own tile as before.
+      const plant = scene.children.getByName(decorObjectName(at(30, 20), 'top')) as Phaser.GameObjects.Image | null;
       // A 32x48 frame anchored at (16, 46) on the bottom middle of tile (30, 20).
       expect({ x: plant?.x, y: plant?.y, key: plant?.texture.key }).toEqual({ x: 30 * TILE, y: 21 * TILE - 46, key: artSheetKey('plant-bonsai', 'sheet') });
       expect(plant!.depth).toBe(worldAssetDepth(21 * TILE));
       const table = image(scene, at(40, 40));
       // The 7x5 footprint runs from tile (37, 38); its bottom middle is (40.5, 43) tiles, the frame's anchor (128, 244).
       expect({ x: table?.x, y: table?.y, frame: Number(table?.frame.name) }).toEqual({ x: 40.5 * TILE - 128, y: 43 * TILE - 244, frame: 0 });
+    }, LOOP_WAIT);
+  });
+
+  it('draws a piece on top of a desk table lifted onto its top, its ground on the front edge, over the desk and under whoever walks in front (#121)', async () => {
+    const { scene, handlers } = await bootConnected();
+    handlers.onDecor!([
+      { index: at(30, 20), piece: 'desk-wood', rotation: 180 },
+      { index: at(30, 20), piece: 'plant-bonsai', rotation: 0 },
+      { index: at(29, 20), piece: 'plant-bonsai', rotation: 0 },
+      { index: at(44, 40), piece: 'table-meeting', rotation: 0 },
+      { index: at(42, 39), piece: 'plant-bonsai', rotation: 0 },
+    ]);
+
+    await vi.waitFor(() => {
+      const desk = image(scene, at(30, 20));
+      const top = scene.children.getByName(decorObjectName(at(30, 20), 'top')) as Phaser.GameObjects.Image | null;
+      const beside = scene.children.getByName(decorObjectName(at(29, 20), 'top')) as Phaser.GameObjects.Image | null;
+      expect(desk?.texture.key).toBe(artSheetKey('desk-wood', 'sheet'));
+      expect(top?.texture.key).toBe(artSheetKey('plant-bonsai', 'sheet'));
+      // The desk sorts by its front edge's floor y: the plant's anchor (16, 46) stands 15 px over it.
+      expect({ x: top?.x, y: top?.y }).toEqual({ x: 30.5 * TILE - 16, y: desk!.depth - 15 - 46 });
+      expect({ x: beside?.x, y: beside?.y }).toEqual({ x: 29.5 * TILE - 16, y: desk!.depth - 15 - 46 });
+      expect(top!.depth).toBe(onTopDepth(desk!.depth));
+      expect(top!.depth).toBeGreaterThan(desk!.depth);
+      expect(top!.depth).toBeLessThan(avatarDepth(desk!.depth));
+      // On a room table, whose 7x5 top runs to the bottom of tile row 42, a piece further back stands on its own tile,
+      // lifted, and sorts with the table.
+      const onTable = scene.children.getByName(decorObjectName(at(42, 39), 'top')) as Phaser.GameObjects.Image | null;
+      expect({ x: onTable?.x, y: onTable?.y, depth: onTable?.depth }).toEqual({ x: 42.5 * TILE - 16, y: 40 * TILE - 15 - 46, depth: onTopDepth(43 * TILE) });
     }, LOOP_WAIT);
   });
 
@@ -1482,12 +1512,12 @@ describe('OfficeScene: the office decor layer (#208)', () => {
   it('keeps a placeholder on the footprint of a piece no catalog knows, and goes when the room drops it', async () => {
     const { scene, handlers } = await bootConnected({ artUploadsUrl: null });
     handlers.onDecor!([{ index: at(50, 50), piece: 'plant-nowhere', rotation: 0 }]);
-    const placeholder = scene.children.getByName(decorObjectName(at(50, 50))) as Phaser.GameObjects.Rectangle;
+    const placeholder = scene.children.getByName(decorObjectName(at(50, 50), 'top')) as Phaser.GameObjects.Rectangle;
     expect(placeholder.type).toBe('Rectangle');
     expect([placeholder.x, placeholder.y]).toEqual([50.5 * TILE, 50.5 * TILE]);
 
     handlers.onDecor!([]);
-    expect(scene.children.getByName(decorObjectName(at(50, 50)))).toBeNull();
+    expect(scene.children.getByName(decorObjectName(at(50, 50), 'top'))).toBeNull();
   });
 
   it('collides with a room table once a catalog read later knows its footprint, and redraws it', async () => {

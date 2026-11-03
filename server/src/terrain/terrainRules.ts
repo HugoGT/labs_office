@@ -26,8 +26,13 @@ import {
 import {
   MAX_DECOR_EDITS,
   decorFootprint,
+  decorItemKey,
+  decorKey,
+  decorLayerOf,
   decorTiles,
   insideMap,
+  isDecorLayer,
+  topItemSupported,
   isDecorPieceId,
   isDecorColor,
   isDecorRotation,
@@ -266,22 +271,34 @@ export function findWallConflict(
  * item anchored there. At most `MAX_DECOR_EDITS` tiles, each once. Whether
  * the piece exists, turns that way and takes a color is the catalog's,
  * checked by the runtime.
+ *
+ * A tile has two layers (#121): an optional `layer` (`'floor'` or `'top'`)
+ * names the one a removal takes off, absent the floor, as every edit before
+ * the layers. A placement lands on its piece's layer (`decorLayerOf`), so a
+ * `layer` on it must agree: a top piece is never on the floor. Each
+ * (tile, layer) at most once.
  */
 export function parseDecorBatch(body: unknown, tileCount: number): DecorEdit[] {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new InvalidTerrainEditError('invalid decor batch');
   const { edits } = body as Record<string, unknown>;
   if (!Array.isArray(edits) || edits.length < 1 || edits.length > MAX_DECOR_EDITS) throw new InvalidTerrainEditError('invalid decor batch');
   const seen = new Set<number>();
-  return edits.map((edit: unknown) => {
+  return edits.map((edit: unknown): DecorEdit => {
     if (typeof edit !== 'object' || edit === null || Array.isArray(edit)) throw new InvalidTerrainEditError('invalid decor edit');
-    const { index, item } = edit as Record<string, unknown>;
+    const { index, item, layer } = edit as Record<string, unknown>;
     if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index >= tileCount) throw new InvalidTerrainEditError('invalid tile');
-    if (seen.has(index)) throw new InvalidTerrainEditError('duplicate tile');
-    seen.add(index);
-    if (item === null) return { index, item: null };
+    if (layer !== undefined && !isDecorLayer(layer)) throw new InvalidTerrainEditError('invalid layer');
+    if (item === null) {
+      if (seen.has(decorKey(index, layer ?? 'floor'))) throw new InvalidTerrainEditError('duplicate tile');
+      seen.add(decorKey(index, layer ?? 'floor'));
+      return layer === 'top' ? { index, item: null, layer } : { index, item: null };
+    }
     if (typeof item !== 'object' || item === undefined || Array.isArray(item)) throw new InvalidTerrainEditError('invalid decor item');
     const { piece, rotation, color } = item as Record<string, unknown>;
     if (!isDecorPieceId(piece)) throw new InvalidTerrainEditError('invalid piece');
+    if (layer !== undefined && layer !== decorLayerOf(piece)) throw new InvalidTerrainEditError('the piece stands on another layer');
+    if (seen.has(decorKey(index, decorLayerOf(piece)))) throw new InvalidTerrainEditError('duplicate tile');
+    seen.add(decorKey(index, decorLayerOf(piece)));
     if (!isDecorRotation(rotation)) throw new InvalidTerrainEditError('invalid rotation');
     if (color === undefined || color === null) return { index, item: { piece, rotation } };
     const normalized = typeof color === 'string' ? color.toLowerCase() : color;
@@ -293,7 +310,8 @@ export function parseDecorBatch(body: unknown, tileCount: number): DecorEdit[] {
 /**
  * Why a decor item of the batch may not stand where it is, or `null` if
  * every one may. `after` is the whole layer with the batch applied and
- * `placed` the anchors the batch places. A placed item's footprint must lie
+ * `placed` the keys (`decorItemKey`: a floor item's is its anchor) the batch
+ * places. A placed item's footprint must lie
  * on the map, on walkable ground (no water or void), off every tile a wall
  * rectangle touches (`wallTiles`) and every static tile (base seats,
  * furniture, the spawn area), and share no tile with another item. Desks,
@@ -306,6 +324,12 @@ export function parseDecorBatch(body: unknown, tileCount: number): DecorEdit[] {
  * the tiles a wall touches do not count for it, since its own posts touch them. The wall
  * tiles are those of `after` (`wallTilesAfter`): a door removed or replaced
  * in the batch closes its wall for what takes its place.
+ *
+ * A top item (#121) has its own rule and the floor rules never see it: its
+ * whole footprint on the map and on the desk tables and room tables of
+ * `after` (`topItemSupported`), sharing no tile with another top item. What
+ * stands on a surface is the surface's ground, so walkability, walls and
+ * static tiles were the surface's to pass.
  */
 export function findDecorConflict(
   after: readonly DecorItem[],
@@ -317,12 +341,23 @@ export function findDecorConflict(
   if (placed.size === 0) return null;
   const wallTiles = wallTilesAfter(snapshot, after);
   const taken = new Set<number>();
+  const takenOnTop = new Set<number>();
   for (const item of after) {
-    if (!placed.has(item.index)) for (const tile of decorTiles(item, infoOf(item.piece), snapshot.width)) taken.add(tile);
+    const tiles = decorLayerOf(item.piece) === 'top' ? takenOnTop : taken;
+    if (!placed.has(decorItemKey(item))) for (const tile of decorTiles(item, infoOf(item.piece), snapshot.width)) tiles.add(tile);
   }
   for (const item of after) {
-    if (!placed.has(item.index)) continue;
+    if (!placed.has(decorItemKey(item))) continue;
     const info = infoOf(item.piece);
+    if (decorLayerOf(item.piece) === 'top') {
+      const rect = decorFootprint(item, info, snapshot.width);
+      if (!insideMap(rect, snapshot.width, snapshot.height) || !topItemSupported(item, after, infoOf, snapshot.width)) return 'placement';
+      for (const tile of rectTiles(rect, snapshot.width)) {
+        if (takenOnTop.has(tile)) return 'placement';
+        takenOnTop.add(tile);
+      }
+      continue;
+    }
     const door = info?.kind === 'door';
     if (door && !doorOnWall(snapshot, item)) return 'placement';
     const rect = decorFootprint(item, info, snapshot.width);

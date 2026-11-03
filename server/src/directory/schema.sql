@@ -605,3 +605,15 @@ BEGIN
     INSERT INTO office_decor_version (version) VALUES (1);
   END IF;
 END $$;
+
+-- The two layers of the decor (#121): a tile holds one item on the floor and
+-- one on top of the desk table or room table there ("Mi espacio" pieces), so
+-- the key is (tile, layer). Which layer an item is on is its piece kind's
+-- (`decorLayerOf` in `src/game/officeDecor.ts`); every row stored before the
+-- column was a floor item. After the one-time copy above, whose ON CONFLICT
+-- names the old one-column key. The key is dropped and added again on every
+-- start, in the one transaction `migrate` runs this file in, so a re-run
+-- converges without a `DO` block (the table is small, the rebuild cheap).
+ALTER TABLE office_decor ADD COLUMN IF NOT EXISTS layer text NOT NULL DEFAULT 'floor' CHECK (layer IN ('floor', 'top'));
+ALTER TABLE office_decor DROP CONSTRAINT IF EXISTS office_decor_pkey;
+ALTER TABLE office_decor ADD CONSTRAINT office_decor_pkey PRIMARY KEY (tile_index, layer);

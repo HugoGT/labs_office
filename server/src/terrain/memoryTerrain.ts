@@ -4,7 +4,7 @@
  */
 
 import type { LayoutMaterial, WallPieceId } from '../../../src/game/officeLayout.ts';
-import { withDecor, type DecorItem } from '../../../src/game/officeDecor.ts';
+import { decorEditKey, decorItemKey, decorKey, withDecor, type DecorItem, type DecorLayer } from '../../../src/game/officeDecor.ts';
 import type { TerrainStore } from './terrainPort.ts';
 
 export interface MemoryTerrain extends TerrainStore {
@@ -12,8 +12,8 @@ export interface MemoryTerrain extends TerrainStore {
   actorOf(index: number): string | null | undefined;
   /** Who placed the wall on a tile, `undefined` where none stands. */
   wallActorOf(index: number): string | null | undefined;
-  /** Who placed the decor item anchored on a tile, `undefined` where none stands. */
-  decorActorOf(index: number): string | null | undefined;
+  /** Who placed the decor item anchored on a tile, on the floor unless `layer` says (#121), `undefined` where none stands. */
+  decorActorOf(index: number, layer?: DecorLayer): string | null | undefined;
 }
 
 export function createMemoryTerrain(
@@ -26,7 +26,8 @@ export function createMemoryTerrain(
   const walls = new Map<number, { piece: WallPieceId; actorId: string | null }>();
   for (const [index, piece] of wallSeed) walls.set(index, { piece, actorId: null });
   let decor: readonly DecorItem[] = withDecor([], [...decorSeed].map(({ index, ...item }) => ({ index, item })));
-  const decorActors = new Map<number, string | null>(decor.map((item) => [item.index, null]));
+  // By `decorItemKey`, like the store's primary key (tile, layer).
+  const decorActors = new Map<number, string | null>(decor.map((item) => [decorItemKey(item), null]));
 
   return {
     async loadBlocks() {
@@ -73,9 +74,9 @@ export function createMemoryTerrain(
     async saveDecor(edits, actorId) {
       // Synchronous between the read and the writes, like one Postgres statement.
       decor = withDecor(decor, edits);
-      for (const { index, item } of edits) {
-        if (item === null) decorActors.delete(index);
-        else decorActors.set(index, actorId);
+      for (const edit of edits) {
+        if (edit.item === null) decorActors.delete(decorEditKey(edit));
+        else decorActors.set(decorEditKey(edit), actorId);
       }
     },
     async saveWallsAndDecor(wallEdits, decorEdits, actorId) {
@@ -84,13 +85,13 @@ export function createMemoryTerrain(
         if (piece !== null) walls.set(index, { piece, actorId });
       }
       decor = withDecor(decor, decorEdits);
-      for (const { index, item } of decorEdits) {
-        if (item === null) decorActors.delete(index);
-        else decorActors.set(index, actorId);
+      for (const edit of decorEdits) {
+        if (edit.item === null) decorActors.delete(decorEditKey(edit));
+        else decorActors.set(decorEditKey(edit), actorId);
       }
     },
-    decorActorOf(index) {
-      return decorActors.get(index);
+    decorActorOf(index, layer = 'floor') {
+      return decorActors.get(decorKey(index, layer));
     },
   };
 }

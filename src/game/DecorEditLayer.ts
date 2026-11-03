@@ -24,6 +24,10 @@
  * `decormove`, the ghost follows the pointer by the tile it was grabbed by,
  * and the release reports `decorpick` there, or `decorputdown` when it moved
  * nowhere or may not stand there. That release selects nothing.
+ *
+ * An item is named by its key (`decorItemKey`, #121) in every event but
+ * `decorpick` (a tile): a floor item's key is its anchor, a top piece's
+ * tells it apart from the desk table under it, on the same anchor.
  */
 
 import Phaser from 'phaser';
@@ -35,7 +39,7 @@ import { TILE } from './mapData';
 import { INITIAL_WHEEL_STATE, ROTATE_WHEEL_RULES, accumulateWheel, type WheelState } from './mapZoom';
 import type { OfficeBridge } from './officeBridge';
 import { PressHold } from './pressHold';
-import { decorFootprint, isRotatable, type DecorItem, type DecorPieceInfo, type DecorTileRect } from './officeDecor';
+import { decorFootprint, decorItemKey, decorKey, decorKeyIndex, decorLayerOf, isRotatable, type DecorItem, type DecorPieceInfo, type DecorTileRect } from './officeDecor';
 import { SELECTION_BUTTON_PX, SELECTION_DELETE_COLOR, SelectionButtons } from './selectionButtons';
 import { ContextOutlines } from './spaceOutline';
 
@@ -68,7 +72,7 @@ export interface DecorEditLayerDeps {
   now?: () => number;
 }
 
-/** An item under a press: how far its anchor's middle is from the pointer. */
+/** An item under a press, by its key (`decorItemKey`): how far its anchor's middle is from the pointer. */
 interface Grab {
   index: number;
   shiftX: number;
@@ -91,7 +95,7 @@ export class DecorEditLayer {
   private wheelState: WheelState = INITIAL_WHEEL_STATE;
   private selection: Phaser.GameObjects.Rectangle | null = null;
   private readonly buttons: SelectionButtons;
-  /** The anchor the outline and buttons stand for, or `null` while none are shown. */
+  /** The key of the item the outline and buttons stand for, or `null` while none are shown. */
   private shownSelection: number | null = null;
   /** Whether the press now down began with nothing picked, so its release may select. */
   private pressSelects = false;
@@ -117,8 +121,9 @@ export class DecorEditLayer {
     if (this.pressSelects) {
       const under = this.pressedItem(pointer);
       if (under !== null) {
-        const shiftX = ((under % this.deps.width) + 0.5) * TILE - pointer.worldX;
-        const shiftY = (Math.floor(under / this.deps.width) + 0.5) * TILE - pointer.worldY;
+        const anchor = decorKeyIndex(under);
+        const shiftX = ((anchor % this.deps.width) + 0.5) * TILE - pointer.worldX;
+        const shiftY = (Math.floor(anchor / this.deps.width) + 0.5) * TILE - pointer.worldY;
         this.hold.start({ index: under, shiftX, shiftY }, this.now());
       }
     }
@@ -242,11 +247,12 @@ export class DecorEditLayer {
     return pointer.camera == null || pointer.camera === this.scene.cameras.main;
   }
 
-  /** The anchor of the item under the pointer, inside the command's area, or `null`. */
+  /** The key of the item under the pointer, inside the command's area, or `null`. */
   private itemAt(pointer: Phaser.Input.Pointer): number | null {
     const tile = this.tileAt(pointer);
     if (tile === null || this.command == null) return null;
-    return decorPickAt(this.deps.items(), (piece) => this.deps.infoOf(piece), this.deps.width, tile, this.command.area)?.index ?? null;
+    const item = decorPickAt(this.deps.items(), (piece) => this.deps.infoOf(piece), this.deps.width, tile, this.command.area);
+    return item === null ? null : decorItemKey(item);
   }
 
   /** Starts the drag of what a press grabbed: React turns it into a move, like the move button. */
@@ -262,11 +268,12 @@ export class DecorEditLayer {
   private resolveDrop(): void {
     const { dragging, drop, command } = this;
     const brush = command?.brush;
-    if (dragging === null || drop === null || command == null || brush == null || brush.from !== dragging.index) return;
+    if (dragging === null || drop === null || command == null || brush == null || brush.from === undefined) return;
+    if (decorKey(brush.from, decorLayerOf(brush.piece)) !== dragging.index) return;
     this.dragging = null;
     this.drop = null;
     const anchor = this.tileAtWorld(drop.worldX + dragging.shiftX, drop.worldY + dragging.shiftY);
-    const allowed = anchor !== null && anchor !== dragging.index &&
+    const allowed = anchor !== null && anchor !== brush.from &&
       decorPlacementAllowed(this.deps.items(), (piece) => this.deps.infoOf(piece), this.deps.ground(), command.area ?? null, anchor, brush, command.desks);
     if (allowed) this.bridge.emit('decorpick', { index: anchor });
     else this.bridge.emit('decorputdown', { index: dragging.index });
@@ -347,7 +354,7 @@ export class DecorEditLayer {
     const command = this.command;
     const index = command?.selected ?? null;
     if (command == null || command.brush !== null || index === null) return null;
-    const item = this.deps.items().find((candidate) => candidate.index === index);
+    const item = this.deps.items().find((candidate) => decorItemKey(candidate) === index);
     if (item === undefined) return null;
     return { index, rect: decorFootprint(item, this.deps.infoOf(item.piece), this.deps.width) };
   }
