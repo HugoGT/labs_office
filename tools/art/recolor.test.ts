@@ -2,12 +2,13 @@ import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { PACK_FACINGS } from '../../src/game/artContract.ts';
 import { recolorPixels } from '../../src/game/artColor.ts';
-import { chairSprite, DEFAULT_GAMER_ACCENT } from './domain/chairs.ts';
+import { chairSprite, DEFAULT_GAMER_ACCENT, DEFAULT_POUF_COLOR } from './domain/chairs.ts';
 import { DEFAULT_FABRIC_COLOR } from './domain/upholstery.ts';
 import { SOFA_SEATS, sofaSprite } from './domain/sofas.ts';
 import { FACINGS } from '../../src/art/seating.ts';
-import { DEFAULT_TABLE_COLOR, tableSprite } from './domain/tables.ts';
+import { DEFAULT_GAMER_LIGHT, DEFAULT_TABLE_COLOR, tableSprite } from './domain/tables.ts';
 import { carpetTile, DEFAULT_CARPET_COLOR, DEFAULT_PLAIN_COLOR, plainTile } from './domain/tiles.ts';
+import { DEFAULT_TREE_COLOR, treeSprite } from './domain/props.ts';
 
 /**
  * The office never runs the generators: it recolors the exported default-color
@@ -66,6 +67,25 @@ test('recoloring the exported painted desk stays within a few levels of the expo
       const result = drift(recolorPixels(exported, DEFAULT_TABLE_COLOR, color), tableSprite('painted', facing, color).image.data);
       assert.ok(result.mean < 2, `${facing} ${color}: mean drift ${result.mean}`);
       assert.ok(result.offShare < 0.04, `${facing} ${color}: ${result.offShare} of the pixels drift`);
+    }
+  }
+});
+
+test('recoloring the exported gamer desk repaints only its lights, as the exporter paints them', () => {
+  // Like the gamer chair, the black body's darkest outline may sit within the light ramp's tolerance: a few levels at most.
+  const OUTLINE_BELOW = 64;
+  for (const facing of PACK_FACINGS) {
+    const source = tableSprite('gamer', facing).image.data;
+    for (const color of COLORS) {
+      const expected = tableSprite('gamer', facing, color).image.data;
+      const actual = recolorPixels(source, DEFAULT_GAMER_LIGHT, color);
+      for (let i = 0; i < expected.length; i += 4) {
+        if ((source[i + 3] ?? 0) === 0 && (expected[i + 3] ?? 0) === 0) continue;
+        let worst = 0;
+        for (let channel = 0; channel < 4; channel += 1) worst = Math.max(worst, Math.abs((actual[i + channel] ?? 0) - (expected[i + channel] ?? 0)));
+        const outline = Math.max(source[i] ?? 0, source[i + 1] ?? 0, source[i + 2] ?? 0) < OUTLINE_BELOW;
+        assert.ok(worst <= (outline ? 24 : 8), `${facing} ${color} pixel ${i / 4}: off by ${worst}${outline ? ' (outline)' : ''}`);
+      }
     }
   }
 });
@@ -137,6 +157,40 @@ test('recoloring an exported fabric sofa matches the exporter like the fabric ar
             assert.ok(worst <= (dark ? 24 : 20), `${seats} ${facing} ${layer} ${color} pixel ${i / 4}: off by ${worst}${dark ? ' (dark)' : ''}`);
           }
         }
+      }
+    }
+  }
+});
+
+test('recoloring the exported tree repaints its leaves as the exporter paints them; trunk and shadow stay', () => {
+  const OUTLINE_BELOW = 64;
+  const source = treeSprite('oak').data;
+  for (const color of COLORS) {
+    const expected = treeSprite('oak', color).data;
+    const actual = recolorPixels(source, DEFAULT_TREE_COLOR, color);
+    for (let i = 0; i < expected.length; i += 4) {
+      if ((source[i + 3] ?? 0) === 0 && (expected[i + 3] ?? 0) === 0) continue;
+      let worst = 0;
+      for (let channel = 0; channel < 4; channel += 1) worst = Math.max(worst, Math.abs((actual[i + channel] ?? 0) - (expected[i + channel] ?? 0)));
+      const outline = Math.max(source[i] ?? 0, source[i + 1] ?? 0, source[i + 2] ?? 0) < OUTLINE_BELOW;
+      assert.ok(worst <= (outline ? 24 : 8), `${color} pixel ${i / 4}: off by ${worst}${outline ? ' (outline)' : ''}`);
+    }
+  }
+});
+
+test('recoloring the exported pouf matches the exporter within a few levels, like the fabric armchair', () => {
+  const DARK_BELOW = 64;
+  for (const facing of FACINGS) {
+    const source = chairSprite('pouf', facing).back.data;
+    for (const color of COLORS) {
+      const expected = chairSprite('pouf', facing, color).back.data;
+      const actual = recolorPixels(source, DEFAULT_POUF_COLOR, color);
+      for (let i = 0; i < expected.length; i += 4) {
+        if ((source[i + 3] ?? 0) === 0 && (expected[i + 3] ?? 0) === 0) continue;
+        let worst = 0;
+        for (let channel = 0; channel < 4; channel += 1) worst = Math.max(worst, Math.abs((actual[i + channel] ?? 0) - (expected[i + channel] ?? 0)));
+        const dark = Math.max(source[i] ?? 0, source[i + 1] ?? 0, source[i + 2] ?? 0) < DARK_BELOW;
+        assert.ok(worst <= (dark ? 24 : 20), `${facing} ${color} pixel ${i / 4}: off by ${worst}${dark ? ' (dark)' : ''}`);
       }
     }
   }

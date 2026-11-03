@@ -457,6 +457,8 @@ export function createTerrainRuntime({
       if (area !== undefined && info.kind === 'door') throw new InvalidTerrainEditError('a door is not for a desk');
       // A sofa furnishes the office: the desk scope never places one either (`fitsDeskArea` does not offer it).
       if (area !== undefined && info.kind === 'sofa') throw new InvalidTerrainEditError('a sofa is not for a desk');
+      // A tree's crown covers the office around it: the desk scope never places one (`fitsDeskArea` does not offer it).
+      if (area !== undefined && info.kind === 'tree') throw new InvalidTerrainEditError('a tree is not for a desk');
     }
     if (area !== undefined) {
       const inside = (item: Pick<DecorItem, 'index' | 'piece' | 'rotation'>): boolean =>

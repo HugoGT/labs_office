@@ -208,10 +208,10 @@ describe('load requests', () => {
     const kinds = new Set(requests.map((request) => request.key.split(':')[1]?.split('-')[0]));
 
     expect(kinds).toEqual(new Set(['floor', 'desk', 'chair', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door', 'sofa', 'character']));
-    // Nine floors, four desks, seven chairs and four walls, the terrain tileset,
-    // two trees, a plant, a bridge, a hedge, three tables (art step 8, the oval one since #208), two doors (#223, #233)
+    // Nine floors, six desks, nine chairs and four walls, the terrain tileset,
+    // three trees, two plants, a bridge, a hedge, four tables (art step 8, the oval one since #208, the round one), two doors (#223, #233)
     // and four sofas.
-    expect(requests).toHaveLength(41);
+    expect(requests).toHaveLength(47);
     expect(requests.filter((request) => request.key.startsWith('art:character-')).map((request) => request.key))
       .toEqual([artSheetKey(pack().defaults.character, 'walk'), artSheetKey(pack().defaults.character, 'seated')]);
     expect(requests).toContainEqual({
@@ -245,6 +245,17 @@ describe('recolorFor', () => {
     expect(recolorFor(wood, '#c0392b')).toBeNull();
     // A malformed color falls back to the exported one instead of a broken texture key.
     expect(recolorFor(painted, 'red')).toBeNull();
+  });
+
+  it('paints the tree from its green leaves, and leaves the large tree as exported', () => {
+    const manifest = pack();
+    const tree = findPiece(manifest, 'tree-oak');
+    const large = findPiece(manifest, 'tree-large');
+    if (tree === undefined || large === undefined) throw new Error('missing pieces');
+
+    expect(recolorFor(tree, '#d9822b')).toEqual({ from: '#4f8f3a', to: '#d9822b' });
+    expect(recolorFor(tree, '#4F8F3A')).toBeNull();
+    expect(recolorFor(large, '#d9822b')).toBeNull();
   });
 
   it('paints the gamer chair from its red accent, and leaves the other chairs as exported', () => {

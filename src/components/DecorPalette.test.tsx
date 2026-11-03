@@ -24,21 +24,24 @@ describe('DecorPalette', () => {
   it('offers every decor piece of the catalog by its full Spanish name, grouped by kind, none pressed, and no eraser', () => {
     render(<DecorPalette value={null} catalog={catalog} onPick={() => {}} preview={noPreview()} />);
 
-    expect(screen.getAllByRole('group').map((group) => group.getAttribute('aria-label'))).toEqual(['Sillas', 'Mesas de escritorio', 'Muebles de sala', 'Plantas', 'Puertas']);
+    expect(screen.getAllByRole('group').map((group) => group.getAttribute('aria-label'))).toEqual(['Sillas', 'Mesas de escritorio', 'Muebles de sala', 'Plantas', 'Árboles', 'Puertas']);
     expect(names('Puertas')).toEqual(['Puerta simple', 'Puerta doble']);
-    expect(names('Sillas')).toEqual(['Silla de madera', 'Silla de metal', 'Silla de cuero', 'Silla gamer', 'Silla de oficina', 'Silla giratoria', 'Sillón tapizado']);
-    expect(names('Mesas de escritorio')).toEqual(['Escritorio de vidrio', 'Escritorio de metal', 'Escritorio de madera', 'Escritorio pintado']);
+    // The chairs and desk tables that take a color come first, each kind otherwise in catalog order.
+    expect(names('Sillas')).toEqual(['Silla gamer', 'Sillón tapizado', 'Puff', 'Silla de madera', 'Silla de metal', 'Silla de cuero', 'Silla de oficina', 'Silla giratoria', 'Silla de comedor']);
+    expect(names('Mesas de escritorio')).toEqual(['Escritorio pintado', 'Escritorio gamer', 'Escritorio de vidrio', 'Escritorio de metal', 'Escritorio de madera', 'Escritorio curvo']);
     // A room's furniture together: its tables, then its sofas.
     expect(names('Muebles de sala')).toEqual([
       'Mesa de reuniones',
       'Mesa de cafetería',
       'Mesa ovalada',
+      'Mesa redonda',
       'Sofá de cuero (2 plazas)',
       'Sofá de cuero (3 plazas)',
       'Sofá tapizado (2 plazas)',
       'Sofá tapizado (3 plazas)',
     ]);
-    expect(names('Plantas')).toEqual(['Ficus']);
+    expect(names('Plantas')).toEqual(['Ficus', 'Bonsái']);
+    expect(names('Árboles')).toEqual(['Árbol', 'Árbol grande']);
     expect(screen.queryByRole('button', { name: 'Quitar' })).not.toBeInTheDocument();
     expect(screen.getAllByRole('button').filter((button) => button.getAttribute('aria-pressed') === 'true')).toEqual([]);
   });
@@ -52,7 +55,7 @@ describe('DecorPalette', () => {
     ];
     render(<DecorPalette value={null} catalog={{ ...catalog, plant }} onPick={() => {}} preview={noPreview()} />);
 
-    expect(names('Plantas')).toEqual(['Ficus', 'Monstera']);
+    expect(names('Plantas')).toEqual(['Ficus', 'Bonsái', 'Monstera']);
   });
 
   it('writes on a tile only the size of a room table or a sofa, the full name kept for its title and accessible name', () => {
@@ -70,11 +73,12 @@ describe('DecorPalette', () => {
     render(<DecorPalette value={null} catalog={catalog} onPick={() => {}} preview={noPreview()} />);
 
     const room = within(screen.getByRole('group', { name: 'Muebles de sala' })).getAllByRole('button');
-    expect(room.map((button) => button.textContent)).toEqual(['7x5', '5x3', '2x1', '2x1', '3x1', '2x1', '3x1']);
+    expect(room.map((button) => button.textContent)).toEqual(['7x5', '5x3', '2x1', '1x1', '2x1', '3x1', '2x1', '3x1']);
     expect(room.map((button) => button.getAttribute('title'))).toEqual([
       'Mesa de reuniones (7x5)',
       'Mesa de cafetería (5x3)',
       'Mesa ovalada (2x1)',
+      'Mesa redonda (1x1)',
       'Sofá de cuero (2 plazas) (2x1)',
       'Sofá de cuero (3 plazas) (3x1)',
       'Sofá tapizado (2 plazas) (2x1)',
@@ -149,13 +153,16 @@ describe('DecorPalette', () => {
     const input = screen.getByLabelText(/^Color de Escritorio pintado:/);
     expect(input).toHaveAttribute('type', 'color');
     expect(input).toHaveAttribute('aria-label', 'Color de Escritorio pintado: #4f9a8a');
-    // Only the painted desk, the gamer chair (its red accent), the fabric armchair and the fabric sofas take a color; every other tile has none.
+    // Only the painted desk, the gamer desk (its lights), the gamer chair (its red accent), the fabric armchair, the pouf, the fabric sofas and the tree (its leaves) take a color; every other tile has none.
     expect(screen.getAllByLabelText(/^Color de/).map((color) => color.getAttribute('aria-label')).sort()).toEqual([
+      'Color de Escritorio gamer: #a066e8',
       'Color de Escritorio pintado: #4f9a8a',
+      'Color de Puff: #6b8fb3',
       'Color de Silla gamer: #d8433b',
       'Color de Sillón tapizado: #c4ab8c',
       'Color de Sofá tapizado (2 plazas): #c4ab8c',
       'Color de Sofá tapizado (3 plazas): #c4ab8c',
+      'Color de Árbol: #4f8f3a',
     ]);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     fireEvent.change(input, { target: { value: '#C83C3C' } });

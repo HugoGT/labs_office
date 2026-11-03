@@ -1701,7 +1701,8 @@ export class OfficeScene extends Phaser.Scene {
    * with its anchor on the middle of its middle tile, in the column of its
    * facing, y-sorted by its own depth point like a Tiled desk; a plant or a
    * room table 1:1 on the bottom middle of its footprint, like a Tiled prop
-   * (a vertical room table on its swapped footprint, in its second frame).
+   * (a vertical room table on its swapped footprint, in its second frame); a
+   * tree the same, on its 1x1 base, its crown y-sorted over whoever walks behind it.
    * While its sheet is not loaded a placeholder covers its footprint (the
    * floor under its top for a desk table), and the sheet's arrival redraws
    * the decor.
@@ -1728,9 +1729,10 @@ export class OfficeScene extends Phaser.Scene {
       return [putArtSprite(this, sheet.key, placement, worldAssetDepth(placement.depthY)).setName(decorObjectName(item.index))];
     }
     if (kind === 'door') return this.drawDoor(item);
-    const propKind = kind === 'table' ? 'table' : 'plant';
-    const sheet = this.artSheet({ materialId: item.piece, color: null }, propKind, this.redrawDecor);
-    if (sheet === null || (sheet.piece.kind !== 'plant' && sheet.piece.kind !== 'table')) {
+    const propKind = kind === 'table' ? 'table' : kind === 'tree' ? 'tree' : 'plant';
+    // A tree in its own leaf color; without one, its manifest default (the exported sheet).
+    const sheet = this.artSheet({ materialId: item.piece, color: kind === 'tree' ? (item.color ?? null) : null }, propKind, this.redrawDecor);
+    if (sheet === null || (sheet.piece.kind !== 'plant' && sheet.piece.kind !== 'tree' && sheet.piece.kind !== 'table')) {
       return [
         this.add
           .rectangle((rect.x + rect.w / 2) * TILE, (rect.y + rect.h / 2) * TILE, rect.w * TILE, rect.h * TILE, ART_FALLBACK_COLOR, ART_FALLBACK_ALPHA)

@@ -28,6 +28,7 @@ import {
   splitFloorMotif,
   validateArtImage,
   type ArtChairPiece,
+  type ArtTreePiece,
   type ArtDeskPiece,
   type ArtFloorPiece,
   type ArtPackManifest,
@@ -134,7 +135,7 @@ describe('art pack manifest', () => {
   it('registers the characters, furniture, floors, walls, the terrain tileset and the map props', () => {
     const count = (kind: string): number => manifest.pieces.filter((piece) => piece.kind === kind).length;
     const kinds = ['character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door', 'sofa'];
-    expect(kinds.map(count)).toEqual([18, 7, 4, 9, 4, 1, 2, 1, 1, 1, 3, 2, 4]);
+    expect(kinds.map(count)).toEqual([18, 9, 6, 9, 4, 1, 2, 2, 1, 1, 4, 2, 4]);
   });
 
   it('uses stable ids derived from the generators, unique and prefixed by kind', () => {
@@ -155,13 +156,19 @@ describe('art pack manifest', () => {
         'floor-carpet',
         'tileset-terrain',
         'tree-oak',
-        'tree-maple',
         'plant-ficus',
         'bridge-wood',
         'hedge-boxwood',
         'table-meeting',
         'table-cafeteria',
         'table-oval',
+        'table-round',
+        'tree-large',
+        'plant-bonsai',
+        'chair-dining',
+        'chair-pouf',
+        'desk-gamer',
+        'desk-curved',
       ]),
     );
   });
@@ -217,7 +224,7 @@ describe('art pack manifest', () => {
 
   it('places every map prop by the contract: footprint, anchor, layer and collision', () => {
     const props = manifest.pieces.filter((piece): piece is ArtPropPiece => ['tree', 'plant', 'bridge', 'hedge', 'table'].includes(piece.kind));
-    expect(props).toHaveLength(8);
+    expect(props).toHaveLength(10);
     const specs = { tree: TREE, plant: PLANT, bridge: BRIDGE, hedge: HEDGE, table: TABLE } as const;
     for (const piece of props) {
       const spec = specs[piece.kind];
@@ -266,17 +273,20 @@ describe('art pack manifest', () => {
     }
   });
 
-  it('marks only the gamer chair, the fabric armchair, the painted desk, the plain floor and the carpet as colorable', () => {
+  it('marks only the gamer chair, the fabric armchair, the pouf, the painted desk, the gamer desk (its lights), the plain floor, the carpet and the tree (its leaves) as colorable', () => {
     const colorable = manifest.pieces
-      .filter((piece): piece is ArtChairPiece | ArtDeskPiece | ArtFloorPiece => piece.kind === 'chair' || piece.kind === 'desk' || piece.kind === 'floor')
+      .filter((piece): piece is ArtChairPiece | ArtDeskPiece | ArtFloorPiece | ArtTreePiece => piece.kind === 'chair' || piece.kind === 'desk' || piece.kind === 'floor' || piece.kind === 'tree')
       .filter((piece) => piece.colorable)
       .map((piece) => [piece.id, piece.defaultColor]);
     expect(colorable).toEqual([
       ['chair-gamer', '#d8433b'],
       ['chair-fabric', '#c4ab8c'],
+      ['chair-pouf', '#6b8fb3'],
       ['desk-painted', '#4f9a8a'],
+      ['desk-gamer', '#a066e8'],
       ['floor-plain', '#b9c3cc'],
       ['floor-carpet', '#5a6f86'],
+      ['tree-oak', '#4f8f3a'],
     ]);
   });
 });
@@ -294,9 +304,9 @@ describe('art pack files', () => {
       const up = PACK_FACINGS.indexOf('up');
       const back = frame(sheet, CHAIR.frame.width, CHAIR.frame.height, up, 0);
       const front = frame(sheet, CHAIR.frame.width, CHAIR.frame.height, up, 1);
-      // Facing up the backrest is in front of the sitter: both layers carry pixels.
+      // Facing up the backrest is in front of the sitter: both layers carry pixels. The pouf has no backrest, so nothing covers its sitter.
       expect(back.some((value, i) => i % 4 === 3 && value > 0), piece.id).toBe(true);
-      expect(front.some((value, i) => i % 4 === 3 && value > 0), piece.id).toBe(true);
+      expect(front.some((value, i) => i % 4 === 3 && value > 0), piece.id).toBe(piece.id !== 'chair-pouf');
     }
   });
 

@@ -24,8 +24,8 @@ export const DECOR_ROTATIONS: readonly DecorRotation[] = [0, 90, 180, 270];
  * The art piece kinds the decor layer places; a door (#223) stands on a wall's
  * grid line (`officeDoors.ts`), and a sofa seats one person per tile.
  */
-export type DecorKind = 'chair' | 'desk' | 'plant' | 'table' | 'door' | 'sofa';
-export const DECOR_KINDS: readonly DecorKind[] = ['chair', 'desk', 'plant', 'table', 'door', 'sofa'];
+export type DecorKind = 'chair' | 'desk' | 'plant' | 'table' | 'door' | 'sofa' | 'tree';
+export const DECOR_KINDS: readonly DecorKind[] = ['chair', 'desk', 'plant', 'table', 'door', 'sofa', 'tree'];
 
 /** The most items one request may set, like the placed chairs before them. */
 export const MAX_DECOR_EDITS = 500;
@@ -97,9 +97,9 @@ export function isDecorColor(value: unknown): value is string {
   return typeof value === 'string' && DECOR_COLOR.test(value);
 }
 
-/** Chairs, desk tables, room tables and doors turn; a plant is drawn in one frame. */
+/** Chairs, desk tables, room tables and doors turn; a plant or a tree is drawn in one frame. */
 export function isRotatable(kind: DecorKind): boolean {
-  return kind !== 'plant';
+  return kind !== 'plant' && kind !== 'tree';
 }
 
 /**
@@ -149,8 +149,8 @@ export function decorPieceInfo(piece: {
   readonly colorable?: boolean;
 }): DecorPieceInfo | null {
   if (!isDecorKind(piece.kind)) return null;
-  // Only desk tables, chairs and sofas take a color in the art contract (`colorable` of `ArtDeskPiece`, `ArtChairPiece` and `ArtSofaPiece`).
-  const colorable = (piece.kind === 'desk' || piece.kind === 'chair' || piece.kind === 'sofa') && piece.colorable === true ? { colorable: true as const } : {};
+  // Only desk tables, chairs, sofas and trees take a color in the art contract (`colorable` of `ArtDeskPiece`, `ArtChairPiece`, `ArtSofaPiece` and `ArtTreePiece`).
+  const colorable = (piece.kind === 'desk' || piece.kind === 'chair' || piece.kind === 'sofa' || piece.kind === 'tree') && piece.colorable === true ? { colorable: true as const } : {};
   const fixed = FIXED_FOOTPRINTS[piece.kind];
   if (fixed !== undefined) return { kind: piece.kind, footprint: fixed, ...colorable };
   const footprint = piece.footprint;
@@ -161,7 +161,8 @@ export function decorPieceInfo(piece: {
 /**
  * What the id alone says when no catalog knows the piece: chairs, desk
  * tables have a fixed footprint, a door's span is in its id (`doorSpanOf`), so
- * are a sofa's seats (`sofaSeatsOf`), and plants take one tile; a room
+ * are a sofa's seats (`sofaSeatsOf`), and plants and trees take one tile (a
+ * tree stands on its base, whatever its crown covers); a room
  * table's footprint only its catalog entry has, so it is `null`. Whether a
  * sofa takes a color is its catalog's to say.
  */
@@ -173,7 +174,7 @@ export function decorInfoFromPieceId(piece: string): DecorPieceInfo | null {
     const seats = sofaSeatsOf(piece);
     return seats === null ? null : decorPieceInfo({ kind, footprint: { w: seats, h: 1 } });
   }
-  if (kind === 'plant') return decorPieceInfo({ kind, footprint: { w: 1, h: 1 } });
+  if (kind === 'plant' || kind === 'tree') return decorPieceInfo({ kind, footprint: { w: 1, h: 1 } });
   return null;
 }
 

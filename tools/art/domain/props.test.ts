@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ART_TILE, BRIDGE, BRIDGE_ORIENTATIONS, HEDGE, PLANT, TABLE, TABLE_FACINGS, TREE, countColors } from '../../../src/game/artContract.ts';
 import type { PixelBuffer } from '../../../src/art/pixelBuffer.ts';
-import { bridgeSprite, hedgeSprite, plantSprite, PLANT_KINDS, treeSprite, TREE_KINDS } from './props.ts';
+import { bridgeSprite, DEFAULT_TREE_COLOR, hedgeSprite, plantSprite, PLANT_KINDS, treeSprite, TREE_KINDS } from './props.ts';
 import { ROOM_TABLE_FOOTPRINTS, ROOM_TABLES, roomTableSprite, TABLE_HEIGHT } from './tables.ts';
 
 function corners(image: PixelBuffer): number[] {
@@ -60,15 +60,87 @@ describe('trees', () => {
     }
   });
 
-  it('read as a green oak and an autumn maple', () => {
-    const oak = averageOpaque(treeSprite('oak'), [10, 50]);
-    const maple = averageOpaque(treeSprite('maple'), [10, 50]);
-    expect(oak.g > oak.r && oak.g > oak.b).toBe(true);
-    expect(maple.r > maple.g && maple.g > maple.b).toBe(true);
+  it('outline the trunk down to the ground, over the contact shadow, so its base is never hollow', () => {
+    for (const kind of TREE_KINDS) {
+      const tree = treeSprite(kind);
+      for (let y = TREE.anchor.y - 4; y < TREE.anchor.y; y += 1) {
+        let left = TREE.anchor.x;
+        while (tree.alphaAt(left - 1, y) === 255) left -= 1;
+        let right = TREE.anchor.x;
+        while (tree.alphaAt(right + 1, y) === 255) right += 1;
+        expect(luma(tree.getPixel(left, y)), `${kind} left edge at ${y}`).toBeLessThan(60);
+        expect(luma(tree.getPixel(right, y)), `${kind} right edge at ${y}`).toBeLessThan(60);
+      }
+    }
+  });
+
+  it('keep the large tree\'s bark grooves off the trunk\'s edges, so no groove doubles the outline', () => {
+    const tree = treeSprite('large');
+    const luma = (x: number, y: number): number => {
+      const p = tree.getPixel(x, y);
+      return p.r * 0.3 + p.g * 0.59 + p.b * 0.11;
+    };
+    for (let y = TREE.anchor.y - 28; y < TREE.anchor.y - 6; y += 1) {
+      let left = TREE.anchor.x;
+      while (tree.alphaAt(left - 1, y) === 255) left -= 1;
+      let right = TREE.anchor.x;
+      while (tree.alphaAt(right + 1, y) === 255) right += 1;
+      // The darkest bark between the edges is a groove; the columns next to the outline never are.
+      let groove = Infinity;
+      for (let x = left + 2; x <= right - 2; x += 1) groove = Math.min(groove, luma(x, y));
+      for (const x of [left + 1, right - 1]) expect(luma(x, y), `row ${y}, column ${x}`).toBeGreaterThan(groove + 4);
+    }
+  });
+
+  it('draw the large tree about 3 tiles tall, a wide trunk inside its 1x1 base, the crown hanging down to about a tile above the ground', () => {
+    const tree = treeSprite('large');
+    const large = opaqueBounds(tree);
+    const oak = opaqueBounds(treeSprite('oak'));
+    // About 3 tiles from the ground to the top of the crown.
+    expect(TREE.anchor.y - large.y0).toBeGreaterThanOrEqual(3 * ART_TILE - 10);
+    expect(large.x1 - large.x0).toBeGreaterThan(oak.x1 - oak.x0 + 6);
+    // The leaves hang low: only about a tile of trunk shows under them.
+    const green = (y: number): boolean => tree.getPixel(TREE.anchor.x, y).g > tree.getPixel(TREE.anchor.x, y).r;
+    let crownBottom = TREE.anchor.y - 4;
+    while (crownBottom > 0 && !green(crownBottom)) crownBottom -= 1;
+    const trunk = TREE.anchor.y - crownBottom;
+    expect(trunk).toBeGreaterThanOrEqual(0.8 * ART_TILE);
+    expect(trunk).toBeLessThanOrEqual(1.25 * ART_TILE);
+    // Wide, yet inside its tile.
+    const row = (y: number): number => {
+      let n = 0;
+      for (let x = 0; x < tree.width; x += 1) if (tree.alphaAt(x, y) === 255) n += 1;
+      return n;
+    };
+    for (const y of [TREE.anchor.y - 8, TREE.anchor.y - ART_TILE]) {
+      expect(row(y), `trunk at ${y}`).toBeGreaterThanOrEqual(ART_TILE / 2);
+      expect(row(y), `trunk at ${y}`).toBeLessThanOrEqual(ART_TILE);
+    }
+  });
+
+  it('draw one tree, green by default, whose leaves take any color while its trunk and silhouette stay', () => {
+    expect([...TREE_KINDS]).toEqual(['oak', 'large']);
+    const green = averageOpaque(treeSprite('oak'), [10, 50]);
+    expect(green.g > green.r && green.g > green.b).toBe(true);
+    expect(treeSprite('oak', DEFAULT_TREE_COLOR)).toBe(treeSprite('oak'));
+    const autumn = treeSprite('oak', '#d9822b');
+    const orange = averageOpaque(autumn, [10, 50]);
+    expect(orange.r > orange.g && orange.g > orange.b).toBe(true);
+    const alpha = (image: PixelBuffer): number[] => Array.from(image.data).filter((_, index) => index % 4 === 3);
+    expect(alpha(autumn)).toEqual(alpha(treeSprite('oak')));
+    expect(autumn.getPixel(TREE.anchor.x, TREE.anchor.y - 10)).toEqual(treeSprite('oak').getPixel(TREE.anchor.x, TREE.anchor.y - 10));
   });
 });
 
 describe('plants', () => {
+  it('keep the bonsai small: a shallow pot and a low crown, well under the ficus', () => {
+    const bonsai = opaqueBounds(plantSprite('bonsai'));
+    const ficus = opaqueBounds(plantSprite('ficus'));
+    expect(bonsai.y1 - bonsai.y0).toBeLessThan(ficus.y1 - ficus.y0 - 10);
+    expect(bonsai.y1 - bonsai.y0).toBeLessThan(ART_TILE);
+    expect(bonsai.y1 - bonsai.y0).toBeGreaterThan(16);
+  });
+
   it('sit a pot on the anchor tile with leaves above it', () => {
     for (const kind of PLANT_KINDS) {
       const plant = plantSprite(kind);
@@ -77,7 +149,8 @@ describe('plants', () => {
       expect(plant.alphaAt(PLANT.anchor.x, PLANT.anchor.y - 4), 'pot').toBe(255);
       const leaves = averageOpaque(plant, [4, 24]);
       expect(leaves.g > leaves.r && leaves.g > leaves.b).toBe(true);
-      expect(opaqueBounds(plant).y0).toBeLessThan(PLANT.anchor.y - ART_TILE);
+      // The bonsai is the small one: it stays under a tile tall (below).
+      if (kind !== 'bonsai') expect(opaqueBounds(plant).y0).toBeLessThan(PLANT.anchor.y - ART_TILE);
     }
   });
 });
@@ -150,9 +223,9 @@ describe('hedges', () => {
 });
 
 describe('room tables', () => {
-  it('match the meeting room and cafeteria tables of the map, plus a small oval one', () => {
-    expect(ROOM_TABLES).toEqual(['meeting', 'cafeteria', 'oval']);
-    expect(ROOM_TABLE_FOOTPRINTS).toEqual({ meeting: { w: 7, h: 5 }, cafeteria: { w: 5, h: 3 }, oval: { w: 2, h: 1 } });
+  it('match the meeting room and cafeteria tables of the map, plus a small oval one and a 1x1 round one', () => {
+    expect(ROOM_TABLES).toEqual(['meeting', 'cafeteria', 'oval', 'round']);
+    expect(ROOM_TABLE_FOOTPRINTS).toEqual({ meeting: { w: 7, h: 5 }, cafeteria: { w: 5, h: 3 }, oval: { w: 2, h: 1 }, round: { w: 1, h: 1 } });
   });
 
   it('cover their footprint in both facings, the vertical one swapped, lift their top TABLE_HEIGHT over it and fit the table frame', () => {
@@ -179,7 +252,8 @@ describe('room tables', () => {
   });
 
   it('draw the vertical facing as its own top-down drawing, not the horizontal one turned', () => {
-    for (const kind of ROOM_TABLES) {
+    // A square footprint (the round table) looks the same standing either way.
+    for (const kind of ROOM_TABLES.filter((table) => ROOM_TABLE_FOOTPRINTS[table].w !== ROOM_TABLE_FOOTPRINTS[table].h)) {
       const horizontal = opaqueBounds(roomTableSprite(kind, 'horizontal'));
       const vertical = opaqueBounds(roomTableSprite(kind, 'vertical'));
       const { w, h } = ROOM_TABLE_FOOTPRINTS[kind];
@@ -192,17 +266,36 @@ describe('room tables', () => {
     }
   });
 
-  it('round the oval table: the corners of its footprint stay clear while its middle is covered', () => {
+  it('round the oval and the round tables: the corners of their footprint stay clear while the middle is covered', () => {
+    for (const kind of ['oval', 'round'] as const) {
+      for (const facing of TABLE_FACINGS) {
+        const table = roomTableSprite(kind, facing);
+        const stated = ROOM_TABLE_FOOTPRINTS[kind];
+        const { w, h } = facing === 'vertical' ? { w: stated.h, h: stated.w } : stated;
+        const left = TABLE.anchor.x - (w * ART_TILE) / 2;
+        const top = TABLE.anchor.y - h * ART_TILE - TABLE_HEIGHT;
+        // The top's corner pixels, lifted TABLE_HEIGHT over the footprint's corners: a round top leaves them empty.
+        expect(table.alphaAt(left + 1, top + 1), `${kind} ${facing} top left`).toBe(0);
+        expect(table.alphaAt(left + w * ART_TILE - 2, top + 1), `${kind} ${facing} top right`).toBe(0);
+        expect(table.alphaAt(TABLE.anchor.x, top + (h * ART_TILE) / 2), `${kind} ${facing} middle`).toBe(255);
+      }
+    }
+  });
+
+  it('draw the round table\'s top as a circle on screen: as wide as it shows tall, edge included', () => {
     for (const facing of TABLE_FACINGS) {
-      const table = roomTableSprite('oval', facing);
-      const stated = ROOM_TABLE_FOOTPRINTS.oval;
-      const { w, h } = facing === 'vertical' ? { w: stated.h, h: stated.w } : stated;
-      const left = TABLE.anchor.x - (w * ART_TILE) / 2;
-      const top = TABLE.anchor.y - h * ART_TILE - TABLE_HEIGHT;
-      // The top's corner pixels, lifted TABLE_HEIGHT over the footprint's corners: an oval leaves them empty.
-      expect(table.alphaAt(left + 1, top + 1), `oval ${facing} top left`).toBe(0);
-      expect(table.alphaAt(left + w * ART_TILE - 2, top + 1), `oval ${facing} top right`).toBe(0);
-      expect(table.alphaAt(TABLE.anchor.x, top + (h * ART_TILE) / 2), `oval ${facing} middle`).toBe(255);
+      const table = roomTableSprite('round', facing);
+      const widths: number[] = [];
+      for (let y = 0; y < table.height; y += 1) {
+        let n = 0;
+        for (let x = 0; x < table.width; x += 1) if (table.alphaAt(x, y) === 255) n += 1;
+        widths.push(n);
+      }
+      const widest = Math.max(...widths);
+      // The top's rows, wider than the pedestal under it (8px with its outline).
+      const topRows = widths.filter((n) => n >= 10).length;
+      expect(widest - topRows, `round ${facing}: ${widest} wide, ${topRows} tall`).toBeGreaterThanOrEqual(0);
+      expect(widest - topRows, `round ${facing}: ${widest} wide, ${topRows} tall`).toBeLessThanOrEqual(2);
     }
   });
 });

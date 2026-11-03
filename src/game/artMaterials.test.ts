@@ -23,7 +23,7 @@ function catalog(): MaterialCatalog {
 
 describe('materialCatalogFrom', () => {
   it('offers every desk and floor material of the pack, in pack order, with its Spanish name', () => {
-    expect(catalog().desk.map((option) => option.id)).toEqual(['desk-glass', 'desk-metal', 'desk-wood', 'desk-painted']);
+    expect(catalog().desk.map((option) => option.id)).toEqual(['desk-glass', 'desk-metal', 'desk-wood', 'desk-painted', 'desk-gamer', 'desk-curved']);
     expect(catalog().floor.map((option) => option.id)).toEqual([
       'floor-wood',
       'floor-grass',
@@ -38,11 +38,12 @@ describe('materialCatalogFrom', () => {
     expect(catalog().desk.find((option) => option.id === 'desk-painted')?.name).toBe('Escritorio pintado');
   });
 
-  it('marks only the painted desk, the plain floor and the carpet as colorable, with their default colors', () => {
+  it('marks only the painted desk, the gamer desk (its lights), the plain floor and the carpet as colorable, with their default colors', () => {
     const colorable = [...catalog().desk, ...catalog().floor].filter((option) => option.colorable);
 
     expect(colorable.map((option) => [option.id, option.defaultColor])).toEqual([
       ['desk-painted', '#4f9a8a'],
+      ['desk-gamer', '#a066e8'],
       ['floor-plain', '#b9c3cc'],
       ['floor-carpet', '#5a6f86'],
     ]);
@@ -79,11 +80,13 @@ describe('materialCatalogFrom: chairs', () => {
       ['chair-office', 'chair'],
       ['chair-task', 'chair'],
       ['chair-fabric', 'chair'],
+      ['chair-dining', 'chair'],
+      ['chair-pouf', 'chair'],
     ]);
     expect(catalog().chair[0]!.sheetUrl).toBe('assets/pack/chair/wood.png');
   });
 
-  it('marks only the gamer chair (its red accent) and the fabric armchair as colorable', () => {
+  it('marks only the gamer chair (its red accent), the fabric armchair and the pouf as colorable', () => {
     expect(catalog().chair.map((option) => [option.id, option.colorable, option.defaultColor])).toEqual([
       ['chair-wood', false, null],
       ['chair-metal', false, null],
@@ -92,6 +95,8 @@ describe('materialCatalogFrom: chairs', () => {
       ['chair-office', false, null],
       ['chair-task', false, null],
       ['chair-fabric', true, '#c4ab8c'],
+      ['chair-dining', false, null],
+      ['chair-pouf', true, '#6b8fb3'],
     ]);
   });
 
@@ -144,11 +149,15 @@ describe('materialCatalogFrom: walls', () => {
 
 describe('materialCatalogFrom: plants and room tables (#208)', () => {
   it('offers every plant and room table of the pack, never colorable, for the decor palette', () => {
-    expect(catalog().plant.map((option) => [option.id, option.kind, option.name])).toEqual([['plant-ficus', 'plant', 'Ficus']]);
+    expect(catalog().plant.map((option) => [option.id, option.kind, option.name])).toEqual([
+      ['plant-ficus', 'plant', 'Ficus'],
+      ['plant-bonsai', 'plant', 'Bonsái'],
+    ]);
     expect(catalog().table.map((option) => [option.id, option.kind])).toEqual([
       ['table-meeting', 'table'],
       ['table-cafeteria', 'table'],
       ['table-oval', 'table'],
+      ['table-round', 'table'],
     ]);
     expect([...catalog().plant, ...catalog().table].every((option) => !option.colorable && option.defaultColor === null)).toBe(true);
     expect(catalog().plant[0]!.sheetUrl).toBe('assets/pack/plant/ficus.png');
@@ -219,7 +228,7 @@ describe('loadMaterialCatalog', () => {
     const result = await loadMaterialCatalog({ manifestUrl: MANIFEST_URL, fetchImpl });
 
     expect(fetchImpl).toHaveBeenCalledWith(MANIFEST_URL);
-    expect(result?.desk).toHaveLength(4);
+    expect(result?.desk).toHaveLength(6);
   });
 
   it('answers null instead of throwing when the manifest is missing or unreadable', async () => {
@@ -261,11 +270,11 @@ describe('uploaded materials (#121)', () => {
 
   it('reads both manifests, and a missing uploads manifest leaves the pack', async () => {
     const both = vi.fn(async (url: string) => ({ ok: true, json: async () => (url === UPLOADS_URL ? UPLOADS : PACK) }) as Response);
-    expect((await loadMaterialCatalog({ manifestUrl: MANIFEST_URL, uploadsUrl: UPLOADS_URL, fetchImpl: both as unknown as typeof fetch }))?.desk).toHaveLength(5);
+    expect((await loadMaterialCatalog({ manifestUrl: MANIFEST_URL, uploadsUrl: UPLOADS_URL, fetchImpl: both as unknown as typeof fetch }))?.desk).toHaveLength(7);
 
     const noUploads = vi.fn(async (url: string) =>
       url === UPLOADS_URL ? ({ ok: false, json: async () => ({}) } as Response) : ({ ok: true, json: async () => PACK } as Response),
     );
-    expect((await loadMaterialCatalog({ manifestUrl: MANIFEST_URL, uploadsUrl: UPLOADS_URL, fetchImpl: noUploads as unknown as typeof fetch }))?.desk).toHaveLength(4);
+    expect((await loadMaterialCatalog({ manifestUrl: MANIFEST_URL, uploadsUrl: UPLOADS_URL, fetchImpl: noUploads as unknown as typeof fetch }))?.desk).toHaveLength(6);
   });
 });

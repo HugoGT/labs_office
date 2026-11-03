@@ -19,7 +19,7 @@ import { ColorableTile } from './ColorableTile';
  * the colors and what a click on the map does.
  */
 
-type DecorCatalogKind = 'chair' | 'sofa' | 'desk' | 'table' | 'plant' | 'door';
+type DecorCatalogKind = 'chair' | 'sofa' | 'desk' | 'table' | 'plant' | 'tree' | 'door';
 
 /** The groups in palette order, named for the person picking, each with the catalog kinds it lists in order. */
 const GROUPS: readonly { kinds: readonly DecorCatalogKind[]; label: string }[] = [
@@ -28,9 +28,20 @@ const GROUPS: readonly { kinds: readonly DecorCatalogKind[]; label: string }[] =
   // A room's furniture together. Only the office scope offers it (`fitsDeskArea` leaves both out).
   { kinds: ['table', 'sofa'], label: 'Muebles de sala' },
   { kinds: ['plant'], label: 'Plantas' },
+  // Only the office scope offers them (`fitsDeskArea` leaves trees out).
+  { kinds: ['tree'], label: 'Árboles' },
   // #223: only the office scope offers them (the desk scope's `fitsDeskArea` leaves doors out).
   { kinds: ['door'], label: 'Puertas' },
 ];
+
+/** The kinds whose pieces that take a color come first, so the ones people paint are at hand. */
+const COLORABLE_FIRST: ReadonlySet<DecorCatalogKind> = new Set(['chair', 'desk']);
+
+/** `options` with the colorable ones first for a kind that asks for it, each part in catalog order. */
+function inPaletteOrder(kind: DecorCatalogKind, options: readonly MaterialOption[]): readonly MaterialOption[] {
+  if (!COLORABLE_FIRST.has(kind)) return options;
+  return [...options.filter((option) => option.colorable), ...options.filter((option) => !option.colorable)];
+}
 
 /** The kinds whose tile also writes their size in tiles, which tells pieces of one look apart. */
 const SIZED: ReadonlySet<DecorCatalogKind> = new Set(['table', 'sofa']);
@@ -39,13 +50,13 @@ const SIZED: ReadonlySet<DecorCatalogKind> = new Set(['table', 'sofa']);
 const THUMBNAIL_PX = 48;
 
 /**
- * Sheet pixels per thumbnail pixel: a desk cell (96x104) is bigger than the
+ * box, and a room table or a tree shrinks just enough to fit, so the small oval one
  * box, and a room table shrinks just enough to fit, so the small oval one
  * reads as big as it can.
  */
 function shrinkFor(kind: DecorCatalogKind, frame: { readonly width: number; readonly height: number }): number {
   if (kind === 'desk' || kind === 'sofa') return 2;
-  if (kind === 'table') return Math.max(1, Math.ceil(Math.max(frame.width, frame.height) / THUMBNAIL_PX));
+  if (kind === 'table' || kind === 'tree') return Math.max(1, Math.ceil(Math.max(frame.width, frame.height) / THUMBNAIL_PX));
   return 1;
 }
 
@@ -127,7 +138,7 @@ export function DecorPalette({ value, catalog, offers = () => true, colors = {},
     <div className={styles.palettes}>
       {GROUPS.map(({ kinds, label }) => {
         const entries = kinds.flatMap((kind) =>
-          (catalog?.[kind] ?? []).flatMap((option) => {
+          inPaletteOrder(kind, catalog?.[kind] ?? []).flatMap((option) => {
             // A retired upload still draws where it was placed (#264), but is not offered.
             if (option.retired) return [];
             const pick = decorPickOf(option);

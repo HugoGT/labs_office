@@ -1,6 +1,6 @@
 /**
- * Tables in four materials (glass, metal, wood and a painted one colored like the plain floor)
- * and the four facings of seating.ts, built from boxes by furnitureModel.ts. A table's facing is
+ * Tables in four materials (glass, metal, wood and a painted one colored like the plain floor),
+ * a black gamer desk with colorable side lights and a curved wooden desk, in the four facings of seating.ts, built from boxes by furnitureModel.ts. A table's facing is
  * the way a person seated at it looks, so a chair with the same facing goes on that side: facing
  * up, the chair is south of the table.
  *
@@ -11,14 +11,23 @@
  */
 import { makeRamp, mixRgba, type Ramp } from './color.ts';
 import { ART_TILE, TABLE, type Footprint, type TableFacing } from '../../../src/game/artContract.ts';
+import { TABLE_DEPTH_PX, TABLE_LONG_SIDE_PX } from '../../../src/game/deskTable.ts';
 import { DEPTH_SCALE, floorPoint, floorSpans, renderFurniture, type Box, type FurnitureModel, type Span, type SurfacePoint } from './furnitureModel.ts';
 import { PixelBuffer, rgba, type Rgba } from '../../../src/art/pixelBuffer.ts';
 import type { Facing, SeatPoint } from '../../../src/art/seating.ts';
 
-export const TABLE_MATERIALS = ['glass', 'metal', 'wood', 'painted'] as const;
+export const TABLE_MATERIALS = ['glass', 'metal', 'wood', 'painted', 'gamer', 'curved'] as const;
 export type TableMaterial = (typeof TABLE_MATERIALS)[number];
 
 export const DEFAULT_TABLE_COLOR = '#4f9a8a';
+/** The purple of the gamer desk's side lights, and the color the pack exports it in. */
+export const DEFAULT_GAMER_LIGHT = '#a066e8';
+
+/** The color a colorable desk is exported in: the painted one all over, the gamer one only in its lights. */
+export const DESK_DEFAULT_COLORS: Readonly<Partial<Record<TableMaterial, string>>> = {
+  painted: DEFAULT_TABLE_COLOR,
+  gamer: DEFAULT_GAMER_LIGHT,
+};
 
 /** Screen pixels from the floor to the table top. */
 export const TABLE_HEIGHT = 15;
@@ -33,26 +42,32 @@ export interface TableSprite {
   readonly chairGround: SeatPoint;
   /** Screen pixels of floor the top runs along its long side, the outline aside. */
   readonly floorLength: number;
+  /** Screen pixels of floor across a regular desk's top (front to back edge), the outline aside: rows facing up or down, columns facing left or right. */
+  readonly floorDepth: number;
 }
 
 /** Model extents: `u` runs from the sitter's side (negative) to the far side, `v` along the top. */
-const HALF_DEPTH = 12;
+const HALF_DEPTH = TABLE_DEPTH_PX / 2;
 /**
- * Half the long side on screen: 80px, about 2.5 tiles, so a table sits
- * centered on a 3-tile edge of a desk (a decor table, Editar espacios) and
- * leaves the rest of the 3x3 free. Facing left or right the long side runs
+ * Half the long side on screen: 84px, a little over 2.5 tiles, so a table
+ * sits centered on a 3-tile edge of a desk (a decor table, Editar espacios)
+ * close to its neighbours (S19). Facing left or right the long side runs
  * along the floor depth, which DEPTH_SCALE shortens, so the model is longer
- * there to draw the same 80px.
+ * there to draw the same 84px.
  */
-const HALF_LENGTH_PX = 40;
+const HALF_LENGTH_PX = TABLE_LONG_SIDE_PX / 2;
+/** How much the desks grew from their first 80px; the curved desk's arcs grow with it. */
+const GROWTH = TABLE_LONG_SIDE_PX / 80;
 const TOP_UNDER = TABLE_HEIGHT - 2;
 const LEG_U: Span = [HALF_DEPTH - 3, HALF_DEPTH - 1];
 /**
- * A chair's seat is 14 deep. In front of or behind the table it slides 3 pixels under the top; beside
- * it (left/right) the sitter sorts before the table, so the seat stops 2 pixels short of the top
+ * A chair's seat is 14 deep. In front of or behind the table its ground point sits 3 floor rows
+ * past the top's sitter edge, so the seat slides under the top; counted in rows, not model
+ * pixels, so the gap stays the 80px desk's however DEPTH_SCALE rounds a deeper top. Beside it
+ * (left/right) the sitter sorts before the table, so the seat stops 2 pixels short of the top
  * and the table never covers the sitter's head and chest.
  */
-const CHAIR_U = -(HALF_DEPTH + 7 - 3);
+const CHAIR_ROWS_PAST_EDGE = 3;
 const SIDE_CHAIR_U = -(HALF_DEPTH + 7 + 2);
 
 interface TableLook {
@@ -151,7 +166,7 @@ function grain(point: SurfacePoint, color: Rgba): Rgba {
   return line && !broken ? mixRgba(color, WALNUT.shadow, 0.45) : color;
 }
 
-function look(material: TableMaterial, color: string): TableLook {
+function look(material: 'glass' | 'metal' | 'wood' | 'painted', color: string): TableLook {
   switch (material) {
     case 'glass':
       return { top: GLASS, frame: CHROME, pull: CHROME, glass: true, topShade: glare };
@@ -164,35 +179,142 @@ function look(material: TableMaterial, color: string): TableLook {
   }
 }
 
+// --- Gamer desk --------------------------------------------------------------------------------
+
+/** Near black, a little blue, so no part of the body sits on the lights' ramp. */
+const CARBON = makeRamp('#2a2c33');
+const CARBON_FRAME = makeRamp('#1e1f25');
+
+/**
+ * A black gaming desk: a carbon top on two solid end panels, a modesty panel at the back and no
+ * drawer. Light strips run along both short sides of the top and down the front of each end panel,
+ * painted only in the tones of `light`'s ramp so the office can recolor them alone.
+ */
+function gamerDeskModel(lightHex: string, halfWidth: number): FurnitureModel {
+  const LIGHT = makeRamp(lightHex);
+  const strip: Span = [halfWidth - 4, halfWidth - 2];
+  const carbon = (point: SurfacePoint, color: Rgba): Rgba => {
+    const side = Math.abs(point.v);
+    if (point.face === 'top') {
+      if (side >= strip[0] && side < strip[1] && Math.abs(point.u) < HALF_DEPTH - 1) return Math.abs(point.u) < HALF_DEPTH - 3 ? LIGHT.light : LIGHT.base;
+      // Carbon weave: a faint diagonal hatch, kept off the rim.
+      return point.col > 1 && point.row > 0 && (point.col + point.row * 2) % 6 === 0 ? CARBON.shadow : color;
+    }
+    return color;
+  };
+  const top: Box = { u: [-HALF_DEPTH, HALF_DEPTH], v: [-halfWidth, halfWidth], y: [TOP_UNDER, TABLE_HEIGHT], ramp: CARBON, top: 'base', side: 'shadow', shade: carbon };
+  // An end panel carries its light as an upright bar near the sitter's edge: seen from the front it is the panel's narrow face.
+  const endLight = (point: SurfacePoint, color: Rgba): Rgba => {
+    if (point.face === 'top' || point.row < 2 || point.row >= point.height - 1) return color;
+    const near = point.face === 'forward' || point.face === 'backward' ? Math.abs(point.col + 0.5 - point.width / 2) < 1 : point.u > -HALF_DEPTH + 3 && point.u < -HALF_DEPTH + 5;
+    return near ? LIGHT.base : color;
+  };
+  const end: Box = { u: [-HALF_DEPTH + 2, HALF_DEPTH - 2], v: [halfWidth - 6, halfWidth - 2], y: [0, TOP_UNDER], ramp: CARBON_FRAME, top: 'base', side: 'base', shade: endLight };
+  const panel: Box = { u: [HALF_DEPTH - 5, HALF_DEPTH - 3], v: [-halfWidth + 6, halfWidth - 6], y: [4, TOP_UNDER], ramp: CARBON_FRAME, top: 'shadow', side: 'shadow' };
+  // A beam under the sitter's edge of the top, like the other desks' apron, stiffens the long span.
+  const beam: Box = { u: [-HALF_DEPTH + 1, -HALF_DEPTH + 3], v: [-halfWidth + 6, halfWidth - 6], y: [TOP_UNDER - 3, TOP_UNDER], ramp: CARBON_FRAME, top: 'base', side: 'base' };
+  return {
+    shadow: { u: [-HALF_DEPTH + 1, HALF_DEPTH - 1], v: [-halfWidth + 1, halfWidth - 1], shape: 'rect' },
+    parts: [{ boxes: [end, mirrorV(end)] }, { boxes: [panel] }, { boxes: [beam, top] }],
+  };
+}
+
+// --- Curved desk -------------------------------------------------------------------------------
+
+const TERRACOTTA = makeRamp('#b9683c');
+/** The curved desk's top runs this much deeper than the others, so the front half-ring has room. */
+const CURVED_HALF_DEPTH = HALF_DEPTH + Math.round(6 * GROWTH);
+
+/**
+ * A curved wooden desk, as seen from above: its far corners rounded off in a wide arc and, at the
+ * middle of the sitter's side, a half circle cut into the top where the chair rolls in, ringed by a
+ * rounded rim like half a donut. Built as one slab per model row (boxes are axis aligned), each slab as wide as
+ * the shape there, so it reads the same from every facing.
+ */
+function curvedDeskModel(halfWidth: number): FurnitureModel {
+  // Turned sideways the long side is drawn longer (DEPTH_SCALE), so the arcs along it stretch too.
+  const stretch = halfWidth / HALF_LENGTH_PX;
+  const corner = Math.round(14 * GROWTH);
+  const notch = Math.round(11 * GROWTH);
+  const ring = Math.round(4 * GROWTH);
+  const front = -HALF_DEPTH;
+  const back = CURVED_HALF_DEPTH;
+  // How far a point sits from the notch's middle, in notch radii (v squeezed back by the stretch).
+  const fromNotch = (point: SurfacePoint): number => Math.hypot((point.u - front) / notch, point.v / stretch / notch);
+  const shade = (point: SurfacePoint, color: Rgba): Rgba => {
+    if (point.face !== 'top') return color;
+    // The half-ring around the notch: a rounded rim, lit on its inner edge and shaded where it falls away outside.
+    const ringAt = fromNotch(point);
+    if (ringAt < (notch + ring) / notch) {
+      const t = (ringAt - 1) / (ring / notch);
+      return t < 0.3 ? TERRACOTTA.light : t < 0.75 ? mixRgba(TERRACOTTA.base, TERRACOTTA.light, 0.35) : TERRACOTTA.shadow;
+    }
+    const grain = Math.floor(point.u * 0.55 + 20) % 3 === 0 && Math.floor(Math.abs(point.v) / 6 + point.u) % 4 !== 0;
+    return grain ? mixRgba(color, TERRACOTTA.shadow, 0.3) : color;
+  };
+  const top: Box[] = [];
+  for (let u = front; u < back; u += 1) {
+    const middle = u + 0.5;
+    // Far corners: a quarter circle of radius `corner` (stretched along v).
+    const intoCorner = middle - (back - corner);
+    const half = intoCorner > 0 ? halfWidth - corner * stretch + Math.round(corner * stretch * Math.sqrt(Math.max(0, 1 - (intoCorner / corner) ** 2))) : halfWidth;
+    // Front notch: a half circle of radius `notch` around the middle of the sitter's edge.
+    const fromFront = middle - front;
+    const open = fromFront < notch ? Math.round(notch * stretch * Math.sqrt(1 - (fromFront / notch) ** 2)) : 0;
+    const slab = { u: [u, u + 1] as Span, y: [TOP_UNDER, TABLE_HEIGHT] as Span, ramp: TERRACOTTA, top: 'base', side: 'shadow', shade } as const;
+    if (open === 0) top.push({ ...slab, v: [-half, half] });
+    else top.push({ ...slab, v: [-half, -open] }, { ...slab, v: [open, half] });
+  }
+  const leg = (u: Span, v: Span): Box => ({ u, v, y: [0, TOP_UNDER], ramp: TERRACOTTA, top: 'base', side: 'shadow' });
+  const legs = [leg([front + 2, front + 5], [halfWidth - 6, halfWidth - 3]), leg([back - 9, back - 6], [halfWidth - 10, halfWidth - 7])];
+  const panel: Box = { u: [back - 8, back - 6], v: [-halfWidth + 12, halfWidth - 12], y: [3, TOP_UNDER], ramp: TERRACOTTA, top: 'shadow', side: 'shadow' };
+  return {
+    // Up to the back edge, not past it: a row further rounds into one more floor row facing down than up.
+    shadow: { u: [front + 1, back], v: [-halfWidth, halfWidth], shape: 'ellipse' },
+    parts: [{ boxes: [...legs, ...legs.map(mirrorV)] }, { boxes: [panel] }, { boxes: top }],
+  };
+}
+
 const cache = new Map<string, TableSprite>();
 
-/** `color` only paints the painted table; the others keep their material. */
-export function tableSprite(material: TableMaterial, facing: Facing, color = DEFAULT_TABLE_COLOR): TableSprite {
-  const id = `${material}:${facing}:${material === 'painted' ? color : ''}`;
+/** `color` paints a colorable desk (DESK_DEFAULT_COLORS); the others keep their material. */
+export function tableSprite(material: TableMaterial, facing: Facing, color?: string): TableSprite {
+  const fallback = DESK_DEFAULT_COLORS[material];
+  const painted = fallback === undefined ? '' : (color ?? fallback);
+  const id = `${material}:${facing}:${painted}`;
   const cached = cache.get(id);
   if (cached) return cached;
   const halfWidth = halfWidthFor(facing);
-  const { back, origin } = renderFurniture(tableModel(look(material, color), halfWidth), facing, 192);
-  const spans = floorSpans(facing, [-HALF_DEPTH, HALF_DEPTH], [-halfWidth, halfWidth]);
+  const model =
+    material === 'gamer' ? gamerDeskModel(painted, halfWidth) : material === 'curved' ? curvedDeskModel(halfWidth) : tableModel(look(material, painted), halfWidth);
+  const { back, origin } = renderFurniture(model, facing, 192);
+  // The curved desk's top runs deeper on the far side; its front edge, where people sit, is the others'.
+  const spans = floorSpans(facing, [-HALF_DEPTH, material === 'curved' ? CURVED_HALF_DEPTH : HALF_DEPTH], [-halfWidth, halfWidth]);
   const front = spans.z[1] - 1;
-  const floorLength = facing === 'up' || facing === 'down' ? spans.x[1] - spans.x[0] : spans.z[1] - spans.z[0];
-  const chair = floorPoint(facing, facing === 'left' || facing === 'right' ? SIDE_CHAIR_U : CHAIR_U, 0);
+  const across = facing === 'up' || facing === 'down';
+  const floorLength = across ? spans.x[1] - spans.x[0] : spans.z[1] - spans.z[0];
+  const regular = floorSpans(facing, [-HALF_DEPTH, HALF_DEPTH], [-halfWidth, halfWidth]);
+  const floorDepth = across ? regular.z[1] - regular.z[0] : regular.x[1] - regular.x[0];
+  const chair = across
+    ? { x: 0, y: facing === 'up' ? regular.z[1] + CHAIR_ROWS_PAST_EDGE : regular.z[0] - CHAIR_ROWS_PAST_EDGE }
+    : floorPoint(facing, SIDE_CHAIR_U, 0);
   const sprite: TableSprite = {
     image: back,
     center: origin,
     ground: { x: origin.x, y: origin.y + front },
     chairGround: { x: origin.x + chair.x, y: origin.y + chair.y },
     floorLength,
+    floorDepth,
   };
-  if (material === 'painted' && cache.size > 64) cache.clear();
+  if (painted !== '' && cache.size > 64) cache.clear();
   cache.set(id, sprite);
   return sprite;
 }
 
 // --- Room tables -------------------------------------------------------------------------------
 
-/** The shared tables of the map: the meeting room's, the cafeteria's and a small oval one (#208). */
-export const ROOM_TABLES = ['meeting', 'cafeteria', 'oval'] as const;
+/** The shared tables of the map: the meeting room's, the cafeteria's, a small oval one (#208) and a 1x1 round one. */
+export const ROOM_TABLES = ['meeting', 'cafeteria', 'oval', 'round'] as const;
 export type RoomTable = (typeof ROOM_TABLES)[number];
 
 /**
@@ -203,6 +325,7 @@ export const ROOM_TABLE_FOOTPRINTS: Readonly<Record<RoomTable, Footprint>> = {
   meeting: { w: 7, h: 5 },
   cafeteria: { w: 5, h: 3 },
   oval: { w: 2, h: 1 },
+  round: { w: 1, h: 1 },
 };
 
 const BEECH = makeRamp('#c8a06a');
@@ -263,17 +386,19 @@ function roomTableModel(kind: 'meeting' | 'cafeteria', facing: TableFacing): Fur
 }
 
 /**
- * The oval table: its top an ellipse inscribed in the footprint, built as one slab per floor row
+ * The oval table, and the round one on a single tile: its top an ellipse inscribed in the footprint, built as one slab per floor row
  * (the boxes are axis aligned), each as wide as the ellipse at that row, so the rim curves and
  * the front half shows its thin edge. One pedestal on a foot along the long side holds it up.
  * The rim catches the light from the upper left and the grain runs along the long side.
  */
-function ovalTableModel(facing: TableFacing): FurnitureModel {
-  const { w, h } = facingFootprint('oval', facing);
-  const vertical = facing === 'vertical';
+function ovalTableModel(kind: 'oval' | 'round', facing: TableFacing): FurnitureModel {
+  const { w, h } = facingFootprint(kind, facing);
+  // A round table is the same standing either way: its square footprint never turns its foot.
+  const vertical = facing === 'vertical' && kind !== 'round';
   // One pixel inside the footprint, so the outline stays on it.
-  const radiusX = (w * ART_TILE) / 2 - 1;
   const radiusRows = (h * ART_TILE) / 2 - 1;
+  // The edge under a round top shows on screen too, so it is that much wider to read as a circle, not an egg.
+  const radiusX = kind === 'round' ? radiusRows + (TABLE_HEIGHT - TOP_UNDER) / 2 : (w * ART_TILE) / 2 - 1;
   const halfDepth = radiusRows / DEPTH_SCALE;
   const grain = longGrain(OAK.shadow, vertical);
   const shade = (point: SurfacePoint, color: Rgba): Rgba => {
@@ -305,7 +430,7 @@ function ovalTableModel(facing: TableFacing): FurnitureModel {
  * south edge (the footprint swapped when vertical) on TABLE.anchor.
  */
 export function roomTableSprite(kind: RoomTable, facing: TableFacing = 'horizontal'): PixelBuffer {
-  const model = kind === 'oval' ? ovalTableModel(facing) : roomTableModel(kind, facing);
+  const model = kind === 'oval' || kind === 'round' ? ovalTableModel(kind, facing) : roomTableModel(kind, facing);
   const { back, origin } = renderFurniture(model, 'down', 400);
   const frame = new PixelBuffer(TABLE.frame.width, TABLE.frame.height);
   const halfRows = (facingFootprint(kind, facing).h * ART_TILE) / 2;

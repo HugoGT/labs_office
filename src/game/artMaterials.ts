@@ -32,6 +32,7 @@ import {
   type ArtPlantPiece,
   type ArtSofaPiece,
   type ArtTablePiece,
+  type ArtTreePiece,
   type ArtWallPiece,
 } from './artContract';
 import { combineArtManifests, isRetiredArtPiece, parseArtPackManifest, type ArtAppearance } from './artPack';
@@ -41,7 +42,7 @@ const SHEET_ROLE = 'sheet';
 
 export interface MaterialOption {
   readonly id: string;
-  readonly kind: 'desk' | 'floor' | 'wall' | 'chair' | 'sofa' | 'plant' | 'table' | 'door';
+  readonly kind: 'desk' | 'floor' | 'wall' | 'chair' | 'sofa' | 'plant' | 'tree' | 'table' | 'door';
   /** Spanish name from the manifest. */
   readonly name: string;
   readonly colorable: boolean;
@@ -54,7 +55,7 @@ export interface MaterialOption {
   readonly retired: boolean;
 }
 
-type CatalogPiece = ArtDeskPiece | ArtFloorPiece | ArtWallPiece | ArtChairPiece | ArtSofaPiece | ArtPlantPiece | ArtTablePiece | ArtDoorPiece;
+type CatalogPiece = ArtDeskPiece | ArtFloorPiece | ArtWallPiece | ArtChairPiece | ArtSofaPiece | ArtPlantPiece | ArtTreePiece | ArtTablePiece | ArtDoorPiece;
 
 export interface MaterialCatalog {
   readonly desk: readonly MaterialOption[];
@@ -67,6 +68,8 @@ export interface MaterialCatalog {
   readonly sofa: readonly MaterialOption[];
   /** The plants (pack and uploads), for the decor palette (never colorable). */
   readonly plant: readonly MaterialOption[];
+  /** The trees, for the office's decor palette (colorable only for the broadleaf one's leaves). */
+  readonly tree: readonly MaterialOption[];
   /** The room tables, for the decor palette (never colorable). */
   readonly table: readonly MaterialOption[];
   /** The doors (#223), for the admin's decor palette (never colorable). */
@@ -80,8 +83,8 @@ function manifestFolder(manifestUrl: string): string {
 }
 
 /** The kinds that may take a color of their own (`recolorFor`). */
-function tinted(piece: CatalogPiece): piece is ArtDeskPiece | ArtFloorPiece | ArtChairPiece | ArtSofaPiece {
-  return piece.kind === 'desk' || piece.kind === 'floor' || piece.kind === 'chair' || piece.kind === 'sofa';
+function tinted(piece: CatalogPiece): piece is ArtDeskPiece | ArtFloorPiece | ArtChairPiece | ArtSofaPiece | ArtTreePiece {
+  return piece.kind === 'desk' || piece.kind === 'floor' || piece.kind === 'chair' || piece.kind === 'sofa' || piece.kind === 'tree';
 }
 
 function optionOf(piece: CatalogPiece, folder: string): MaterialOption | null {
@@ -122,17 +125,17 @@ export function materialCatalogFrom(raw: unknown, manifestUrl: string, uploads?:
     { manifest: uploads === undefined ? null : parseArtPackManifest(uploads.raw), url: uploads?.url ?? manifestUrl },
   ]);
   if (joined === null) return null;
-  const options: Record<MaterialOption['kind'], MaterialOption[]> = { desk: [], floor: [], wall: [], chair: [], sofa: [], plant: [], table: [], door: [] };
+  const options: Record<MaterialOption['kind'], MaterialOption[]> = { desk: [], floor: [], wall: [], chair: [], sofa: [], plant: [], tree: [], table: [], door: [] };
   for (const piece of joined.manifest.pieces) {
     if (!(piece.kind in options)) continue;
     const option = optionOf(piece as CatalogPiece, manifestFolder(joined.sourceOf(piece.id) ?? manifestUrl));
     if (option !== null) options[option.kind].push(option);
   }
-  const { desk, floor, wall, chair, sofa, plant, table, door } = options;
+  const { desk, floor, wall, chair, sofa, plant, tree, table, door } = options;
   const deskDefault = defaultOf(desk, manifest.defaults.desk);
   const floorDefault = defaultOf(floor, manifest.defaults.floor);
   if (deskDefault === null || floorDefault === null) return null;
-  return { desk, floor, wall, chair, sofa, plant, table, door, defaults: { desk: deskDefault, floor: floorDefault } };
+  return { desk, floor, wall, chair, sofa, plant, tree, table, door, defaults: { desk: deskDefault, floor: floorDefault } };
 }
 
 /** What a form holds right after picking `option`: a colorable material starts in its default color. */
@@ -188,7 +191,7 @@ export function previewFrame(option: MaterialOption): PreviewFrame {
     const bottom = Math.min(frame.height, anchor.y + TABLE_PREVIEW_MARGIN * 2);
     return { x, y, width: right - x, height: bottom - y };
   }
-  if (option.kind === 'plant' || option.kind === 'table') {
+  if (option.kind === 'plant' || option.kind === 'tree' || option.kind === 'table') {
     const { frame } = ART_IMAGE_SPECS[option.kind];
     return { x: 0, y: 0, width: frame.width, height: frame.height };
   }

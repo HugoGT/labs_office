@@ -506,6 +506,7 @@ describe('createTerrainRuntime decor', () => {
   const DESK = { x: 66, y: 21, w: 3, h: 3 };
   const WOOD_DOWN = { piece: 'chair-wood', rotation: 0 } as const;
   const CATALOG = [
+    { id: 'tree-large', kind: 'tree', retired: false, footprint: { w: 1, h: 1 } },
     { id: 'chair-wood', kind: 'chair', retired: false },
     { id: 'chair-metal', kind: 'chair', retired: false },
     { id: 'chair-gamer', kind: 'chair', colorable: true, retired: false },
@@ -514,7 +515,7 @@ describe('createTerrainRuntime decor', () => {
     { id: 'plant-ficus', kind: 'plant', footprint: { w: 1, h: 1 }, retired: false },
     { id: 'table-meeting', kind: 'table', footprint: { w: 7, h: 5 }, retired: false },
     { id: 'plant-gone', kind: 'plant', footprint: { w: 1, h: 1 }, retired: true },
-    { id: 'tree-oak', kind: 'tree', footprint: { w: 1, h: 1 }, retired: false },
+    { id: 'bridge-wood', kind: 'bridge', footprint: { w: 1, h: 1 }, retired: false },
     { id: 'sofa-leather-3', kind: 'sofa', footprint: { w: 3, h: 1 }, colorable: false, retired: false },
     { id: 'sofa-fabric-2', kind: 'sofa', footprint: { w: 2, h: 1 }, colorable: true, retired: false },
   ];
@@ -553,7 +554,7 @@ describe('createTerrainRuntime decor', () => {
 
     expect(runtime.decorInfo('table-meeting')).toEqual({ kind: 'table', footprint: { w: 7, h: 5 } });
     expect(runtime.decorInfo('plant-gone')).toEqual({ kind: 'plant', footprint: { w: 1, h: 1 } });
-    expect(runtime.decorInfo('tree-oak')).toBeNull();
+    expect(runtime.decorInfo('bridge-wood')).toBeNull();
     expect(runtime.decorInfo('desk-glass')).toEqual({ kind: 'desk', footprint: { w: 3, h: 1 } });
     expect(runtime.decorInfo('table-unknown')).toBeNull();
   });
@@ -594,7 +595,7 @@ describe('createTerrainRuntime decor', () => {
   it.each([
     ['an unknown piece', { piece: 'chair-throne', rotation: 0 }],
     ['a retired piece', { piece: 'plant-gone', rotation: 0 }],
-    ['a piece the layer does not place', { piece: 'tree-oak', rotation: 0 }],
+    ['a piece the layer does not place', { piece: 'bridge-wood', rotation: 0 }],
     ['a turned plant', { piece: 'plant-ficus', rotation: 90 }],
     ['a room table turned 180 (symmetric: only 0 and 90)', { piece: 'table-meeting', rotation: 180 }],
     ['a room table turned 270', { piece: 'table-meeting', rotation: 270 }],
@@ -720,6 +721,18 @@ describe('createTerrainRuntime decor', () => {
     // The office scope places it on the same tiles.
     await runtime.setDecor([{ index: at(DESK.x + 1, DESK.y + 2), item: { piece: 'sofa-leather-3', rotation: 0 } }], null);
     expect(runtime.decor()).toEqual([{ index: at(DESK.x + 1, DESK.y + 2), piece: 'sofa-leather-3', rotation: 0 }]);
+  });
+
+  it('places no tree from a desk, only from the office scope, on its 1x1 base', async () => {
+    const runtime = runtimeWith();
+    await runtime.load();
+
+    await expect(runtime.setDecor([{ index: at(DESK.x + 1, DESK.y + 1), item: { piece: 'tree-large', rotation: 0 } }], 'user-1', DESK)).rejects.toThrow('a tree is not for a desk');
+    expect(runtime.decor()).toEqual([]);
+    // A tree never turns.
+    await expect(runtime.setDecor([{ index: at(DESK.x + 1, DESK.y + 1), item: { piece: 'tree-large', rotation: 90 } }], null)).rejects.toThrow('this piece does not turn that way');
+    await runtime.setDecor([{ index: at(DESK.x + 1, DESK.y + 1), item: { piece: 'tree-large', rotation: 0 } }], null);
+    expect(runtime.decor()).toEqual([{ index: at(DESK.x + 1, DESK.y + 1), piece: 'tree-large', rotation: 0 }]);
   });
 
   describe('desk rules', () => {

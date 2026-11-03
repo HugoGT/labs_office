@@ -46,8 +46,8 @@ import { CHAIR_DEFAULT_COLORS, type ChairMaterial } from './domain/chairs.ts';
 import { SOFA_DEFAULT_COLORS, type SofaMaterial } from './domain/sofas.ts';
 import type { DoorMaterial } from './domain/doors.ts';
 import type { PixelBuffer } from '../../src/art/pixelBuffer.ts';
-import type { PlantKind, TreeKind } from './domain/props.ts';
-import { DEFAULT_TABLE_COLOR, ROOM_TABLE_FOOTPRINTS, type RoomTable, type TableMaterial } from './domain/tables.ts';
+import { DEFAULT_TREE_COLOR, type PlantKind, type TreeKind } from './domain/props.ts';
+import { DESK_DEFAULT_COLORS, ROOM_TABLE_FOOTPRINTS, type RoomTable, type TableMaterial } from './domain/tables.ts';
 import { DEFAULT_CARPET_COLOR, DEFAULT_PLAIN_COLOR, type Terrain } from './domain/tiles.ts';
 import type { WallMaterial } from './domain/wallMap.ts';
 import { encodePng } from '../../server/src/assets/pngCodec.ts';
@@ -71,6 +71,8 @@ const CHAIR_NAMES: Readonly<Record<ChairMaterial, string>> = {
   office: 'Silla de oficina',
   task: 'Silla giratoria',
   fabric: 'Sillón tapizado',
+  dining: 'Silla de comedor',
+  pouf: 'Puff',
 };
 const SOFA_NAMES: Readonly<Record<SofaMaterial, string>> = {
   leather: 'Sofá de cuero',
@@ -81,6 +83,8 @@ const DESK_NAMES: Readonly<Record<TableMaterial, string>> = {
   metal: 'Escritorio de metal',
   wood: 'Escritorio de madera',
   painted: 'Escritorio pintado',
+  gamer: 'Escritorio gamer',
+  curved: 'Escritorio curvo',
 };
 const FLOOR_NAMES: Readonly<Record<Terrain, string>> = {
   wood: 'Madera',
@@ -98,12 +102,13 @@ const FLOOR_DEFAULT_COLORS: Readonly<Partial<Record<Terrain, string>>> = { plain
 
 const WALL_NAMES: Readonly<Record<WallMaterial, string>> = { brick: 'Ladrillo', stone: 'Piedra', plaster: 'Yeso', glass: 'Vidrio' };
 
-const TREE_NAMES: Readonly<Record<TreeKind, string>> = { oak: 'Roble', maple: 'Arce' };
-const PLANT_NAMES: Readonly<Record<PlantKind, string>> = { ficus: 'Ficus' };
+const TREE_NAMES: Readonly<Record<TreeKind, string>> = { oak: 'Árbol', large: 'Árbol grande' };
+const PLANT_NAMES: Readonly<Record<PlantKind, string>> = { ficus: 'Ficus', bonsai: 'Bonsái' };
 const TABLES: Readonly<Record<RoomTable, { readonly name: string; readonly material: string }>> = {
   meeting: { name: 'Mesa de reuniones', material: 'walnut' },
   cafeteria: { name: 'Mesa de cafetería', material: 'beech' },
   oval: { name: 'Mesa ovalada', material: 'oak' },
+  round: { name: 'Mesa redonda', material: 'oak' },
 };
 /** The single and the double door are two items (#233), each with its own name and wall footprint. */
 const DOOR_NAMES: Readonly<Record<DoorMaterial, Readonly<Record<DoorVariant, string>>>> = {
@@ -189,8 +194,9 @@ export function renderPackFiles(): Map<string, Uint8Array> {
         name: DESK_NAMES[material],
         ...common,
         material,
-        colorable: material === 'painted',
-        defaultColor: material === 'painted' ? DEFAULT_TABLE_COLOR : null,
+        // The painted desk takes a color all over, the gamer desk only in its side lights.
+        colorable: DESK_DEFAULT_COLORS[material] !== undefined,
+        defaultColor: DESK_DEFAULT_COLORS[material] ?? null,
         anchor: DESK.anchor,
         facings: sheet.facings,
         files: [png(`desk/${material}.png`, 'sheet', 'desk', sheet.image)],
@@ -248,6 +254,9 @@ export function renderPackFiles(): Map<string, Uint8Array> {
         name: TREE_NAMES[kind],
         ...common,
         material: kind,
+        // Only the broadleaf tree takes a color, its leaves; the large tree keeps its own greens.
+        colorable: kind === 'oak',
+        defaultColor: kind === 'oak' ? DEFAULT_TREE_COLOR : null,
         footprint: TREE.footprint,
         anchor: TREE.anchor,
         layer: TREE.layer,

@@ -9,11 +9,21 @@
  * stripping.
  */
 
-/** Long side of a table's top on screen, in pixels: about 2.5 tiles (`HALF_LENGTH_PX` of tools/art). */
-export const TABLE_LONG_SIDE_PX = 80;
-/** Short side of the top's floor area: 24 model pixels of depth, 14 rows facing up or down, 24 columns facing left or right. */
-const TABLE_DEPTH_ROWS = 14;
-const TABLE_DEPTH_COLUMNS = 24;
+/**
+ * Long side of a table's top on screen, in pixels: a little over 2.5 tiles,
+ * grown from 80 so neighbouring desks stand closer, like in a real office
+ * (S19). tools/art draws the desk pieces from it.
+ */
+export const TABLE_LONG_SIDE_PX = 84;
+/**
+ * Depth of the top in model pixels, grown with the long side (24 * 84 / 80)
+ * to the nearest even value: the model is symmetric around the middle in whole
+ * pixels. tools/art draws the desk pieces from it.
+ */
+export const TABLE_DEPTH_PX = 26;
+/** Short side of the top's floor area: 16 rows facing up or down (DEPTH_SCALE of tools/art), the depth in columns facing left or right. */
+const TABLE_DEPTH_ROWS = 16;
+const TABLE_DEPTH_COLUMNS = TABLE_DEPTH_PX;
 
 export type TableRotation = 0 | 90 | 180 | 270;
 export type TableFacing = 'down' | 'right' | 'up' | 'left';

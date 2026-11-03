@@ -215,6 +215,8 @@ function hasDrawingFields(piece: Record<string, unknown>, kind: ArtPieceKind): b
     case 'tileset':
       return piece.tileSize === ART_TILE && Array.isArray(piece.materials) && piece.materials.length > 0 && piece.materials.every(isTilesetMaterial);
     case 'tree':
+      // The color pair is optional on a tree, like on a chair: one exported before trees had colors has neither field.
+      return isPlacedProp(piece) && (piece.colorable === undefined ? piece.defaultColor === undefined : isColorModel(piece));
     case 'plant':
     case 'table':
       return isPlacedProp(piece);
@@ -324,7 +326,7 @@ export interface Recolor {
  * there, and anything else is a row this client should not tint.
  */
 export function recolorFor(piece: ArtPiece, color: string | null): Recolor | null {
-  if ((piece.kind !== 'desk' && piece.kind !== 'floor' && piece.kind !== 'chair' && piece.kind !== 'sofa') || piece.colorable !== true) return null;
+  if ((piece.kind !== 'desk' && piece.kind !== 'floor' && piece.kind !== 'chair' && piece.kind !== 'sofa' && piece.kind !== 'tree') || piece.colorable !== true) return null;
   if (piece.defaultColor === null || piece.defaultColor === undefined) return null;
   if (color === null) return null;
   const to = color.toLowerCase();
