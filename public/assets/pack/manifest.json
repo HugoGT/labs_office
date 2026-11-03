@@ -2197,30 +2197,32 @@
       ]
     },
     {
-      "id": "plant-ficus",
-      "kind": "plant",
+      "id": "tree-ficus",
+      "kind": "tree",
       "name": "Ficus",
       "author": "HugoGT",
       "license": "proprietary-internal",
       "material": "ficus",
+      "colorable": false,
+      "defaultColor": null,
       "footprint": {
         "w": 1,
         "h": 1
       },
       "anchor": {
-        "x": 16,
-        "y": 46
+        "x": 32,
+        "y": 90
       },
       "layer": "sorted",
       "collision": "solid",
       "files": [
         {
           "role": "sheet",
-          "path": "plant/ficus.png",
-          "imageKind": "plant",
-          "width": 32,
-          "height": 48,
-          "sha256": "b1b1dc261525fe15d685bcd51a53d6e040a44c1337a927a27b25af5c8ddce8df"
+          "path": "tree/ficus.png",
+          "imageKind": "tree",
+          "width": 64,
+          "height": 96,
+          "sha256": "e0eef638fac0b0a25d8800ea31d7022c9b528d925257e5ba44a0cfe5389bb203"
         }
       ]
     },

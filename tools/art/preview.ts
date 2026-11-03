@@ -291,7 +291,7 @@ function terrainScene(sheets: PackSheets): PixelBuffer {
     prop(autumn, TREE, 13, 5),
     prop(oak, TREE, 22, 1),
     prop(oak, TREE, 9, 14),
-    prop(sheetOf(sheets.plants, 'ficus'), PLANT, 20, 12),
+    prop(sheetOf(sheets.trees, 'ficus'), TREE, 20, 12),
     ...hedges(sheets, [
       [15, 15],
       [16, 15],
@@ -391,7 +391,7 @@ function propsPreview(sheets: PackSheets): PixelBuffer {
     prop(treeSprite('oak', AUTUMN_LEAVES), TREE, 8, 1),
     prop(sheetOf(sheets.trees, 'oak'), TREE, 8, 7),
     prop(sheetOf(sheets.trees, 'large'), TREE, 6, 7),
-    prop(sheetOf(sheets.plants, 'ficus'), PLANT, 2, 7),
+    prop(sheetOf(sheets.trees, 'ficus'), TREE, 2, 7),
     prop(sheetOf(sheets.plants, 'bonsai'), PLANT, 4, 7),
     ...hedges(sheets, ring),
   ]);
@@ -407,8 +407,8 @@ function propsPreview(sheets: PackSheets): PixelBuffer {
   drawScene(room, [
     ...table('meeting', 1, 2, true),
     ...table('cafeteria', 12, 3, false),
-    prop(sheetOf(sheets.plants, 'ficus'), PLANT, 20, 1),
-    prop(sheetOf(sheets.plants, 'ficus'), PLANT, 20, 7),
+    prop(sheetOf(sheets.trees, 'ficus'), TREE, 20, 1),
+    prop(sheetOf(sheets.trees, 'ficus'), TREE, 20, 7),
     prop(sheetOf(sheets.plants, 'bonsai'), PLANT, 21, 4),
   ]);
 

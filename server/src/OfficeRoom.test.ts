@@ -2267,7 +2267,7 @@ describe('OfficeRoom: decor chairs', () => {
   });
 
   it('ignores a chair that does not stand there, one out of reach, any other decor piece and the old per-desk seat', async () => {
-    await server.terrain.setDecor([{ index: tile(21, 22), item: { piece: 'plant-ficus', rotation: 0 } }], null);
+    await server.terrain.setDecor([{ index: tile(21, 22), item: { piece: 'plant-bonsai', rotation: 0 } }], null);
     const room = await join('Ana');
     await waitFor(() => room.state.players.size === 1);
 
@@ -2302,7 +2302,7 @@ describe('OfficeRoom: decor chairs', () => {
     room.send('sit', { seat: chairSeatId(CHAIR) });
     await waitFor(() => room.state.players.get(room.sessionId)?.seat === chairSeatId(CHAIR));
 
-    await server.terrain.setDecor([{ index: CHAIR, item: { piece: 'plant-ficus', rotation: 0 } }], null);
+    await server.terrain.setDecor([{ index: CHAIR, item: { piece: 'plant-bonsai', rotation: 0 } }], null);
     await waitFor(() => room.state.players.get(room.sessionId)?.seat === '');
   });
 });

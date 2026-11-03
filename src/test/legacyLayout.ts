@@ -320,7 +320,7 @@ export function buildLegacyLayout() {
   add('table-cafeteria', { tx: 53, ty: 23, w: 5, h: 3 });
   // The cafeteria's plants, and the meeting room gets its own in the corners.
   for (const [tx, ty] of [[51, 19], [61, 19], [51, 30], [61, 30], [51, 3], [61, 3], [51, 14], [61, 14]] as const) {
-    add('plant-ficus', { tx, ty, w: 1, h: 1 });
+    add('plant-bonsai', { tx, ty, w: 1, h: 1 });
   }
   for (const tx of [13, 32]) {
     add('bridge-wood', { tx, ty: 19, w: 3, h: 3 }, [{ name: 'orientation', type: 'string', value: 'north-south' }]);

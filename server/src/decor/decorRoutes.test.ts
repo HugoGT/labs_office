@@ -170,7 +170,7 @@ describe('handleListAssets', () => {
   it('credits the author of an uploaded plant (#122), in both catalogs', async () => {
     const { deps, decor } = harness([]);
     const ficus = (JSON.parse(readFileSync(new URL('../../../public/assets/pack/manifest.json', import.meta.url), 'utf8')) as ArtPackManifest).pieces.find(
-      (piece) => piece.id === 'plant-ficus',
+      (piece) => piece.id === 'plant-bonsai',
     )!;
     const piece = { ...ficus, id: 'plant-upload-0123456789abcdef', name: 'Helecho', author: 'Ana' };
     await decor.registerUploadedArtPiece({

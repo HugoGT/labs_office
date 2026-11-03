@@ -94,8 +94,8 @@ describe('office entry art readiness', () => {
     await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
     const art = (scene as unknown as { art: ArtPackLoader }).art;
     const manifest = art.manifest!;
-    const ficus = manifest.pieces.find((piece) => piece.id === 'plant-ficus')!;
-    const alias = { ...ficus, id: 'plant-ficus-entry', files: ficus.files.map((file) => ({ ...file, path: broken ? 'entry-missing.png' : file.path })) };
+    const ficus = manifest.pieces.find((piece) => piece.id === 'plant-bonsai')!;
+    const alias = { ...ficus, id: 'plant-bonsai-entry', files: ficus.files.map((file) => ({ ...file, path: broken ? 'entry-missing.png' : file.path })) };
     art.adoptManifest({ ...manifest, pieces: [...manifest.pieces, alias] });
     const index = 40 * BASE_LAYOUT.width + 30;
 

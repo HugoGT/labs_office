@@ -17,7 +17,7 @@ const at = (tx: number, ty: number): number => ty * WIDTH + tx;
 
 const CHAIR: DecorPick = { id: 'chair-gamer', info: { kind: 'chair', footprint: { w: 1, h: 1 } } };
 const DESK: DecorPick = { id: 'desk-wood', info: { kind: 'desk', footprint: { w: 3, h: 1 } } };
-const PLANT: DecorPick = { id: 'plant-ficus', info: { kind: 'plant', footprint: { w: 1, h: 1 } } };
+const PLANT: DecorPick = { id: 'plant-bonsai', info: { kind: 'plant', footprint: { w: 1, h: 1 } } };
 const TABLE: DecorPick = { id: 'table-meeting', info: { kind: 'table', footprint: { w: 7, h: 5 } } };
 const OVAL: DecorPick = { id: 'table-oval', info: { kind: 'table', footprint: { w: 2, h: 1 } } };
 const PAINTED: DecorPick = { id: 'desk-painted', info: { kind: 'desk', footprint: { w: 3, h: 1 }, colorable: true } };
@@ -168,7 +168,7 @@ describe('useDecorEditor', () => {
 
     act(() => result.current.pick(PLANT));
     act(() => bridge.emit('decorrotate', { step: 1 }));
-    expect(result.current.brush).toMatchObject({ piece: 'plant-ficus', rotation: 0 });
+    expect(result.current.brush).toMatchObject({ piece: 'plant-bonsai', rotation: 0 });
     expect(result.current.rotation).toBe(0);
   });
 
@@ -655,7 +655,7 @@ describe('useDecorEditor', () => {
       act(() => bridge.emit('decorselect', { index: DESK_AT }));
       act(() => result.current.pick(PLANT));
       expect(result.current.selected).toBeNull();
-      expect(result.current.brush).toMatchObject({ piece: 'plant-ficus' });
+      expect(result.current.brush).toMatchObject({ piece: 'plant-bonsai' });
     });
 
     it('moves the item: the move button turns it into a brush of the same piece, turn and color, and the next click moves it in one batch', async () => {

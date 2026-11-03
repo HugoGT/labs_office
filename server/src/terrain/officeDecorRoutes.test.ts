@@ -25,7 +25,7 @@ const CATALOG = [
   { id: 'chair-wood', kind: 'chair', retired: false },
   { id: 'desk-wood', kind: 'desk', retired: false },
   { id: 'desk-painted', kind: 'desk', colorable: true, retired: false },
-  { id: 'plant-ficus', kind: 'plant', footprint: { w: 1, h: 1 }, retired: false },
+  { id: 'plant-bonsai', kind: 'plant', footprint: { w: 1, h: 1 }, retired: false },
 ];
 
 function user(overrides: Partial<DirectoryUser> & Pick<DirectoryUser, 'id' | 'uid'>): DirectoryUser {
@@ -109,7 +109,7 @@ describe('handleSetOfficeDecor (POST /admin/decor)', () => {
       { edits: [] },
       { edits: [{ index: tiles, item: CHAIR }] },
       { edits: [{ index: FREE, item: { piece: 'chair-throne', rotation: 0 } }] },
-      { edits: [{ index: FREE, item: { piece: 'plant-ficus', rotation: 90 } }] },
+      { edits: [{ index: FREE, item: { piece: 'plant-bonsai', rotation: 90 } }] },
       { edits: [{ index: FREE, item: { piece: 'desk-wood', rotation: 0, color: '#c83c3c' } }] },
       { edits: [{ index: FREE, item: { piece: 'desk-painted', rotation: 0, color: 'rojo' } }] },
       { edits: [{ index: FREE, item: CHAIR }, { index: FREE, item: null }] },

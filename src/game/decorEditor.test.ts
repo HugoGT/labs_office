@@ -296,8 +296,8 @@ describe('decorPlacementAllowed: doors (#223, #233)', () => {
     const wetEnd = [...wet.walkable];
     wetEnd[at(4, 3)] = false;
     expect(decorPlacementAllowed(none, infoOf, { ...wet, walkable: wetEnd }, null, at(2, 4), doubleBrush(0))).toBe(false);
-    expect(decorPlacementAllowed([{ index: at(3, 3), piece: 'plant-ficus', rotation: 0 }], infoOf, walled(), null, at(3, 4), doorBrush(0))).toBe(false);
-    expect(decorPlacementAllowed([{ index: at(4, 4), piece: 'plant-ficus', rotation: 0 }], infoOf, walled(), null, at(3, 4), doorBrush(0))).toBe(false);
+    expect(decorPlacementAllowed([{ index: at(3, 3), piece: 'plant-bonsai', rotation: 0 }], infoOf, walled(), null, at(3, 4), doorBrush(0))).toBe(false);
+    expect(decorPlacementAllowed([{ index: at(4, 4), piece: 'plant-bonsai', rotation: 0 }], infoOf, walled(), null, at(3, 4), doorBrush(0))).toBe(false);
     expect(decorPlacementAllowed(none, infoOf, walled(), { x: 2, y: 3, w: 3, h: 3 }, at(3, 4), doorBrush(0))).toBe(false);
   });
 

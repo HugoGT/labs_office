@@ -51,7 +51,7 @@ const DECOR_INFO: Record<string, DecorPieceInfo> = {
   'chair-wood': { kind: 'chair', footprint: { w: 1, h: 1 } },
   'desk-wood': { kind: 'desk', footprint: { w: 3, h: 1 } },
   'desk-glass': { kind: 'desk', footprint: { w: 3, h: 1 } },
-  'plant-ficus': { kind: 'plant', footprint: { w: 1, h: 1 } },
+  'plant-bonsai': { kind: 'plant', footprint: { w: 1, h: 1 } },
   'tree-large': { kind: 'tree', footprint: { w: 1, h: 1 } },
   'table-meeting': { kind: 'table', footprint: { w: 7, h: 5 } },
   'sofa-leather-3': { kind: 'sofa', footprint: { w: 3, h: 1 } },
@@ -108,7 +108,7 @@ describe('pieceCollisions: validation', () => {
   });
 
   it('only edits pieces that stand in the world: trees, plants, tables, desks, chairs and sofas', () => {
-    for (const id of ['tree-oak', 'plant-ficus', 'plant-upload-0123456789abcdef', 'table-meeting', 'desk-wood', 'chair-wood', 'sofa-fabric-3']) {
+    for (const id of ['tree-oak', 'plant-bonsai', 'plant-upload-0123456789abcdef', 'table-meeting', 'desk-wood', 'chair-wood', 'sofa-fabric-3']) {
       expect(isEditablePieceId(id), id).toBe(true);
     }
     for (const id of ['bridge-wood', 'hedge-boxwood', 'wall-brick', 'floor-oak', 'character-p01', 'tree', 'tree-', 'Tree-oak', 'tree oak', 1, null]) {
@@ -273,13 +273,13 @@ describe('pieceCollisions: instances', () => {
   });
 
   it('stands a plant 1:1 on the bottom middle of its footprint, walk-through until an admin edits it', () => {
-    const [plant] = officeDecorInstances([{ index: 4 * 20 + 6, piece: 'plant-ficus', rotation: 0 }], infoOf, 20);
+    const [plant] = officeDecorInstances([{ index: 4 * 20 + 6, piece: 'plant-bonsai', rotation: 0 }], infoOf, 20);
 
-    expect(plant).toMatchObject({ piece: 'plant-ficus', pivot: { x: 6 * 32 + 16, y: 5 * 32 }, rotation: 0, scale: { x: 1, y: 1 }, pickBox: { x: 192, y: 128, w: 32, h: 32 } });
+    expect(plant).toMatchObject({ piece: 'plant-bonsai', pivot: { x: 6 * 32 + 16, y: 5 * 32 }, rotation: 0, scale: { x: 1, y: 1 }, pickBox: { x: 192, y: 128, w: 32, h: 32 } });
     expect(worldRectsOf(plant!, NO_EDITS)).toEqual([]);
     // The same rectangles as the layout plant of that piece on the same tile.
-    const [layoutPlant] = layoutPropInstances([prop({ piece: 'plant-ficus', kind: 'plant', tx: 6, ty: 4 })]);
-    const edit = new Map([['plant-ficus', [{ x: -8, y: -12, w: 16, h: 12 }]]]);
+    const [layoutPlant] = layoutPropInstances([prop({ piece: 'plant-bonsai', kind: 'plant', tx: 6, ty: 4 })]);
+    const edit = new Map([['plant-bonsai', [{ x: -8, y: -12, w: 16, h: 12 }]]]);
     expect(worldRectsOf(plant!, edit)).toEqual(worldRectsOf(layoutPlant!, edit));
   });
 
@@ -412,9 +412,9 @@ describe('pieceCollisions: editing support', () => {
   it('picks the smallest thing under a point, so decor wins over a prop under it', () => {
     const instances: CollisionInstance[] = [
       ...layoutPropInstances([prop({ piece: 'tree-oak', kind: 'tree', tx: 0, ty: 0, w: 3, h: 3 })]),
-      ...officeDecorInstances([{ index: 1 * 3 + 1, piece: 'plant-ficus', rotation: 0 }], infoOf, 3),
+      ...officeDecorInstances([{ index: 1 * 3 + 1, piece: 'plant-bonsai', rotation: 0 }], infoOf, 3),
     ];
-    expect(pickInstance(instances, NO_EDITS, { x: 48, y: 48 })?.piece).toBe('plant-ficus');
+    expect(pickInstance(instances, NO_EDITS, { x: 48, y: 48 })?.piece).toBe('plant-bonsai');
     expect(pickInstance(instances, NO_EDITS, { x: 5, y: 5 })?.piece).toBe('tree-oak');
     expect(pickInstance(instances, NO_EDITS, { x: 500, y: 5 })).toBeNull();
   });
@@ -426,8 +426,8 @@ describe('pieceCollisions: editing support', () => {
       [
         { index: 5 * width + 5, piece: 'desk-glass', rotation: 0 },
         { index: 5 * width + 5, piece: 'chair-wood', rotation: 0 },
-        { index: 5 * width + 4, piece: 'plant-ficus', rotation: 0 },
-        { index: 5 * width + 6, piece: 'plant-ficus', rotation: 0 },
+        { index: 5 * width + 4, piece: 'plant-bonsai', rotation: 0 },
+        { index: 5 * width + 6, piece: 'plant-bonsai', rotation: 0 },
       ],
       infoOf,
       width,
@@ -443,10 +443,10 @@ describe('pieceCollisions: editing support', () => {
     expect(pickInstance(instances, NO_EDITS, middle, desk)?.piece).toBe('chair-wood');
 
     const plant = pickInstance(instances, NO_EDITS, end);
-    expect(plant?.piece).toBe('plant-ficus');
+    expect(plant?.piece).toBe('plant-bonsai');
     expect(pickInstance(instances, NO_EDITS, end, plant)?.piece).toBe('desk-glass');
     // A current piece that is not under the point starts from the top again.
-    expect(pickInstance(instances, NO_EDITS, end, chair)?.piece).toBe('plant-ficus');
+    expect(pickInstance(instances, NO_EDITS, end, chair)?.piece).toBe('plant-bonsai');
   });
 
   it('tells two instances of the same piece apart when cycling', () => {

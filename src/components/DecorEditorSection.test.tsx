@@ -42,7 +42,7 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
     expect(onRequestActive).toHaveBeenCalledTimes(1);
     expect(onEditingChange).toHaveBeenLastCalledWith(true);
     expect(await screen.findByRole('group', { name: 'Sillas' })).toBeInTheDocument();
-    expect(screen.getByRole('group', { name: 'Muebles de sala' })).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Sala' })).toBeInTheDocument();
   });
 
   it('places a picked sofa over its seats on the clicked tile, says what it places, and a fabric one in its color', async () => {
@@ -166,15 +166,15 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
     };
     const { bridge } = renderSection({ decor, initiallyActive: true });
 
-    await userEvent.click(await screen.findByRole('button', { name: 'Ficus' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Bonsái' }));
     act(() => bridge.emit('decorpick', { index: at(40, 40) }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/necesita suelo libre/);
     // One click, one edit: the brush is put down (no «Múltiple»).
-    expect(screen.getByRole('button', { name: 'Ficus' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'Bonsái' })).toHaveAttribute('aria-pressed', 'false');
 
-    await userEvent.click(screen.getByRole('button', { name: 'Ficus' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Bonsái' }));
     await userEvent.click(screen.getByRole('button', { name: 'Deseleccionar' }));
-    expect(screen.getByRole('button', { name: 'Ficus' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: 'Bonsái' })).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('leaves with «Salir», and on an Escape with nothing picked', async () => {
@@ -200,19 +200,19 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
       expect(walls.previousElementSibling).toHaveTextContent(/^Paredes$/);
       expect(document.body.textContent).not.toMatch(/líneas entre casillas|muebles ni la entrada/);
 
-      await userEvent.click(screen.getByRole('button', { name: 'Ficus' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Bonsái' }));
       await userEvent.click(screen.getByRole('button', { name: 'Ladrillo' }));
       expect(screen.getByRole('button', { name: 'Ladrillo' })).toHaveAttribute('aria-pressed', 'true');
-      expect(screen.getByRole('button', { name: 'Ficus' })).toHaveAttribute('aria-pressed', 'false');
+      expect(screen.getByRole('button', { name: 'Bonsái' })).toHaveAttribute('aria-pressed', 'false');
       expect(screen.getByText('Pintando paredes de Ladrillo')).toBeInTheDocument();
       expect(terrainCommands.at(-1)).toEqual({ brush: { kind: 'wall', piece: 'wall-brick' } });
       // The decor tool lets go of the map while a wall is picked: its clicks are the wall's.
       expect(commands.at(-1)).toBeNull();
 
-      await userEvent.click(screen.getByRole('button', { name: 'Ficus' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Bonsái' }));
       expect(screen.getByRole('button', { name: 'Ladrillo' })).toHaveAttribute('aria-pressed', 'false');
       expect(terrainCommands.at(-1)).toBeNull();
-      expect(commands.at(-1)).toMatchObject({ brush: { kind: 'piece', piece: 'plant-ficus' } });
+      expect(commands.at(-1)).toMatchObject({ brush: { kind: 'piece', piece: 'plant-bonsai' } });
     });
 
     it('puts «⛔ Borrador» on its own line right above «Múltiple», out of the walls, and says only that while it is picked (#223)', async () => {
@@ -238,7 +238,7 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
       expect(screen.getByRole('button', { name: 'Deseleccionar' }).parentElement).toHaveTextContent(/^Borrador/);
       expect(document.body.textContent).not.toMatch(/Quitando|Quitar/);
 
-      await userEvent.click(screen.getByRole('button', { name: 'Ficus' }));
+      await userEvent.click(screen.getByRole('button', { name: 'Bonsái' }));
       expect(eraser).toHaveAttribute('aria-pressed', 'false');
       expect(terrainCommands.at(-1)).toBeNull();
     });
@@ -410,8 +410,8 @@ describe('DecorEditorSection: Decoración for one desk', () => {
     expect(screen.getByRole('heading', { name: 'Decoración' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Salir' })).toBeInTheDocument();
     // A desk holds desk tables, never a room table, not even the 2x1 oval one (#116).
-    expect(screen.getByRole('group', { name: 'Mesas de escritorio' })).toBeInTheDocument();
-    expect(screen.queryByRole('group', { name: 'Muebles de sala' })).not.toBeInTheDocument();
+    expect(screen.getByRole('group', { name: 'Escritorios' })).toBeInTheDocument();
+    expect(screen.queryByRole('group', { name: 'Sala' })).not.toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: /Múltiple/ })).not.toBeInTheDocument();
     expect(commands.at(-1)).toEqual({ brush: null, area: DESK, outlines: [DESK_OUTLINE] });
   });
@@ -419,7 +419,7 @@ describe('DecorEditorSection: Decoración for one desk', () => {
   it('places one piece per click and unpicks the brush', async () => {
     const decor: OfficeDecorPort = { setDecor: vi.fn(async () => undefined) };
     const { bridge } = renderSection({ scope: 'desk', area: DESK, decor });
-    await userEvent.click(await screen.findByRole('button', { name: 'Ficus' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Bonsái' }));
     act(() => bridge.emit('decorpick', { index: at(11, 11) }));
     await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledTimes(1));
     expect(screen.queryByText(/^Poniendo/)).not.toBeInTheDocument();
@@ -453,7 +453,7 @@ describe('DecorEditorSection: Decoración for one desk', () => {
   it('steps out on Escape like the admin menu: the brush, then the editor itself', async () => {
     const onExit = vi.fn();
     const { commands } = renderSection({ scope: 'desk', area: DESK, onExit });
-    await userEvent.click(await screen.findByRole('button', { name: 'Ficus' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Bonsái' }));
 
     await userEvent.keyboard('{Escape}');
     expect(commands.at(-1)).toMatchObject({ brush: null });
@@ -478,7 +478,7 @@ describe('DecorEditorSection: Decoración for one desk', () => {
   it('refuses a tile outside the desk without asking the server', async () => {
     const decor: OfficeDecorPort = { setDecor: vi.fn(async () => undefined) };
     const { bridge } = renderSection({ scope: 'desk', area: DESK, decor });
-    await userEvent.click(await screen.findByRole('button', { name: 'Ficus' }));
+    await userEvent.click(await screen.findByRole('button', { name: 'Bonsái' }));
     act(() => bridge.emit('decorpick', { index: at(20, 20) }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/dentro de tu escritorio/);
     expect(decor.setDecor).not.toHaveBeenCalled();

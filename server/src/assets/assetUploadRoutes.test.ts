@@ -211,7 +211,7 @@ describe('handleUploadedArtManifest', () => {
     expect(manifest?.contractVersion).toBe(ART_CONTRACT_VERSION);
     expect(manifest?.pieces).toEqual([uploaded.body.piece]);
     // The pack itself stays in its own static manifest.
-    expect(manifest?.pieces.some((piece) => piece.id === 'plant-ficus')).toBe(false);
+    expect(manifest?.pieces.some((piece) => piece.id === 'plant-bonsai')).toBe(false);
   });
 });
 

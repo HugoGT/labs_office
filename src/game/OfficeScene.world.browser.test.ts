@@ -1281,7 +1281,7 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
     expect(turns).toEqual([-1]);
     expect(views).toEqual([zoomView(2)]);
 
-    bridge.emitCommand('decoredit', { brush: { kind: 'piece', piece: 'plant-ficus', info: plant, rotation: 0 }, area: null });
+    bridge.emitCommand('decoredit', { brush: { kind: 'piece', piece: 'plant-bonsai', info: plant, rotation: 0 }, area: null });
     spin();
     expect(turns).toEqual([-1]);
     expect(views.at(-1)).toEqual(zoomView(3));
@@ -1400,14 +1400,14 @@ describe('OfficeScene: the office decor layer (#208)', () => {
   it('draws a plant and a room table 1:1 on the bottom middle of their footprint, centered on the anchor', async () => {
     const { scene, handlers } = await bootConnected();
     handlers.onDecor!([
-      { index: at(30, 20), piece: 'plant-ficus', rotation: 0 },
+      { index: at(30, 20), piece: 'plant-bonsai', rotation: 0 },
       { index: at(40, 40), piece: 'table-meeting', rotation: 0 },
     ]);
 
     await vi.waitFor(() => {
       const plant = image(scene, at(30, 20));
       // A 32x48 frame anchored at (16, 46) on the bottom middle of tile (30, 20).
-      expect({ x: plant?.x, y: plant?.y, key: plant?.texture.key }).toEqual({ x: 30 * TILE, y: 21 * TILE - 46, key: artSheetKey('plant-ficus', 'sheet') });
+      expect({ x: plant?.x, y: plant?.y, key: plant?.texture.key }).toEqual({ x: 30 * TILE, y: 21 * TILE - 46, key: artSheetKey('plant-bonsai', 'sheet') });
       expect(plant!.depth).toBe(worldAssetDepth(21 * TILE));
       const table = image(scene, at(40, 40));
       // The 7x5 footprint runs from tile (37, 38); its bottom middle is (40.5, 43) tiles, the frame's anchor (128, 244).

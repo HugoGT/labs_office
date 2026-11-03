@@ -39,7 +39,7 @@ const at = (tx: number, ty: number): number => ty * WIDTH + tx;
 const INFO: Record<string, DecorPieceInfo> = {
   'chair-wood': CHAIR,
   'desk-wood': DESK,
-  'plant-ficus': PLANT,
+  'plant-bonsai': PLANT,
   'table-meeting': MEETING,
 };
 const infoOf = (piece: string): DecorPieceInfo | null => INFO[piece] ?? null;
@@ -50,7 +50,7 @@ describe('officeDecor: pieces', () => {
     const byId = new Map(manifest.pieces.map((piece) => [piece.id, piece]));
     expect(decorPieceInfo(byId.get('chair-wood')!)).toEqual(CHAIR);
     expect(decorPieceInfo(byId.get('desk-wood')!)).toEqual(DESK);
-    expect(decorPieceInfo(byId.get('plant-ficus')!)).toEqual(PLANT);
+    expect(decorPieceInfo(byId.get('plant-bonsai')!)).toEqual(PLANT);
     expect(decorPieceInfo(byId.get('table-meeting')!)).toEqual(MEETING);
     expect(decorPieceInfo(byId.get('table-cafeteria')!)).toEqual({ kind: 'table', footprint: { w: 5, h: 3 } });
     // A tree stands on its 1x1 base, whatever its crown covers.
@@ -143,7 +143,7 @@ describe('officeDecor: footprints', () => {
   });
 
   it('centers a plant or a room table on its anchor tile', () => {
-    expect(decorFootprint({ index: at(4, 6), piece: 'plant-ficus', rotation: 0 }, PLANT, WIDTH)).toEqual({ x: 4, y: 6, w: 1, h: 1 });
+    expect(decorFootprint({ index: at(4, 6), piece: 'plant-bonsai', rotation: 0 }, PLANT, WIDTH)).toEqual({ x: 4, y: 6, w: 1, h: 1 });
     expect(decorFootprint({ index: at(10, 10), piece: 'table-meeting', rotation: 0 }, MEETING, WIDTH)).toEqual({ x: 7, y: 8, w: 7, h: 5 });
     expect(decorFootprint({ index: at(10, 10), piece: 'table-cafeteria', rotation: 0 }, { kind: 'table', footprint: { w: 5, h: 3 } }, WIDTH)).toEqual({ x: 8, y: 9, w: 5, h: 3 });
   });
@@ -180,7 +180,7 @@ describe('officeDecor: seats', () => {
     const items: DecorItem[] = [
       { index: at(4, 5), piece: 'chair-wood', rotation: 0 },
       { index: at(6, 5), piece: 'chair-upload-0123456789abcdef', rotation: 90 },
-      { index: at(8, 5), piece: 'plant-ficus', rotation: 0 },
+      { index: at(8, 5), piece: 'plant-bonsai', rotation: 0 },
     ];
 
     expect(decorChairs(items)).toEqual([
@@ -211,7 +211,7 @@ describe('officeDecor: overlap and covering', () => {
     const items: DecorItem[] = [
       { index: at(4, 6), piece: 'desk-wood', rotation: 0 },
       { index: at(4, 5), piece: 'chair-wood', rotation: 0 },
-      { index: at(5, 6), piece: 'plant-ficus', rotation: 0 },
+      { index: at(5, 6), piece: 'plant-bonsai', rotation: 0 },
     ];
     expect(findDecorOverlap(items, infoOf, WIDTH)).toBe(at(5, 6));
     expect(findDecorOverlap(items.slice(0, 2), infoOf, WIDTH)).toBeNull();
@@ -260,7 +260,7 @@ describe('officeDecor: edits and wire form', () => {
   it('applies edits in order, sorted by tile', () => {
     const placed = withDecor([], [
       { index: 9, item: { piece: 'chair-wood', rotation: 0 } },
-      { index: 2, item: { piece: 'plant-ficus', rotation: 0 } },
+      { index: 2, item: { piece: 'plant-bonsai', rotation: 0 } },
     ]);
     expect(placed.map(({ index }) => index)).toEqual([2, 9]);
     const replaced = withDecor(placed, [{ index: 9, item: { piece: 'desk-wood', rotation: 90 } }, { index: 2, item: null }, { index: 50, item: null }]);
@@ -299,7 +299,7 @@ describe('officeDecor: edits and wire form', () => {
     expect(decodeOfficeDecor(encoded, tiles)).toEqual(items);
     expect(encodeOfficeDecor([])).toBe('');
     expect(decodeOfficeDecor('', tiles)).toEqual([]);
-    for (const garbage of ['3', '3:chair-wood', '3:chair-wood:45', `${tiles}:chair-wood:0`, '3:chair-wood:0,3:plant-ficus:0', '3:Chair:0', '-1:chair-wood:0']) {
+    for (const garbage of ['3', '3:chair-wood', '3:chair-wood:45', `${tiles}:chair-wood:0`, '3:chair-wood:0,3:plant-bonsai:0', '3:Chair:0', '-1:chair-wood:0']) {
       expect(decodeOfficeDecor(garbage, tiles), garbage).toBeNull();
     }
     expect(decodeOfficeDecor(42, tiles)).toBeNull();
@@ -407,7 +407,7 @@ describe('officeDecor: sofas', () => {
       { index: at(4, 5), piece: 'chair-wood', rotation: 90 },
       { index: at(10, 10), piece: 'sofa-fabric-3', rotation: 0, color: '#2a9d8f' },
       { index: at(15, 10), piece: 'sofa-leather-2', rotation: 270 },
-      { index: at(8, 5), piece: 'plant-ficus', rotation: 0 },
+      { index: at(8, 5), piece: 'plant-bonsai', rotation: 0 },
       { index: at(2, 2), piece: 'desk-wood', rotation: 0 },
     ];
 

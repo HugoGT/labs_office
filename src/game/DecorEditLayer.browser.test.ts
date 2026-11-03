@@ -78,7 +78,7 @@ const DESK: DecorPieceInfo = { kind: 'desk', footprint: { w: 3, h: 1 } };
 const PLANT: DecorPieceInfo = { kind: 'plant', footprint: { w: 1, h: 1 } };
 const chair: DecorBrush = { kind: 'piece', piece: 'chair-wood', info: CHAIR, rotation: 0 };
 const desk: DecorBrush = { kind: 'piece', piece: 'desk-wood', info: DESK, rotation: 0 };
-const plant: DecorBrush = { kind: 'piece', piece: 'plant-ficus', info: PLANT, rotation: 0 };
+const plant: DecorBrush = { kind: 'piece', piece: 'plant-bonsai', info: PLANT, rotation: 0 };
 const MEETING: DecorPieceInfo = { kind: 'table', footprint: { w: 7, h: 5 } };
 const OVAL: DecorPieceInfo = { kind: 'table', footprint: { w: 2, h: 1 } };
 const meeting: DecorBrush = { kind: 'piece', piece: 'table-meeting', info: MEETING, rotation: 0 };
@@ -345,7 +345,7 @@ describe('DecorEditLayer', () => {
     const placed: DecorItem[] = [
       { index: at(10, 7), piece: 'table-meeting', rotation: 0 },
       { index: at(10, 9), piece: 'chair-wood', rotation: 0 },
-      { index: at(3, 3), piece: 'plant-ficus', rotation: 0 },
+      { index: at(3, 3), piece: 'plant-bonsai', rotation: 0 },
     ];
 
     function selections(bridge: ReturnType<typeof createOfficeBridge>): (number | null)[] {
@@ -521,7 +521,7 @@ describe('DecorEditLayer', () => {
       bridge.emitCommand('decoredit', { brush: null, area: null, selected: at(3, 3) });
       expect(claims(mid(3), mid(3))).toBe(true);
       const trash = named<Phaser.GameObjects.Rectangle>(scene, DECOR_DELETE_BUTTON_NAME)!;
-      items.push({ index: at(Math.floor(trash.x / TILE), Math.floor(trash.y / TILE)), piece: 'plant-ficus', rotation: 0 });
+      items.push({ index: at(Math.floor(trash.x / TILE), Math.floor(trash.y / TILE)), piece: 'plant-bonsai', rotation: 0 });
       expect(claims(trash.x, trash.y)).toBe(false);
     });
 

@@ -19,7 +19,7 @@ import {
 import { makeRamp, mixRgba, type Ramp } from './color.ts';
 import { periodicNoise, type Noise } from './noise.ts';
 import { createRng } from './random.ts';
-import { PixelBuffer, rgba, type Rgba } from '../../../src/art/pixelBuffer.ts';
+import { PixelBuffer, place, rgba, type Rgba } from '../../../src/art/pixelBuffer.ts';
 
 /** Same contact shadow as furniture and characters. */
 const CONTACT_SHADOW = rgba(46, 26, 20, 78);
@@ -84,7 +84,8 @@ function foliage(image: PixelBuffer, blobs: readonly Blob[], ramp: Ramp, noise: 
 // --- Trees -------------------------------------------------------------------------------------
 
 /** One broadleaf tree, its leaves in any color (an autumn one is the same tree painted orange), and the large tree. */
-export const TREE_KINDS = ['oak', 'large'] as const;
+// The ficus is a potted tree: it stands on the floor, unlike the plants, which stand on desks and tables (#121).
+export const TREE_KINDS = ['oak', 'large', 'ficus'] as const;
 export type TreeKind = (typeof TREE_KINDS)[number];
 
 /** The leaves the broadleaf tree is exported in; the large tree keeps its own greens. */
@@ -108,7 +109,7 @@ export function treeSprite(kind: TreeKind, color: string = DEFAULT_TREE_COLOR): 
   const key = kind === 'large' ? kind : `${kind}:${color.toLowerCase()}`;
   const cached = treeCache.get(key);
   if (cached !== undefined) return cached;
-  const image = kind === 'large' ? largeTreeSprite() : broadleafSprite(color);
+  const image = kind === 'large' ? largeTreeSprite() : kind === 'ficus' ? ficusSprite() : broadleafSprite(color);
   treeCache.set(key, image);
   return image;
 }
@@ -235,38 +236,85 @@ function largeTreeSprite(): PixelBuffer {
 
 // --- Plants ------------------------------------------------------------------------------------
 
-export const PLANT_KINDS = ['ficus', 'bonsai'] as const;
+export const PLANT_KINDS = ['bonsai'] as const;
 export type PlantKind = (typeof PLANT_KINDS)[number];
 
 const POT = makeRamp('#b86b45');
 const PLANT_LEAVES = makeRamp('#4f9a48');
+/** The crown sits high enough over the pot to show the trunk between them. */
 const PLANT_CROWN: readonly Blob[] = [
-  { x: 16, y: 22, r: 8 },
-  { x: 10, y: 27, r: 5 },
-  { x: 22, y: 27, r: 5 },
-  { x: 11, y: 15, r: 5 },
-  { x: 21, y: 15, r: 5 },
-  { x: 16, y: 10, r: 4.5 },
+  { x: 16, y: 18, r: 8 },
+  { x: 10, y: 23, r: 5 },
+  { x: 22, y: 23, r: 5 },
+  { x: 11, y: 11, r: 5 },
+  { x: 21, y: 11, r: 5 },
+  { x: 16, y: 6, r: 4.5 },
 ];
 
-/** A potted plant in its 32x48 frame, the pot standing on PLANT.anchor. */
-export function plantSprite(kind: PlantKind): PixelBuffer {
-  if (kind === 'bonsai') return bonsaiSprite();
-  const image = new PixelBuffer(PLANT.frame.width, PLANT.frame.height);
-  const { x: ax, y: ay } = PLANT.anchor;
-  shadowEllipse(image, ax, ay - 1, 9, 2.5);
-  const potTop = ay - 12;
-  for (let y = potTop; y < ay; y += 1) {
-    const half = y < potTop + 2 ? 8 : 7 - Math.floor(((y - potTop) * 2) / 12);
+/** The ficus pot's rows above the anchor: a two-row lip, then the body. */
+const POT_HEIGHT = 12;
+
+/**
+ * The ficus pot, lit from the upper left like a trunk so it reads round rather than flat: a lip
+ * with rounded ends casting a thin shadow on the body, and a body that bulges out under the lip
+ * and curves back in to a narrow base.
+ */
+function roundPot(image: PixelBuffer, ax: number, ay: number): void {
+  const top = ay - POT_HEIGHT;
+  const bodyTop = top + 2;
+  const ramp = [POT.deep, POT.shadow, POT.base, POT.light] as const;
+  // Light from the upper left on a surface turned `across` (-1 left edge, 1 right edge) and `down` (-1 up, 1 down).
+  const tone = (across: number, down: number, darker: boolean): Rgba => {
+    const light = -0.8 * across - 0.3 * down;
+    const step = light > 0.35 ? 3 : light > -0.2 ? 2 : light > -0.6 ? 1 : 0;
+    return ramp[Math.max(0, step - (darker ? 1 : 0))] as Rgba;
+  };
+  for (let y = bodyTop; y < ay; y += 1) {
+    const t = (y - bodyTop) / (ay - 1 - bodyTop);
+    // A narrow neck under the lip, widest about 40% down, then tucking in; the bottom row rounds its corners off.
+    const half = Math.round(5 + 3.5 * Math.sin(Math.PI * (0.15 + 0.85 * t))) - (y === ay - 1 ? 1 : 0);
     for (let x = ax - half; x < ax + half; x += 1) {
-      const rim = y < potTop + 2;
-      const tone = rim ? (y === potTop ? POT.light : POT.base) : x < ax - half + 3 ? POT.light : x >= ax + half - 3 ? POT.shadow : POT.base;
-      image.setPixel(x, y, tone);
+      const across = (x + 0.5 - ax) / half;
+      // The lip shades the row under it.
+      image.setPixel(x, y, tone(across, 1.6 * (t - 0.4), y === bodyTop));
     }
   }
-  foliage(image, PLANT_CROWN, PLANT_LEAVES, periodicNoise(kind === 'ficus' ? 41 : 43, 32, 4));
+  for (let y = top; y < bodyTop; y += 1) {
+    // The lip's ends are rounded off on its top row, whose upward face catches the light.
+    const half = y === top ? 7.5 : 8;
+    for (let x = Math.ceil(ax - half); x < Math.floor(ax + half); x += 1) {
+      const across = (x + 0.5 - ax) / half;
+      image.setPixel(x, y, tone(across, y === top ? -1 : 0, false));
+    }
+  }
+}
+
+/** A potted plant in its 32x48 frame, the pot standing on PLANT.anchor; the bonsai is the only one for now. */
+export function plantSprite(_kind: PlantKind): PixelBuffer {
+  return bonsaiSprite();
+}
+
+/**
+ * The ficus, drawn plant-sized (its pot on PLANT.anchor) and set in the tree frame with its pot on
+ * TREE.anchor: a potted tree on the floor's 1x1 base.
+ */
+function ficusSprite(): PixelBuffer {
+  const image = new PixelBuffer(PLANT.frame.width, PLANT.frame.height);
+  const { x: ax, y: ay } = PLANT.anchor;
+  roundPot(image, ax, ay);
+  // A short trunk from the pot up into the crown, lit on its left like the large tree's.
+  for (let y = ay - POT_HEIGHT - 1; y > 20; y -= 1) {
+    image.setPixel(ax - 1, y, BARK.light);
+    image.setPixel(ax, y, BARK.base);
+    image.setPixel(ax + 1, y, BARK.shadow);
+  }
+  foliage(image, PLANT_CROWN, PLANT_LEAVES, periodicNoise(41, 32, 4));
   image.addOutline(ink);
-  return image;
+  // After the outline, so the ink closes the pot's bottom too.
+  shadowEllipse(image, ax, ay, 9, 2);
+  const tree = new PixelBuffer(TREE.frame.width, TREE.frame.height);
+  place(tree, image, TREE.anchor.x - ax, TREE.anchor.y - ay);
+  return tree;
 }
 
 const BONSAI_POT = makeRamp('#55708f');

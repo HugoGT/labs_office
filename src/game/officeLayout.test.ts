@@ -212,7 +212,7 @@ describe('parseOfficeLayout', () => {
   });
 
   it('accepts the Tiled 1.9 `class` spelling of tile and object types and strips flip flags from gids', () => {
-    const raw = tiledMap({ width: 9, height: 9, blocks: () => 'dirt', props: [{ type: 'plant-ficus', x: 0, y: 0, width: 32, height: 32 }] });
+    const raw = tiledMap({ width: 9, height: 9, blocks: () => 'dirt', props: [{ type: 'plant-bonsai', x: 0, y: 0, width: 32, height: 32 }] });
     const tileset = (raw.tilesets as { tiles: { id: number; type?: string; class?: string }[] }[])[0];
     tileset.tiles = tileset.tiles.map(({ id, type }) => ({ id, class: type }));
     const props = (raw.layers as { name: string; objects?: Record<string, unknown>[] }[]).find((layer) => layer.name === 'props');
@@ -223,7 +223,7 @@ describe('parseOfficeLayout', () => {
     const layout = parseOfficeLayout(raw);
 
     expect(layout.blocks).toEqual(['dirt']);
-    expect(layout.props[0]?.piece).toBe('plant-ficus');
+    expect(layout.props[0]?.piece).toBe('plant-bonsai');
   });
 
   it('rejects a block that is not one material, naming it, so a stray stroke in Tiled cannot pass', () => {
@@ -377,7 +377,7 @@ describe('effective walkability', () => {
             height: 96,
             properties: [{ name: 'orientation', type: 'string', value: 'east-west' }],
           },
-          { type: 'plant-ficus', x: 32 * 7, y: 32 * 4, width: 32, height: 32 },
+          { type: 'plant-bonsai', x: 32 * 7, y: 32 * 4, width: 32, height: 32 },
         ],
       }),
     );
@@ -447,7 +447,7 @@ describe('the committed layout (maps/office.json)', () => {
       { piece: 'table-cafeteria', tx: 53, ty: 23, w: 5, h: 3 },
     ]);
     for (const [tx, ty] of [[51, 19], [61, 19], [51, 30], [61, 30]]) {
-      expect(props('plant')).toContainEqual(expect.objectContaining({ piece: 'plant-ficus', tx, ty }));
+      expect(props('plant')).toContainEqual(expect.objectContaining({ piece: 'plant-bonsai', tx, ty }));
     }
     for (const [tx, ty] of oldTrees) expect(props('tree')).toContainEqual(expect.objectContaining({ tx, ty }));
     expect(props('bridge').map(({ tx, ty, orientation }) => ({ tx, ty, orientation }))).toEqual([

@@ -23,11 +23,12 @@ type DecorCatalogKind = 'chair' | 'sofa' | 'desk' | 'table' | 'plant' | 'tree' |
 
 /** The groups in palette order, named for the person picking, each with the catalog kinds it lists in order. */
 const GROUPS: readonly { kinds: readonly DecorCatalogKind[]; label: string }[] = [
+  // #121: the small pieces that dress one's own desk come first, named for the space they dress.
+  { kinds: ['plant'], label: 'Mi espacio' },
+  { kinds: ['desk'], label: 'Escritorios' },
   { kinds: ['chair'], label: 'Sillas' },
-  { kinds: ['desk'], label: 'Mesas de escritorio' },
   // A room's furniture together. Only the office scope offers it (`fitsDeskArea` leaves both out).
-  { kinds: ['table', 'sofa'], label: 'Muebles de sala' },
-  { kinds: ['plant'], label: 'Plantas' },
+  { kinds: ['table', 'sofa'], label: 'Sala' },
   // Only the office scope offers them (`fitsDeskArea` leaves trees out).
   { kinds: ['tree'], label: 'Árboles' },
   // #223: only the office scope offers them (the desk scope's `fitsDeskArea` leaves doors out).
