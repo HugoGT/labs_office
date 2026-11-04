@@ -263,6 +263,26 @@ describe('useTerrainEditor', () => {
     await waitFor(() => expect(result.current.pending).toBe(false));
   });
 
+  it('leaves the overlay to another tool of the menu while paused, and takes it back with its brush when resumed', () => {
+    const bridge = createOfficeBridge();
+    const commands: OfficeCommandMap['terrainedit'][] = [];
+    bridge.onCommand('terrainedit', (command) => commands.push(command));
+    const { result, rerender } = renderHook(({ paused }) => useTerrainEditor({ bridge, terrain: port(), paused }), { initialProps: { paused: false } });
+    act(() => result.current.enter());
+    act(() => result.current.pick('grass'));
+    expect(commands.at(-1)).toEqual({ brush: floor('grass') });
+
+    rerender({ paused: true });
+    expect(commands.at(-1)).toBeNull();
+    // Still open, and nothing it does reaches the map meanwhile.
+    expect(result.current.active).toBe(true);
+    act(() => result.current.pick('sand'));
+    expect(commands.at(-1)).toBeNull();
+
+    rerender({ paused: false });
+    expect(commands.at(-1)).toEqual({ brush: floor('sand') });
+  });
+
   it('closes the overlay when unmounted while open', () => {
     const { result, commands, unmount } = setup();
     act(() => result.current.enter());

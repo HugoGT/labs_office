@@ -1,5 +1,5 @@
 /**
- * The wall tool of "Decoración" (#224): what it asks the map to show through
+ * The wall tool of "Editar terreno" (#224, in "Decoración" until it moved back): what it asks the map to show through
  * `terrainedit`, how a picked wall turns map clicks into wall paints, and
  * what it tells the admin.
  */
@@ -49,9 +49,11 @@ describe('useWallEditor', () => {
     const { result, commands } = setup();
     expect(commands).toEqual([]);
 
+    expect(result.current.showing).toBe(false);
     act(() => result.current.pick('wall-brick'));
     expect(result.current.brush).toEqual({ kind: 'wall', piece: 'wall-brick' });
     expect(commands.at(-1)).toEqual({ brush: { kind: 'wall', piece: 'wall-brick' } });
+    expect(result.current.showing).toBe(true);
 
     act(() => result.current.pick(null));
     expect(result.current.brush).toEqual({ kind: 'wall', piece: null });
@@ -134,9 +136,12 @@ describe('useWallEditor', () => {
     act(() => result.current.unpick());
 
     expect(commands.at(-1)).toEqual({ brush: null, previewWalls: [{ index: TILE_A, piece: 'wall-brick' }] });
+    // It still holds the overlay: a tool sharing it waits until it lets go.
+    expect(result.current.showing).toBe(true);
     await act(async () => calls[0]!.resolve());
     act(() => bridge.emit('terrain', { blocks: BASE_LAYOUT.blocks, walls: withWalls(BASE_LAYOUT.walls, [{ index: TILE_A, piece: 'wall-brick' }]), colors: NO_COLORS }));
     expect(commands.at(-1)).toBeNull();
+    expect(result.current.showing).toBe(false);
   });
 
   it('never sends one tile twice in a request', async () => {
@@ -253,7 +258,7 @@ describe('useWallEditor: what the eraser would take (#241)', () => {
     const empty = BASE_LAYOUT.walls.map(() => null);
     const { result } = renderHook(() => useWallEditor({ bridge, terrain, eraseDecor: () => false }));
     act(() => bridge.emit('terrain', { blocks: BASE_LAYOUT.blocks, walls: withWalls(empty, [{ index: TILE_A, piece: 'wall-stone' }, { index: TILE_B, piece: 'wall-brick' }]), colors: NO_COLORS }));
-    // A two-tile door anchored on DOOR spans the posts DOOR, DOOR + 1 and DOOR + 2; a chair is taken by its tile.
+    // A two-tile door anchored on DOOR needs the walls DOOR - 1 to DOOR + 2: its span and one past each end; a chair is taken by its tile.
     act(() => bridge.emit('decor', { items: [{ index: DOOR, piece: 'door-wood', rotation: 0 }, { index: TILE_C, piece: 'chair-office', rotation: 0 }] }));
 
     act(() => result.current.pick('wall-brick'));
@@ -262,13 +267,13 @@ describe('useWallEditor: what the eraser would take (#241)', () => {
     act(() => result.current.pick(null));
     // Each wall covers the tile it stands on and the ones above and below it.
     const W = BASE_LAYOUT.width;
-    expect(commands.at(-1)?.erasable).toEqual([TILE_A - W, TILE_B - W, TILE_A, TILE_B, DOOR, DOOR + 1, DOOR + 2, TILE_A + W, TILE_B + W]);
+    expect(commands.at(-1)?.erasable).toEqual([TILE_A - W, TILE_B - W, TILE_A, TILE_B, DOOR - 1, DOOR, DOOR + 1, DOOR + 2, TILE_A + W, TILE_B + W]);
     expect(commands.at(-1)?.erasableDecor).toEqual([{ x0: 69, y0: 22, x1: 69, y1: 22 }]);
 
     // An erase on its way already leaves its wall with nothing to take.
     act(() => bridge.emit('wallpick', { index: TILE_A }));
     await waitFor(() => expect(calls).toHaveLength(1));
-    expect(commands.at(-1)?.erasable).toEqual([TILE_B - W, TILE_B, DOOR, DOOR + 1, DOOR + 2, TILE_B + W]);
+    expect(commands.at(-1)?.erasable).toEqual([TILE_B - W, TILE_B, DOOR - 1, DOOR, DOOR + 1, DOOR + 2, TILE_B + W]);
   });
 
   it('erases a wall from any of its three tiles, and nothing from a tile no wall covers', async () => {

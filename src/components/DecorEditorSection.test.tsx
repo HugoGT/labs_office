@@ -1,14 +1,12 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import exportedManifest from '../../public/assets/pack/manifest.json?raw';
 import { AdminError } from '../dashboard/adminPort';
-import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import { materialCatalogFrom } from '../game/artMaterials';
 import type { ArtPreviewCache } from '../game/artPreview';
 import { MAP_W } from '../game/mapData';
 import { createOfficeBridge, type OfficeCommandMap } from '../game/officeBridge';
-import { BASE_LAYOUT, withWalls } from '../game/officeLayout';
 import { decorKey } from '../game/officeDecor';
 import type { OfficeDecorPort } from '../game/officeDecorPort';
 import { DecorEditorSection } from './DecorEditorSection';
@@ -21,15 +19,9 @@ function renderSection(overrides: Partial<Parameters<typeof DecorEditorSection>[
   const bridge = overrides.bridge ?? createOfficeBridge();
   const commands: OfficeCommandMap['decoredit'][] = [];
   bridge.onCommand('decoredit', (command) => commands.push(command));
-  const terrainCommands: OfficeCommandMap['terrainedit'][] = [];
-  bridge.onCommand('terrainedit', (command) => terrainCommands.push(command));
   const decor: OfficeDecorPort = overrides.decor ?? { setDecor: vi.fn(async () => undefined) };
   const props = { bridge, decor, scope: 'office' as const, area: null, loadMaterials: async () => catalog, preview: noPreview, ...overrides };
-  return { ...props, commands, terrainCommands, ...render(<DecorEditorSection {...props} />) };
-}
-
-function terrainPort(overrides: Partial<TerrainAdminPort> = {}): TerrainAdminPort {
-  return { setBlock: vi.fn(async () => undefined), setBlocks: vi.fn(async () => undefined), setWalls: vi.fn(async () => undefined), ...overrides };
+  return { ...props, commands, ...render(<DecorEditorSection {...props} />) };
 }
 
 describe('DecorEditorSection: Decoración (the whole office)', () => {
@@ -203,199 +195,24 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
     expect(second.commands.at(-1)).toBeNull();
   });
 
-  describe('walls (#224)', () => {
-    it('offers the walls below the pieces with no explanation, one entry pressed at a time across both, and says what it paints', async () => {
-      const { commands, terrainCommands } = renderSection({ initiallyActive: true, terrain: terrainPort() });
+  it('offers no walls nor their eraser, even handed the terrain port it once painted them through: they live in "Editar terreno"', async () => {
+    const terrain = { setBlock: vi.fn(), setBlocks: vi.fn(), setWalls: vi.fn() };
+    renderSection({ initiallyActive: true, ...({ terrain } as object) });
+    await screen.findByRole('group', { name: 'Sillas' });
+    expect(screen.queryByRole('group', { name: 'Paredes' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: 'Paredes' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Borrador' })).not.toBeInTheDocument();
+  });
 
-      const walls = await screen.findByRole('group', { name: 'Paredes' });
-      // Only the heading sits between the pieces and the walls.
-      expect(walls.previousElementSibling).toHaveTextContent(/^Paredes$/);
-      expect(document.body.textContent).not.toMatch(/líneas entre casillas|muebles ni la entrada/);
+  it('deletes a selected double door like any piece, as one item', async () => {
+    const decor: OfficeDecorPort = { setDecor: vi.fn(async () => undefined) };
+    const { bridge } = renderSection({ initiallyActive: true, decor });
+    act(() => bridge.emit('decor', { items: [{ index: at(40, 40), piece: 'door-wood-double', rotation: 0 }] }));
+    await screen.findByRole('group', { name: 'Sillas' });
 
-      await userEvent.click(screen.getByRole('button', { name: 'Bonsái' }));
-      await userEvent.click(screen.getByRole('button', { name: 'Ladrillo' }));
-      expect(screen.getByRole('button', { name: 'Ladrillo' })).toHaveAttribute('aria-pressed', 'true');
-      expect(screen.getByRole('button', { name: 'Bonsái' })).toHaveAttribute('aria-pressed', 'false');
-      expect(screen.getByText('Pintando paredes de Ladrillo')).toBeInTheDocument();
-      expect(terrainCommands.at(-1)).toEqual({ brush: { kind: 'wall', piece: 'wall-brick' } });
-      // The decor tool lets go of the map while a wall is picked: its clicks are the wall's.
-      expect(commands.at(-1)).toBeNull();
-
-      await userEvent.click(screen.getByRole('button', { name: 'Bonsái' }));
-      expect(screen.getByRole('button', { name: 'Ladrillo' })).toHaveAttribute('aria-pressed', 'false');
-      expect(terrainCommands.at(-1)).toBeNull();
-      expect(commands.at(-1)).toMatchObject({ brush: { kind: 'piece', piece: 'plant-bonsai' } });
-    });
-
-    it('puts «⛔ Borrador» on its own line right above «Múltiple», out of the walls, and says only that while it is picked (#223)', async () => {
-      const { terrainCommands } = renderSection({ initiallyActive: true, terrain: terrainPort() });
-      const multiple = await screen.findByRole('checkbox', { name: 'Múltiple: colocar varios items' });
-      const eraser = screen.getByRole('button', { name: 'Borrador' });
-
-      // The header, then the eraser's line, then the line of «Múltiple», before the pieces' palettes.
-      const eraserLine = screen.getByRole('heading', { name: 'Decoración' }).parentElement!.nextElementSibling!;
-      expect(eraserLine).toContainElement(eraser);
-      expect(eraserLine).not.toContainElement(multiple);
-      expect(eraserLine.nextElementSibling).toContainElement(multiple);
-      expect(within(screen.getByRole('group', { name: 'Paredes' })).queryByRole('button', { name: 'Borrador' })).not.toBeInTheDocument();
-      expect(eraser).toHaveTextContent(/^\u26D4 Borrador$/);
-      expect(eraser).toHaveAttribute('title', 'Borrador');
-      expect(document.body.textContent).not.toMatch(/Quitar pared|Quitando paredes|Goma/);
-
-      await userEvent.click(screen.getByRole('button', { name: 'Ladrillo' }));
-      await userEvent.click(eraser);
-      expect(eraser).toHaveAttribute('aria-pressed', 'true');
-      expect(screen.getByRole('button', { name: 'Ladrillo' })).toHaveAttribute('aria-pressed', 'false');
-      expect(terrainCommands.at(-1)?.brush).toEqual({ kind: 'wall', piece: null });
-      expect(screen.getByRole('button', { name: 'Deseleccionar' }).parentElement).toHaveTextContent(/^Borrador/);
-      expect(document.body.textContent).not.toMatch(/Quitando|Quitar/);
-
-      await userEvent.click(screen.getByRole('button', { name: 'Bonsái' }));
-      expect(eraser).toHaveAttribute('aria-pressed', 'false');
-      expect(terrainCommands.at(-1)).toBeNull();
-    });
-
-    it('erases the clicked vertex when the eraser is picked, and the walls stay paintable (#223)', async () => {
-      const setWalls = vi.fn(async () => undefined);
-      const { bridge } = renderSection({ initiallyActive: true, terrain: terrainPort({ setWalls }) });
-      act(() => bridge.emit('terrain', { blocks: BASE_LAYOUT.blocks, walls: withWalls(BASE_LAYOUT.walls, [{ index: 7, piece: 'wall-stone' }]), colors: new Map() }));
-
-      await userEvent.click(await screen.findByRole('button', { name: 'Borrador' }));
-      act(() => bridge.emit('wallpick', { index: 7 }));
-      await vi.waitFor(() => expect(setWalls).toHaveBeenLastCalledWith([{ index: 7, piece: null }]));
-
-      await userEvent.click(screen.getByRole('button', { name: 'Ladrillo' }));
-      act(() => bridge.emit('wallpick', { index: 9 }));
-      await vi.waitFor(() => expect(setWalls).toHaveBeenLastCalledWith([{ index: 9, piece: 'wall-brick' }]));
-    });
-
-    describe('on a door (#232, #233)', () => {
-      // A wall along row 40, posts (39, 40)..(44, 40), and the doors on its line: a door spans 2 tiles, a double door 3.
-      const WALL = withWalls(BASE_LAYOUT.walls, [39, 40, 41, 42, 43, 44].map((tx) => ({ index: at(tx, 40), piece: 'wall-brick' as const })));
-      const LONE = [{ index: at(40, 40), piece: 'door-wood', rotation: 0 as const }];
-      const DOUBLE = [{ index: at(40, 40), piece: 'door-wood-double', rotation: 0 as const }];
-      const TWO = [...LONE, { index: at(42, 40), piece: 'door-wood', rotation: 0 as const }];
-
-      function onWall(items: typeof TWO) {
-        const setWalls = vi.fn(async () => undefined);
-        const decor: OfficeDecorPort = { setDecor: vi.fn(async () => undefined) };
-        const view = renderSection({ initiallyActive: true, decor, terrain: terrainPort({ setWalls }) });
-        act(() => view.bridge.emit('terrain', { blocks: BASE_LAYOUT.blocks, walls: WALL, colors: new Map() }));
-        act(() => view.bridge.emit('decor', { items }));
-        return { ...view, setWalls };
-      }
-
-      it('takes a lone door off the post at either end and keeps the post, then erases the post once the room shows it gone', async () => {
-        const { bridge, decor, setWalls } = onWall(LONE);
-        await userEvent.click(await screen.findByRole('button', { name: 'Borrador' }));
-
-        act(() => bridge.emit('wallpick', { index: at(42, 40) }));
-        await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(40, 40), item: null }]));
-        // The other end of the same door, before the room shows it gone: still the door's, never erased.
-        act(() => bridge.emit('wallpick', { index: at(40, 40) }));
-        expect(decor.setDecor).toHaveBeenCalledTimes(1);
-        expect(setWalls).not.toHaveBeenCalled();
-
-        act(() => bridge.emit('decor', { items: [] }));
-        act(() => bridge.emit('wallpick', { index: at(42, 40) }));
-        await vi.waitFor(() => expect(setWalls).toHaveBeenCalledWith([{ index: at(42, 40), piece: null }]));
-      });
-
-      it('takes a door off from the post in its middle, where the eraser lands when it is over the door', async () => {
-        const { bridge, decor, setWalls } = onWall(LONE);
-        await userEvent.click(await screen.findByRole('button', { name: 'Borrador' }));
-
-        act(() => bridge.emit('wallpick', { index: at(41, 40) }));
-        await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(40, 40), item: null }]));
-        expect(setWalls).not.toHaveBeenCalled();
-      });
-
-      it('leaves the posts past the ends of a door to the eraser', async () => {
-        const { bridge, decor, setWalls } = onWall(LONE);
-        await userEvent.click(await screen.findByRole('button', { name: 'Borrador' }));
-
-        act(() => bridge.emit('wallpick', { index: at(43, 40) }));
-        await vi.waitFor(() => expect(setWalls).toHaveBeenCalledWith([{ index: at(43, 40), piece: null }]));
-        expect(decor.setDecor).not.toHaveBeenCalled();
-      });
-
-      it('takes a double door off from the post at either end or in the middle of its three tiles', async () => {
-        const { bridge, decor, setWalls } = onWall(DOUBLE);
-        await userEvent.click(await screen.findByRole('button', { name: 'Borrador' }));
-
-        act(() => bridge.emit('wallpick', { index: at(43, 40) }));
-        await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(40, 40), item: null }]));
-        expect(setWalls).not.toHaveBeenCalled();
-
-        act(() => bridge.emit('decor', { items: DOUBLE }));
-        act(() => bridge.emit('wallpick', { index: at(42, 40) }));
-        await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledTimes(2));
-        expect(decor.setDecor).toHaveBeenLastCalledWith([{ index: at(40, 40), item: null }]);
-        expect(setWalls).not.toHaveBeenCalled();
-      });
-
-      it('takes off only the doors that end on the post: both of a post they share, one of a post that is only its own', async () => {
-        const { bridge, decor, setWalls } = onWall(TWO);
-        await userEvent.click(await screen.findByRole('button', { name: 'Borrador' }));
-
-        act(() => bridge.emit('wallpick', { index: at(44, 40) }));
-        await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(42, 40), item: null }]));
-
-        act(() => bridge.emit('decor', { items: TWO }));
-        act(() => bridge.emit('wallpick', { index: at(42, 40) }));
-        await vi.waitFor(() =>
-          expect(decor.setDecor).toHaveBeenLastCalledWith([
-            { index: at(40, 40), item: null },
-            { index: at(42, 40), item: null },
-          ]),
-        );
-        expect(setWalls).not.toHaveBeenCalled();
-      });
-
-      it('deletes a selected double door like any piece, as one item', async () => {
-        const { bridge, decor } = onWall(DOUBLE);
-        await screen.findByRole('group', { name: 'Sillas' });
-
-        act(() => bridge.emit('decorselect', { index: at(40, 40) }));
-        act(() => bridge.emit('decordelete', { index: at(40, 40) }));
-        await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(40, 40), item: null }]));
-      });
-    });
-
-    it('steps out on Escape: the picked wall first, then the editor', async () => {
-      const onExit = vi.fn();
-      const { commands, terrainCommands } = renderSection({ initiallyActive: true, terrain: terrainPort(), onExit });
-      await userEvent.click(await screen.findByRole('button', { name: 'Borrador' }));
-      expect(screen.getByRole('button', { name: 'Deseleccionar' }).parentElement).toHaveTextContent('Borrador');
-
-      await userEvent.keyboard('{Escape}');
-      expect(screen.getByRole('button', { name: 'Borrador' })).toHaveAttribute('aria-pressed', 'false');
-      expect(terrainCommands.at(-1)).toBeNull();
-      expect(commands.at(-1)).toMatchObject({ brush: null, area: null });
-      expect(onExit).not.toHaveBeenCalled();
-
-      await userEvent.keyboard('{Escape}');
-      expect(onExit).toHaveBeenCalledTimes(1);
-    });
-
-    it('paints the clicked vertices with the picked wall, and says why the server refused one', async () => {
-      const setWalls = vi.fn(async () => {
-        throw new AdminError('terrain-under-placement');
-      });
-      const { bridge } = renderSection({ initiallyActive: true, terrain: terrainPort({ setWalls }) });
-      await userEvent.click(await screen.findByRole('button', { name: 'Piedra' }));
-
-      act(() => bridge.emit('wallpick', { index: 7 }));
-
-      await vi.waitFor(() => expect(setWalls).toHaveBeenCalledWith([{ index: 7, piece: 'wall-stone' }]));
-      expect(await screen.findByRole('alert')).toHaveTextContent(/Una pared no puede tapar un escritorio/);
-    });
-
-    it('offers no walls without the terrain port', async () => {
-      renderSection({ initiallyActive: true });
-      await screen.findByRole('group', { name: 'Sillas' });
-      expect(screen.queryByRole('group', { name: 'Paredes' })).not.toBeInTheDocument();
-    });
+    act(() => bridge.emit('decorselect', { index: at(40, 40) }));
+    act(() => bridge.emit('decordelete', { index: at(40, 40) }));
+    await vi.waitFor(() => expect(decor.setDecor).toHaveBeenCalledWith([{ index: at(40, 40), item: null }]));
   });
 
   it('leaves when another editor takes the map', async () => {
@@ -494,12 +311,6 @@ describe('DecorEditorSection: Decoración for one desk', () => {
     act(() => bridge.emit('decorpick', { index: at(20, 20) }));
     expect(await screen.findByRole('alert')).toHaveTextContent(/dentro de tu escritorio/);
     expect(decor.setDecor).not.toHaveBeenCalled();
-  });
-
-  it('offers no walls: only an admin paints them (#224)', async () => {
-    renderSection({ scope: 'desk', area: DESK, terrain: terrainPort() });
-    await screen.findByRole('group', { name: 'Sillas' });
-    expect(screen.queryByRole('group', { name: 'Paredes' })).not.toBeInTheDocument();
   });
 
   it('passes the desks to the map for the desk rules', async () => {

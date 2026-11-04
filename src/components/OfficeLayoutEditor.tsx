@@ -103,7 +103,7 @@ function LayoutEditorSections({
   const parts = (
     <>
       {shown('decor') && decor !== undefined && decor !== null && (
-        <DecorEditorSection bridge={bridge} decor={decor} scope="office" area={null} desks={deskAreas} rooms={roomAreas} terrain={terrain}
+        <DecorEditorSection bridge={bridge} decor={decor} scope="office" area={null} desks={deskAreas} rooms={roomAreas}
           initiallyActive={section !== undefined} onExit={onExit}
           onEditingChange={(editing) => reportEditing('decor', editing)}
           forceExit={forced('decor')}
@@ -129,7 +129,7 @@ function LayoutEditorSections({
         />
       )}
       {shown('terrain') && terrain !== undefined && terrain !== null && (
-        <TerrainEditorSection bridge={bridge} terrain={terrain} desks={deskAreas} rooms={roomAreas}
+        <TerrainEditorSection bridge={bridge} terrain={terrain} desks={deskAreas} rooms={roomAreas} decor={decor}
           initiallyActive={section !== undefined} onExit={onExit}
           onEditingChange={(editing) => reportEditing('terrain', editing)}
           forceExit={forced('terrain')}

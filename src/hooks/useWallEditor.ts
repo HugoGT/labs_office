@@ -11,8 +11,8 @@ import type { TerrainBrush } from '../game/terrainEditor';
 import { tileAreaRect, type TileRect } from '../game/terrainGrid';
 
 /**
- * The wall tool of "Decoración" (#224; it was part of the terrain editor
- * until then): pick a wall in the palette, or the wall eraser, then every
+ * The wall tool of "Editar terreno" (#224; it lived in "Decoración" for a
+ * while and came back beside the floors): pick a wall in the palette, or the wall eraser, then every
  * click or drag on the map paints single posts on the grid vertex nearest
  * the pointer. A wall runs along the line between tiles and blocks the way.
  * Walls are still terrain to the server (`POST /admin/terrain/walls`, the
@@ -21,8 +21,8 @@ import { tileAreaRect, type TileRect } from '../game/terrainGrid';
  * The map side is the terrain editor's: the tool drives the `terrainedit`
  * overlay (`TerrainEditLayer`), which reports `wallpick`, and the scene draws
  * the pending paints. It holds that overlay only while it has something to
- * show, a picked wall or paints on their way, so the decor editor beside it
- * keeps the map the rest of the time.
+ * show, a picked wall or paints on their way (`showing`), so the floor tool
+ * beside it keeps the overlay the rest of the time.
  *
  * Paints go to the server one request at a time, in click order: the ones
  * queued meanwhile leave together in one `setWalls`, so a long dragged wall
@@ -56,7 +56,7 @@ export interface UseWallEditorOptions {
   eraseDecor?: (post: number, tile: number | null) => boolean;
   /** What a decor piece is, for the footprints the eraser outlines; the pack's pieces by default. */
   infoOf?: (piece: string) => DecorPieceInfo | null;
-  /** The outlines the map draws while a wall is picked (#216), the ones "Decoración" draws: a guide only. */
+  /** The outlines the map draws while a wall is picked (#216), the ones the floor tool draws: a guide only. */
   outlines?: readonly TileRect[];
 }
 
@@ -67,6 +67,12 @@ export interface WallEditor {
   brush: WallBrush | null;
   /** A paint is on its way to the server. */
   pending: boolean;
+  /**
+   * It holds the `terrainedit` overlay: a wall is picked or paints still wait
+   * for the room. The floor tool shares that overlay and waits meanwhile, or
+   * its commands would replace the wall's preview.
+   */
+  showing: boolean;
   blocked: boolean;
   error: string | null;
   /** Picks the wall `piece` (`null`: the wall eraser), or unpicks it when it is the picked one. */
@@ -262,6 +268,7 @@ export function useWallEditor({ bridge, terrain, eraseDecor, infoOf = decorInfoF
     walls,
     brush,
     pending: draining,
+    showing: shows,
     blocked,
     error,
     pick(piece) {

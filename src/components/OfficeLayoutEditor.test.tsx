@@ -11,6 +11,22 @@ import OfficeLayoutEditor, { type OfficeLayoutEditorProps } from './OfficeLayout
 const MESA: AdminDesk = { id: 'id-mesa', label: 'Mesa 4', x: 10, y: 10, w: 3, h: 3, occupant: null };
 const SALA: AdminSpace = { id: 'id-sala', name: 'Sala grande', x: 0, y: 0, w: 4, h: 4, capacity: null, kind: 'room' };
 
+describe('OfficeLayoutEditor: walls live in "Editar terreno" (tile walls, L22)', () => {
+  it.each([
+    ['terrain', true],
+    ['decor', false],
+  ] as const)('the %s section shows the walls: %s', async (section, shown) => {
+    const props: OfficeLayoutEditorProps = {
+      bridge: createOfficeBridge(), desks: fakeDesks(), spaces: fakeSpaces(), refreshDesks: vi.fn(), refreshSpaces: vi.fn(),
+      terrain: { setBlock: vi.fn(), setBlocks: vi.fn(), setWalls: vi.fn() }, collisions: { saveRects: vi.fn(), reset: vi.fn() },
+      decor: { setDecor: vi.fn() }, section, onEditingChange: vi.fn(),
+    };
+    render(<OfficeLayoutEditor {...props} />);
+    await screen.findByRole('button', { name: 'Salir' });
+    expect(screen.queryByText('Paredes') !== null).toBe(shown);
+  });
+});
+
 describe('OfficeLayoutEditor: selected submenu lifecycle (#147)', () => {
   it.each(['decor', 'spaces', 'terrain', 'collision'] as const)('unmounting %s clears editing and its bridge mode', async (section) => {
     const bridge = createOfficeBridge();

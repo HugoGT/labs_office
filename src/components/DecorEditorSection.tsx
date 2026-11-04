@@ -1,16 +1,14 @@
 import { useEffect, useMemo, useRef } from 'react';
-import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
+import type { MaterialCatalog } from '../game/artMaterials';
 import type { ArtPreviewCache } from '../game/artPreview';
 import { decorOutlines, fitsDeskArea, type DecorBrush } from '../game/decorEditor';
 import type { OfficeBridge } from '../game/officeBridge';
-import { decorInfoFromPieceId, decorItemKey, type DecorTileRect } from '../game/officeDecor';
+import { decorInfoFromPieceId, decorItemKey, type DecorPieceInfo, type DecorTileRect } from '../game/officeDecor';
 import type { OfficeDecorPort } from '../game/officeDecorPort';
 import { useDecorEditor } from '../hooks/useDecorEditor';
 import { useMaterialCatalog, type LoadMaterials } from '../hooks/useMaterialCatalog';
-import { useWallEditor, type WallBrush } from '../hooks/useWallEditor';
 import { DecorPalette, catalogDecorInfo } from './DecorPalette';
 import { MultipleToggle } from './MultipleToggle';
-import { WALL_ERASER_LABEL, WALL_PIECE_LABELS, WallEraser, WallPalette } from './TerrainPalette';
 import styles from './TerrainEditorSection.module.css';
 
 /**
@@ -35,17 +33,20 @@ import styles from './TerrainEditorSection.module.css';
  * The desk rules (`deskDecorRules.ts`) apply to both: `desks` lets the
  * editor and the map's ghost judge them before the server does.
  *
- * The admin's menu also paints the walls (#224, moved from "Editar
- * terreno"), below the pieces: `useWallEditor` with `WallPalette`, and its
- * eraser, «⛔ Borrador» (`WallEraser`), on its own line above «Múltiple», which takes the
- * chair, table, desk or plant under the pointer before a wall. One entry is
- * picked at a time across the pieces, the walls and the eraser, and while a wall is, the decor
- * tool is paused so the map's clicks are the wall's.
+ * The walls are not here: they went back to "Editar terreno" (#224 had
+ * moved them in), beside the floors they stand on.
  */
 
-/** What the picked wall brush paints, in words. */
-function wallBrushLabel(brush: WallBrush): string {
-  return brush.piece === null ? WALL_ERASER_LABEL : `Pintando paredes de ${WALL_PIECE_LABELS[brush.piece]}`;
+/**
+ * What a decor piece is, by the catalog (uploads included) and else by its
+ * id: how this menu sizes the pieces, and how the wall eraser of "Editar
+ * terreno" finds the one under the pointer, so both judge a piece alike.
+ */
+export function useCatalogDecorInfo(catalog: MaterialCatalog | null): (piece: string) => DecorPieceInfo | null {
+  return useMemo(() => {
+    const fromCatalog = catalogDecorInfo(catalog);
+    return (piece: string) => fromCatalog(piece) ?? decorInfoFromPieceId(piece);
+  }, [catalog]);
 }
 
 export interface DecorEditorSectionProps {
@@ -58,8 +59,6 @@ export interface DecorEditorSectionProps {
   desks?: readonly DecorTileRect[];
   /** `office` only: every room in tiles, outlined for the admin like the desks (#216). */
   rooms?: readonly DecorTileRect[];
-  /** `office` only: the terrain admin port the walls are painted through (#224); absent, no walls are offered. */
-  terrain?: TerrainAdminPort | null;
   /** `desk` only: releases the claimed desk ("Dejar escritorio"), like the desk banner's. */
   onLeaveDesk?: () => void;
   /** Reports each closed/open change, like the other sections. */
@@ -83,7 +82,6 @@ export function DecorEditorSection({
   area,
   desks,
   rooms,
-  terrain = null,
   onLeaveDesk,
   onEditingChange,
   forceExit = false,
@@ -94,19 +92,12 @@ export function DecorEditorSection({
   preview,
 }: DecorEditorSectionProps) {
   const catalog = useMaterialCatalog(loadMaterials);
-  const infoOf = useMemo(() => {
-    const fromCatalog = catalogDecorInfo(catalog);
-    return (piece: string) => fromCatalog(piece) ?? decorInfoFromPieceId(piece);
-  }, [catalog]);
+  const infoOf = useCatalogDecorInfo(catalog);
   const office = scope === 'office';
   const hasDesk = !office && area !== null;
-  // Only an admin paints walls: the desk scope never gets the port, so it offers none.
-  // Called on a map click, long after this render declared `editor` below.
   // The desk scope outlines its own desk, the office scope every desk and room (#216).
   const outlines = useMemo(() => decorOutlines(area, desks ?? [], office ? (rooms ?? []) : []), [area, desks, rooms, office]);
-  const walls = useWallEditor({ bridge, terrain: office ? terrain : null, eraseDecor: (post, tile) => editor.erase(post, tile), infoOf, outlines });
-  const editor = useDecorEditor({ bridge, decor, area, infoOf, onExit, desks, outlines, paused: walls.brush !== null });
-  const offersWalls = office && terrain !== null;
+  const editor = useDecorEditor({ bridge, decor, area, infoOf, onExit, desks, outlines });
   const onExitRef = useRef(onExit);
   onExitRef.current = onExit;
   const names = useMemo(() => {
@@ -140,12 +131,6 @@ export function DecorEditorSection({
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
   }, [office, hasDesk]);
-
-  // Leaving the menu puts the picked wall down with everything else.
-  useEffect(() => {
-    if (!editor.active) walls.reset();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editor.active]);
 
   useEffect(() => {
     onEditingChange?.(editor.active);
@@ -211,11 +196,6 @@ export function DecorEditorSection({
     <div className={styles.section}>
       {header}
 
-      {offersWalls && (
-        <div className={styles.tools}>
-          <WallEraser value={walls.brush} onPick={walls.pick} disabled={walls.blocked} />
-        </div>
-      )}
       {office && (
         <div className={styles.row}>
           <MultipleToggle checked={editor.multiple} onChange={editor.setMultiple} disabled={editor.blocked} />
@@ -227,34 +207,13 @@ export function DecorEditorSection({
         catalog={catalog}
         offers={office ? undefined : fitsDeskArea}
         colors={editor.colors}
-        onPick={(option) => {
-          walls.unpick();
-          editor.pick(option);
-        }}
-        onColorChange={(piece, color) => {
-          walls.unpick();
-          editor.setColor(piece, color);
-        }}
+        onPick={editor.pick}
+        onColorChange={editor.setColor}
         onColorPicking={editor.setPickingColor}
         disabled={editor.blocked}
         preview={preview}
       />
 
-      {offersWalls && (
-        <>
-          <h4 className={styles.subtitle}>Paredes</h4>
-          <WallPalette value={walls.brush} onPick={walls.pick} walls={catalog?.wall ?? null} disabled={walls.blocked} preview={preview} />
-        </>
-      )}
-
-      {walls.brush !== null && (
-        <div className={styles.row}>
-          <span>{wallBrushLabel(walls.brush)}</span>
-          <button type="button" className={styles.button} onClick={walls.unpick}>
-            Deseleccionar
-          </button>
-        </div>
-      )}
       {editor.brush !== null && (
         <div className={styles.row}>
           <span>{brushLabel(editor.brush)}</span>
@@ -268,11 +227,11 @@ export function DecorEditorSection({
           <span>Seleccionado: {names.get(selectedItem.piece) ?? selectedItem.piece}</span>
         </div>
       )}
-      {(editor.pending || walls.pending) && <span className={styles.hint}>Guardando…</span>}
+      {editor.pending && <span className={styles.hint}>Guardando…</span>}
 
-      {(walls.error ?? editor.error) !== null && (
+      {editor.error !== null && (
         <div className={styles.error} role="alert">
-          {walls.error ?? editor.error}
+          {editor.error}
         </div>
       )}
 
