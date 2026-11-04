@@ -1013,6 +1013,28 @@ describe('createTerrainRuntime doors and windows in tile walls (#223, #233, S6-S
     expect([65, 66, 67, 68].map((tx) => runtime.walls()[at(tx, 22)])).toEqual(['wall-brick', 'wall-brick', 'wall-brick', 'wall-brick']);
   });
 
+  it('refuses a door over another door, data unchanged: only a door and a window replace each other (S6)', async () => {
+    const store = createMemoryTerrain([], WALL);
+    const runtime = runtimeWith(store);
+    await runtime.load();
+    await runtime.setDecor([{ index: at(66, 22), item: DOOR }], null);
+    const before = await store.loadDecor();
+    await expect(runtime.setDecor([{ index: at(67, 22), item: DOOR }], 'admin-1')).rejects.toThrow(TerrainProtectedError);
+    expect(await store.loadDecor()).toEqual(before);
+    expect(runtime.decor()).toEqual(before);
+  });
+
+  it('refuses erasing the run under a vertical door down to its face, walls unchanged, so the door never stands in nothing', async () => {
+    const store = createMemoryTerrain([], WALL);
+    const runtime = runtimeWith(store);
+    await runtime.load();
+    await runtime.setDecor([{ index: at(65, 24), item: VERTICAL }], null);
+    const walls = await store.loadWalls();
+    await expect(runtime.setWalls([27, 28, 29].map((ty) => ({ index: at(65, ty), piece: null })), 'admin-1', NONE)).rejects.toThrow(TerrainProtectedError);
+    expect(await store.loadWalls()).toEqual(walls);
+    expect(runtime.snapshot().openings).toEqual([{ axis: 'vertical', tx: 65, ty: 24, span: 2 }]);
+  });
+
   it('refuses a window over another window, data unchanged, and takes two side by side (L23)', async () => {
     const store = createMemoryTerrain([], WALL);
     const runtime = runtimeWith(store);

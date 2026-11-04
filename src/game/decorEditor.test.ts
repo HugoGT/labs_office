@@ -267,13 +267,14 @@ describe('decorPlacementAllowed: doors and windows in tile walls (#223, #233, S6
     expect(decorPlacementAllowed(none, infoOf, walled(), { x: 1, y: 1, w: 3, h: 3 }, tile(2, 2), doorBrush(0))).toBe(false);
   });
 
-  it('replaces a window with a door and a door with a window, and a door with another one, but no other piece (S6)', () => {
+  it('replaces a window with a door and a door with a window, but not a door with another door nor any other piece (S6)', () => {
     const window: DecorItem = { index: tile(2, 2), piece: 'door-glass-window', rotation: 0 };
     const door: DecorItem = { index: tile(3, 2), piece: 'door-wood', rotation: 0 };
     expect(decorPlacementAllowed([window], doorInfo, walled(), null, tile(2, 2), doorBrush(0))).toBe(true);
     expect(decorPlacementAllowed([window], doorInfo, walled(), null, tile(3, 2), doorBrush(0))).toBe(true);
     expect(decorPlacementAllowed([door], doorInfo, walled(), null, tile(4, 2), windowBrush(0))).toBe(true);
-    expect(decorPlacementAllowed([door], doorInfo, walled(), null, tile(2, 2), doubleBrush(0))).toBe(true);
+    expect(decorPlacementAllowed([door], doorInfo, walled(), null, tile(2, 2), doubleBrush(0))).toBe(false);
+    expect(decorPlacementAllowed([door], doorInfo, walled(), null, tile(4, 2), doorBrush(0))).toBe(false);
     // A chair over a door's doorway is refused as before.
     expect(decorPlacementAllowed([door], doorInfo, walled(), null, tile(3, 1), chairBrush())).toBe(false);
   });

@@ -7,6 +7,7 @@ import {
   DOOR_SWING_MS,
   decorPieceTurns,
   doorEndPosts,
+  doorsLeftOffWall,
   doorFarSide,
   doorHingeStops,
   doorLeaves,
@@ -73,8 +74,20 @@ describe('officeDoors: doors and windows in tile walls (tile walls, S7-S10)', ()
     expect(doorsReplacedBy([window], [windowAt(5, 3)], WIDTH)).toEqual([]);
     expect(doorsReplacedBy([window], [door(5, 3, 0)], WIDTH)).toEqual([window.index]);
     expect(doorsReplacedBy([door(4, 3, 0)], [windowAt(5, 3)], WIDTH)).toEqual([at(4, 3)]);
-    // Side by side, nothing is replaced.
+    // Side by side, nothing is replaced; a door over a door replaces nothing either (it is refused).
     expect(doorsReplacedBy([window], [windowAt(6, 3)], WIDTH)).toEqual([]);
+    expect(doorsReplacedBy([door(4, 3, 0)], [door(5, 3, 0)], WIDTH)).toEqual([]);
+  });
+
+  it('tells when walls after an edit would leave a door that stands on its wall off it, the run under a vertical door included', () => {
+    const vertical = door(11, 4, 90);
+    expect(doorOnWall(grid, vertical)).toBe(true);
+    const without = (...rows: number[]) => grid.walls.map((wall, index) => (index % WIDTH === 11 && rows.includes(Math.floor(index / WIDTH)) ? null : wall));
+    // Erasing the bottom of the run under it leaves it standing in nothing: refused.
+    expect(doorsLeftOffWall([vertical], grid, without(7, 8, 9, 10))).toBe(true);
+    // The same walls with no door, or erasing a wall the door does not need, is fine.
+    expect(doorsLeftOffWall([], grid, without(7, 8, 9, 10))).toBe(false);
+    expect(doorsLeftOffWall([door(3, 3, 0)], grid, without(7, 8, 9, 10))).toBe(false);
   });
 
   it('knows a door by its id, single, double or a window, and a window apart', () => {

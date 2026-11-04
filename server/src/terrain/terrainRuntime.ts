@@ -84,7 +84,7 @@ import {
   type DecorTileRect,
 } from '../../../src/game/officeDecor.ts';
 import { deskOverChairLimit, displacedDeskTables } from '../../../src/game/deskDecorRules.ts';
-import { doorOpenings, doorPostSet, doorsReplacedBy, isDoorPiece } from '../../../src/game/officeDoors.ts';
+import { doorOpenings, doorPostSet, doorsLeftOffWall, doorsReplacedBy, isDoorPiece } from '../../../src/game/officeDoors.ts';
 import { carriedDecor, onAreaOutline, replacedDecor } from '../../../src/game/areaCarry.ts';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY } from '../../../src/game/mapData.ts';
 import type { TerrainStore } from './terrainPort.ts';
@@ -416,6 +416,8 @@ export function createTerrainRuntime({
     conflict ??= findWallConflict(standing, layout, withoutDoors, guards);
     if (conflict !== null) throw new TerrainProtectedError(conflict);
     const next = withWalls(walls, changed);
+    // Nor may it take away the rest of the run a vertical door stands on (its face below it).
+    if (doorsLeftOffWall(decor, { width: layout.width, height: layout.height, walls }, next)) throw new TerrainProtectedError('placement');
     // A placed or repainted post becomes the latest, the order the store keeps by `updated_at`.
     const nextOrder = withWallOrder(wallOrder, walls, changed);
     const nextSnapshot = snapshotOf(blocks, next, decor, nextOrder);

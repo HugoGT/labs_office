@@ -213,6 +213,16 @@ export function decorPieceTurns(piece: string, kind: DecorKind): boolean {
   return isRotatable(kind) && !isWindowPiece(piece);
 }
 
+/**
+ * Whether walls `after` would leave a door or window of `items` that stands
+ * on its wall now (`doorOnWall`) off it. `doorPostSet` guards the span and
+ * its ends; a vertical door also needs its run to go on below it, to its
+ * face, which only this catches.
+ */
+export function doorsLeftOffWall(items: readonly DecorItem[], grid: Pick<WallGrid, 'width' | 'height' | 'walls'>, after: WallGrid['walls']): boolean {
+  return items.some((item) => isDoorPiece(item.piece) && doorOnWall(grid, item) && !doorOnWall({ ...grid, walls: after }, item));
+}
+
 /** Every wall tile a door or window needs (`doorPosts`): removing one would leave it off its wall (repainting one keeps it). */
 export function doorPostSet(items: readonly DecorItem[], width: number): Set<number> {
   return new Set(items.flatMap((item) => (isDoorPiece(item.piece) ? doorPosts(item, width) : [])));
@@ -221,10 +231,10 @@ export function doorPostSet(items: readonly DecorItem[], width: number): Set<num
 /**
  * The anchors of the doors and windows of `items` that the ones `placed`
  * replace (S6): every other one sharing a wall tile with one of them
- * (`doorTiles`). A door takes the place of a window and the other way round,
- * and of another door too; the wall under them stays. A window never takes
- * the place of another window (L23): one over another is refused, like any
- * two pieces on the same tiles.
+ * (`doorTiles`). A door takes the place of a window and the other way round;
+ * the wall under them stays. A door over a door, or a window over a window
+ * (L23), replaces nothing and is refused like any two pieces on the same
+ * tiles.
  */
 export function doorsReplacedBy(items: readonly DecorItem[], placed: readonly DoorPlacement[], width: number): number[] {
   const placedDoors = placed.filter((item) => isDoorPiece(item.piece));
@@ -235,7 +245,7 @@ export function doorsReplacedBy(items: readonly DecorItem[], placed: readonly Do
       (item) =>
         isDoorPiece(item.piece) &&
         !anchors.has(item.index) &&
-        placedDoors.some((door) => !(isWindowPiece(door.piece) && isWindowPiece(item.piece)) && doorTiles(item, width).some((tile) => doorTiles(door, width).includes(tile))),
+        placedDoors.some((door) => isWindowPiece(door.piece) !== isWindowPiece(item.piece) && doorTiles(item, width).some((tile) => doorTiles(door, width).includes(tile))),
     )
     .map((item) => item.index);
 }
