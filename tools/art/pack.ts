@@ -99,7 +99,7 @@ const FLOOR_NAMES: Readonly<Record<Terrain, string>> = {
 /** The colorable floors and the color each is exported in; the rest have a fixed texture. */
 const FLOOR_DEFAULT_COLORS: Readonly<Partial<Record<Terrain, string>>> = { plain: DEFAULT_PLAIN_COLOR, carpet: DEFAULT_CARPET_COLOR };
 
-const WALL_NAMES: Readonly<Record<WallMaterial, string>> = { brick: 'Ladrillo', stone: 'Piedra', plaster: 'Yeso', glass: 'Vidrio' };
+const WALL_NAMES: Readonly<Record<WallMaterial, string>> = { brick: 'Ladrillo', stone: 'Piedra', plaster: 'Yeso' };
 
 const TREE_NAMES: Readonly<Record<TreeKind, string>> = { oak: 'Árbol', large: 'Árbol grande', ficus: 'Ficus' };
 const PLANT_NAMES: Readonly<Record<PlantKind, string>> = { bonsai: 'Bonsái' };
@@ -221,7 +221,7 @@ export function renderPackFiles(): Map<string, Uint8Array> {
         material,
         heightTiles: WALL.heightTiles,
         topHeight: WALL.topHeight,
-        translucent: material === 'glass',
+        translucent: false,
         files: [png(`wall/${material}.png`, 'sheet', 'wall', image)],
       }),
     ),

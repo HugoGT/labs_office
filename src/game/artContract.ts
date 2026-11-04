@@ -468,7 +468,9 @@ export const WALL: WallSpec = {
   rows: 3,
   heightTiles: 3,
   topHeight: 19,
-  // Glass is translucent; a wall piece covers its whole frame, so no corner rule.
+  // No pack wall is translucent since the glass material was removed; partial alpha
+  // stays so the contract walls are drawn against does not tighten. A wall piece
+  // covers its whole frame, so no corner rule.
   alpha: 'partial',
   transparentCorners: false,
   maxColors: MAX_COLORS_PER_IMAGE,

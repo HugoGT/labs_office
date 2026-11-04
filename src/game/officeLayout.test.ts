@@ -57,7 +57,7 @@ import {
 } from './officeLayout';
 
 /** The palette every test map uses: terrain materials, walls and the hedge, by tile `type`. */
-const PALETTE = [...LAYOUT_MATERIALS, 'wall-brick', 'wall-stone', 'wall-plaster', 'wall-glass', 'hedge-boxwood', ...LAYOUT_DECALS];
+const PALETTE = [...LAYOUT_MATERIALS, 'wall-brick', 'wall-stone', 'wall-plaster', 'hedge-boxwood', ...LAYOUT_DECALS];
 
 function gidOf(name: string): number {
   const index = PALETTE.indexOf(name);
@@ -627,13 +627,13 @@ describe('terrain walls', () => {
 
   it('sets and erases single tiles, leaving every other tile and the input alone', () => {
     const empty = new Array<string | null>(TILES).fill(null);
-    const built = withWalls(empty, [{ index: 5, piece: 'wall-brick' }, { index: 6, piece: 'wall-glass' }]);
+    const built = withWalls(empty, [{ index: 5, piece: 'wall-brick' }, { index: 6, piece: 'wall-plaster' }]);
     const erased = withWalls(built, [{ index: 5, piece: null }]);
 
     expect(built[5]).toBe('wall-brick');
-    expect(built[6]).toBe('wall-glass');
+    expect(built[6]).toBe('wall-plaster');
     expect(empty.every((wall) => wall === null)).toBe(true);
-    expect(erased.filter((wall) => wall !== null)).toEqual(['wall-glass']);
+    expect(erased.filter((wall) => wall !== null)).toEqual(['wall-plaster']);
     expect(() => withWalls(empty, [{ index: TILES, piece: 'wall-brick' }])).toThrow(InvalidOfficeLayoutError);
     expect(() => withWalls(empty, [{ index: -1, piece: 'wall-brick' }])).toThrow(InvalidOfficeLayoutError);
   });
@@ -643,15 +643,15 @@ describe('terrain walls', () => {
       { index: 0, piece: 'wall-brick' },
       { index: 7, piece: 'wall-stone' },
       { index: TILES - 1, piece: 'wall-plaster' },
-      { index: 40, piece: 'wall-glass' },
+      { index: 40, piece: 'wall-brick' },
     ]);
     const encoded = encodeTerrainWalls(walls);
 
-    expect(encoded).toBe(`0:brick,7:stone,40:glass,${TILES - 1}:plaster`);
+    expect(encoded).toBe(`0:brick,7:stone,40:brick,${TILES - 1}:plaster`);
     expect(decodeTerrainWalls(encoded, TILES)).toEqual(walls);
     expect(encodeTerrainWalls(new Array<string | null>(TILES).fill(null))).toBe('');
     expect(decodeTerrainWalls('', TILES)).toEqual(new Array(TILES).fill(null));
-    for (const garbage of [`${TILES}:brick`, '-1:brick', '1.5:brick', '3:lava', '3', '3:brick,3:stone', 'x:brick', ',', ' 3:brick']) {
+    for (const garbage of [`${TILES}:brick`, '-1:brick', '1.5:brick', '3:lava', '3:glass', '3', '3:brick,3:stone', 'x:brick', ',', ' 3:brick']) {
       expect(decodeTerrainWalls(garbage, TILES), garbage).toBeNull();
     }
     expect(decodeTerrainWalls(42, TILES)).toBeNull();
@@ -662,8 +662,8 @@ describe('terrain walls', () => {
     const walls = withWalls(new Array<string | null>(TILES).fill(null), [
       { index: 9, piece: 'wall-brick' },
       { index: 3, piece: 'wall-stone' },
-      { index: 5, piece: 'wall-glass' },
-      { index: 1, piece: 'wall-glass' },
+      { index: 5, piece: 'wall-plaster' },
+      { index: 1, piece: 'wall-plaster' },
     ]);
 
     expect(orderedWallPosts(walls)).toEqual([1, 3, 5, 9]);
@@ -680,9 +680,9 @@ describe('terrain walls', () => {
       { index: 6, piece: 'wall-brick' },
     ]);
 
-    expect(withWallOrder([2, 4, 6], walls, [{ index: 8, piece: 'wall-glass' }])).toEqual([2, 4, 6, 8]);
+    expect(withWallOrder([2, 4, 6], walls, [{ index: 8, piece: 'wall-plaster' }])).toEqual([2, 4, 6, 8]);
     // A repaint (another piece on a standing post) makes it the latest.
-    expect(withWallOrder([2, 4, 6], walls, [{ index: 2, piece: 'wall-glass' }])).toEqual([4, 6, 2]);
+    expect(withWallOrder([2, 4, 6], walls, [{ index: 2, piece: 'wall-plaster' }])).toEqual([4, 6, 2]);
     // The same piece again is no edit at all.
     expect(withWallOrder([2, 4, 6], walls, [{ index: 2, piece: 'wall-brick' }])).toEqual([2, 4, 6]);
     expect(withWallOrder([2, 4, 6], walls, [{ index: 4, piece: null }])).toEqual([2, 6]);
@@ -693,16 +693,16 @@ describe('terrain walls', () => {
     const walls = withWalls(new Array<string | null>(TILES).fill(null), [
       { index: 7, piece: 'wall-stone' },
       { index: 0, piece: 'wall-brick' },
-      { index: 40, piece: 'wall-glass' },
+      { index: 40, piece: 'wall-plaster' },
     ]);
     const encoded = encodeTerrainWalls(walls, [40, 7, 0]);
 
-    expect(encoded).toBe('40:glass,7:stone,0:brick');
+    expect(encoded).toBe('40:plaster,7:stone,0:brick');
     expect(decodeTerrainWalls(encoded, TILES)).toEqual(walls);
     expect(decodeTerrainWallOrder(encoded, TILES)).toEqual([40, 7, 0]);
     // Without an order the string is index ordered, as before, and decodes to that order.
-    expect(encodeTerrainWalls(walls)).toBe('0:brick,7:stone,40:glass');
-    expect(decodeTerrainWallOrder('0:brick,7:stone,40:glass', TILES)).toEqual([0, 7, 40]);
+    expect(encodeTerrainWalls(walls)).toBe('0:brick,7:stone,40:plaster');
+    expect(decodeTerrainWallOrder('0:brick,7:stone,40:plaster', TILES)).toEqual([0, 7, 40]);
     expect(decodeTerrainWallOrder('', TILES)).toEqual([]);
     for (const garbage of [`${TILES}:brick`, '3:brick,3:stone', 'x:brick', ',']) expect(decodeTerrainWallOrder(garbage, TILES), garbage).toBeNull();
     expect(decodeTerrainWallOrder(undefined, TILES)).toBeNull();
@@ -811,9 +811,9 @@ describe('terrain walls', () => {
     const height = 7;
     const walls = new Array<string | null>(width * height).fill(null);
     walls[1 * width + 2] = 'wall-brick';
-    walls[3 * width + 2] = 'wall-glass';
+    walls[3 * width + 2] = 'wall-plaster';
 
-    expect(wallStretches({ width, height, walls })).toEqual([{ tx: 2, top: 0, bottom: 4, base: 3, piece: 'wall-glass' }]);
+    expect(wallStretches({ width, height, walls })).toEqual([{ tx: 2, top: 0, bottom: 4, base: 3, piece: 'wall-plaster' }]);
   });
 
   it('frames each tile of a stretch: cap above the bottom three, End frames only where the run ends on the right', () => {
@@ -874,7 +874,7 @@ describe('terrain walls', () => {
       for (const [tx, ty] of [[1, 1], [2, 1], [3, 1], [4, 1], [1, 2]] as const) walls[ty * width + tx] = material(tx, ty);
       return walls;
     };
-    const mixed = { width, height, walls: shape((tx, ty) => (tx === 4 || ty === 2 ? 'wall-glass' : 'wall-brick')) };
+    const mixed = { width, height, walls: shape((tx, ty) => (tx === 4 || ty === 2 ? 'wall-plaster' : 'wall-brick')) };
     const plain = { width, height, walls: shape(() => 'wall-brick') };
 
     expect(wallsJoin(mixed, 3, 1, 4, 1)).toBe(true);

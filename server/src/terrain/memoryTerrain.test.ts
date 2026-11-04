@@ -66,9 +66,9 @@ describe('memoryTerrain walls', () => {
 
   it('places, replaces and removes walls in one save, recording who placed each', async () => {
     const store = createMemoryTerrain([], [[4, 'wall-brick'], [5, 'wall-brick']]);
-    await store.saveWalls([{ index: 4, piece: 'wall-glass' }, { index: 5, piece: null }, { index: 9, piece: 'wall-stone' }], 'admin-1');
+    await store.saveWalls([{ index: 4, piece: 'wall-plaster' }, { index: 5, piece: null }, { index: 9, piece: 'wall-stone' }], 'admin-1');
 
-    expect(new Map(await store.loadWalls())).toEqual(new Map([[4, 'wall-glass'], [9, 'wall-stone']]));
+    expect(new Map(await store.loadWalls())).toEqual(new Map([[4, 'wall-plaster'], [9, 'wall-stone']]));
     expect(store.wallActorOf(4)).toBe('admin-1');
     expect(store.wallActorOf(5)).toBeUndefined();
     expect([...(await store.loadBlocks())]).toEqual([]);
@@ -77,7 +77,7 @@ describe('memoryTerrain walls', () => {
     const store = createMemoryTerrain([], [[9, 'wall-brick'], [4, 'wall-brick'], [5, 'wall-brick']]);
     expect([...(await store.loadWalls())].map(([index]) => index)).toEqual([9, 4, 5]);
 
-    await store.saveWalls([{ index: 9, piece: 'wall-glass' }, { index: 2, piece: 'wall-stone' }], null);
+    await store.saveWalls([{ index: 9, piece: 'wall-plaster' }, { index: 2, piece: 'wall-stone' }], null);
     expect([...(await store.loadWalls())].map(([index]) => index)).toEqual([4, 5, 9, 2]);
 
     await store.saveWalls([{ index: 4, piece: null }, { index: 4, piece: 'wall-stone' }], null);
@@ -85,13 +85,13 @@ describe('memoryTerrain walls', () => {
   });
 
   it('saves blocks and removes walls in one save', async () => {
-    const store = createMemoryTerrain([], [[4, 'wall-brick'], [5, 'wall-glass']]);
+    const store = createMemoryTerrain([], [[4, 'wall-brick'], [5, 'wall-plaster']]);
     await store.saveBlocksClearingWalls([{ index: 0, material: 'void' }, { index: 1, material: 'carpet', color: '#a0b1c2' }], [4], 'admin-1');
 
     expect([...(await store.loadBlocks())]).toEqual([[0, 'void'], [1, 'carpet']]);
     expect([...(await store.loadBlockColors())]).toEqual([[1, '#a0b1c2']]);
     expect(store.actorOf(0)).toBe('admin-1');
-    expect([...(await store.loadWalls())]).toEqual([[5, 'wall-glass']]);
+    expect([...(await store.loadWalls())]).toEqual([[5, 'wall-plaster']]);
     expect(store.wallActorOf(4)).toBeUndefined();
   });
 });

@@ -208,12 +208,12 @@ describe('wallSprites', () => {
   });
 
   it('ends a run where the material changes: each material closes its own right edge', () => {
-    const sprites = wallSprites(blankLayout({ walls: tiles(18, { '2,4': 'wall-brick', '3,4': 'wall-glass', '4,4': 'wall-glass' }) }));
+    const sprites = wallSprites(blankLayout({ walls: tiles(18, { '2,4': 'wall-brick', '3,4': 'wall-plaster', '4,4': 'wall-plaster' }) }));
 
     expect(sprites.filter(({ y }) => y === 4 * TILE).map(({ piece, frame }) => [piece, frame])).toEqual([
       ['wall-brick', wallFrameIndex('faceEnd', 2)],
-      ['wall-glass', wallFrameIndex('face', 3)],
-      ['wall-glass', wallFrameIndex('faceEnd', 4)],
+      ['wall-plaster', wallFrameIndex('face', 3)],
+      ['wall-plaster', wallFrameIndex('faceEnd', 4)],
     ]);
   });
 
@@ -224,7 +224,7 @@ describe('wallSprites', () => {
   });
 
   it('draws exactly the tiles the wall blocks, one sprite each', () => {
-    const layout = blankLayout({ walls: tiles(18, { '2,2': 'wall-brick', '3,2': 'wall-brick', '3,4': 'wall-glass', '9,6': 'wall-stone' }) });
+    const layout = blankLayout({ walls: tiles(18, { '2,2': 'wall-brick', '3,2': 'wall-brick', '3,4': 'wall-plaster', '9,6': 'wall-stone' }) });
     const drawn = wallSprites(layout).map(({ x, y }) => `${x},${y}`);
     const blocked = wallFootprintRects(layout).flatMap(({ x, y, h }) => Array.from({ length: h / TILE }, (_, row) => `${x},${y + row * TILE}`));
 

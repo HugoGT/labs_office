@@ -252,15 +252,14 @@ describe('wall sheet', () => {
     }
   });
 
-  it('draws four different materials, solid ones opaque and glass translucent, each face varying across its three variants', () => {
+  it('draws three different materials, all opaque, each face varying across its three variants', () => {
     const faces = WALL_MATERIALS.map((material) => pixels(frameAt(wallSheet(material), 'face', 0)));
     expect(new Set(faces.map((face) => face.join())).size).toBe(WALL_MATERIALS.length);
     for (const material of WALL_MATERIALS) {
       const sheet = wallSheet(material);
       const alphas = new Set<number>();
       for (let y = 0; y < sheet.height; y += 1) for (let x = 0; x < sheet.width; x += 1) alphas.add(sheet.getPixel(x, y).a);
-      if (material === 'glass') expect([...alphas].some((alpha) => alpha > 0 && alpha < 255)).toBe(true);
-      else expect([...alphas]).toEqual([255]);
+      expect([...alphas], material).toEqual([255]);
     }
     for (const material of ['brick', 'stone'] as const) {
       const sheet = wallSheet(material);

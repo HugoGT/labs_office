@@ -5,7 +5,7 @@ import { decodePng } from '../../server/src/assets/pngCodec.ts';
 export const LAYOUT_PATH = 'src/game/maps/office.json';
 export const PALETTE_PATH = 'src/game/maps/layout-palette.png';
 /** Void (no terrain) comes last, so the tile ids of everything before it never move. */
-export const LAYOUT_PALETTE: readonly string[] = [...TERRAIN_MATERIALS, 'wall-brick', 'wall-stone', 'wall-plaster', 'wall-glass', 'hedge-boxwood', ...TERRAIN_DECALS, 'void'];
+export const LAYOUT_PALETTE: readonly string[] = [...TERRAIN_MATERIALS, 'wall-brick', 'wall-stone', 'wall-plaster', 'hedge-boxwood', ...TERRAIN_DECALS, 'void'];
 
 /** The void tile: the solid black the office draws behind its terrain. */
 const VOID_RGBA = rgba((TERRAIN_VOID_COLOR >> 16) & 0xff, (TERRAIN_VOID_COLOR >> 8) & 0xff, TERRAIN_VOID_COLOR & 0xff);

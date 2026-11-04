@@ -140,7 +140,6 @@ describe('materialCatalogFrom: walls', () => {
       ['wall-brick', 'wall', 'Ladrillo'],
       ['wall-stone', 'wall', 'Piedra'],
       ['wall-plaster', 'wall', 'Yeso'],
-      ['wall-glass', 'wall', 'Vidrio'],
     ]);
     expect(catalog().wall.every((option) => !option.colorable && option.defaultColor === null)).toBe(true);
     expect(catalog().wall[0]!.sheetUrl).toBe('assets/pack/wall/brick.png');

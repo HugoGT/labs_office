@@ -135,7 +135,7 @@ describe('art pack manifest', () => {
   it('registers the characters, furniture, floors, walls, the terrain tileset and the map props', () => {
     const count = (kind: string): number => manifest.pieces.filter((piece) => piece.kind === kind).length;
     const kinds = ['character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door', 'sofa'];
-    expect(kinds.map(count)).toEqual([18, 9, 6, 9, 4, 1, 3, 1, 1, 1, 4, 3, 4]);
+    expect(kinds.map(count)).toEqual([18, 9, 6, 9, 3, 1, 3, 1, 1, 1, 4, 3, 4]);
   });
 
   it('uses stable ids derived from the generators, unique and prefixed by kind', () => {
@@ -148,7 +148,7 @@ describe('art pack manifest', () => {
         'chair-wood',
         'desk-painted',
         'floor-plain',
-        'wall-glass',
+        'wall-plaster',
         'floor-dirt',
         'floor-sand',
         'floor-cobblestone',
@@ -171,6 +171,8 @@ describe('art pack manifest', () => {
         'desk-curved',
       ]),
     );
+    // S17: the glass wall material was removed; the pack no longer offers it.
+    expect(manifest.pieces.filter((piece) => piece.kind === 'wall').map((piece) => piece.id)).toEqual(['wall-brick', 'wall-stone', 'wall-plaster']);
   });
 
   it('names defaults that exist in the pack', () => {

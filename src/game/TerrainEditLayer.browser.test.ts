@@ -215,7 +215,7 @@ describe('TerrainEditLayer', () => {
     const bridge = createOfficeBridge();
     new TerrainEditLayer(scene, bridge, BASE_LAYOUT);
 
-    bridge.emitCommand('terrainedit', { brush: wall('wall-glass') });
+    bridge.emitCommand('terrainedit', { brush: wall('wall-plaster') });
     scene.input.emit('pointermove', pointerAt(2 * TILE + 3, TILE + 3));
     const hover = outline(scene, TERRAIN_HOVER_NAME)!;
     expect(hover.visible).toBe(true);

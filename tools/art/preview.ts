@@ -164,7 +164,7 @@ function floorsPreview(sheets: PackSheets): PixelBuffer {
 }
 
 /** The art demo's pairing of wall material and floor. */
-const WALL_FLOORS: Readonly<Record<WallMaterial, Terrain>> = { brick: 'wood', stone: 'grass', plaster: 'water', glass: 'plain' };
+const WALL_FLOORS: Readonly<Record<WallMaterial, Terrain>> = { brick: 'wood', stone: 'grass', plaster: 'water' };
 const ROOM_COLS = 8;
 const ROOM_ROWS = 9;
 

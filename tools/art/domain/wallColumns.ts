@@ -1,5 +1,5 @@
 /**
- * Wall columns drawn in code for the four materials. A wall stands on a whole tile and reads as a
+ * Wall columns drawn in code for the three materials. A wall stands on a whole tile and reads as a
  * column three tiles tall seen from the front: a near-black top band (`WALL.topHeight`) over the
  * material's face. The face repeats every `WALL_VARIANTS` tiles across (`PERIOD`), so walls side by
  * side read as one surface and a pattern can hold pieces longer than a tile allows. It is cut into
@@ -9,7 +9,7 @@
  * right edge of the last wall of a horizontal run.
  */
 import { hexToRgba, makeRamp, mixRgba, type Ramp } from './color.ts';
-import { PixelBuffer, rgba, type Rgba } from '../../../src/art/pixelBuffer.ts';
+import { PixelBuffer, type Rgba } from '../../../src/art/pixelBuffer.ts';
 import { createRng, type Rng } from './random.ts';
 import { ART_TILE, WALL, WALL_FRAMES, WALL_TOP_COLOR, WALL_VARIANTS, type WallFrame } from '../../../src/game/artContract.ts';
 import type { WallMaterial } from './wallMap.ts';
@@ -180,35 +180,6 @@ function plasterFace(rng: Rng): PixelBuffer {
   return face;
 }
 
-// --- Glass -------------------------------------------------------------------------------------
-
-const FRAME = makeRamp('#8e9aa6');
-const GLASS = rgba(168, 214, 240, 110);
-const GLARE = rgba(240, 250, 255, 170);
-const GLARE_PERIOD = 16;
-const SILL = 4;
-
-/** Translucent panes with diagonal glare, a frame along top and bottom and a mullion every tile. */
-function glassFace(): PixelBuffer {
-  const face = new PixelBuffer(PERIOD, FACE_HEIGHT);
-  for (let y = 0; y < FACE_HEIGHT; y += 1) {
-    for (let x = 0; x < PERIOD; x += 1) {
-      const phase = (x + y) % GLARE_PERIOD;
-      face.setPixel(x, y, phase < 2 || phase === 5 ? GLARE : GLASS);
-    }
-  }
-  rect(face, 0, 0, PERIOD, 2, FRAME.base);
-  rect(face, 0, FACE_HEIGHT - SILL, PERIOD, SILL, FRAME.base);
-  rect(face, 0, FACE_HEIGHT - SILL, PERIOD, 1, FRAME.light);
-  for (let y = 0; y < FACE_HEIGHT; y += 1) {
-    for (let x = 0; x < PERIOD; x += WIDTH) {
-      face.setPixel(x, y, FRAME.light);
-      face.setPixel(x + 1, y, FRAME.shadow);
-    }
-  }
-  return face;
-}
-
 // --- Columns -----------------------------------------------------------------------------------
 
 interface FaceStyle {
@@ -228,7 +199,6 @@ const FACES: Readonly<Record<WallMaterial, FaceStyle>> = {
   brick: { ramp: BRICK, paint: brickFace, endJoint: MORTAR.base },
   stone: { ramp: STONE, paint: stoneFace, seed: 29 },
   plaster: { ramp: SKIRTING, paint: plasterFace },
-  glass: { ramp: FRAME, paint: glassFace },
 };
 
 /**

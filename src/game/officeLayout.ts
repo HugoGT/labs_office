@@ -613,7 +613,7 @@ export function newlyUnwalkableTiles(before: TerrainSnapshot, after: TerrainSnap
  * The wall pieces of the art pack (pinned by a test against the manifest):
  * the only pieces the terrain editor paints, one per grid vertex.
  */
-export const WALL_PIECES = ['wall-brick', 'wall-stone', 'wall-plaster', 'wall-glass'] as const;
+export const WALL_PIECES = ['wall-brick', 'wall-stone', 'wall-plaster'] as const;
 export type WallPieceId = (typeof WALL_PIECES)[number];
 
 /** The most wall posts one request may set: a long dragged wall is one request, never an unbounded one. */

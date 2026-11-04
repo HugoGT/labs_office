@@ -419,9 +419,9 @@ describe('OfficeRoom: edited terrain', () => {
     const ana = await join('Ana');
     await waitFor(() => wallsOf(ana) !== null);
 
-    await server.terrain.setWalls([{ index: tile(20, 30), piece: 'wall-brick' }, { index: tile(21, 30), piece: 'wall-glass' }], null, nobody);
+    await server.terrain.setWalls([{ index: tile(20, 30), piece: 'wall-brick' }, { index: tile(21, 30), piece: 'wall-stone' }], null, nobody);
 
-    await waitFor(() => wallsOf(ana)?.[tile(21, 30)] === 'wall-glass');
+    await waitFor(() => wallsOf(ana)?.[tile(21, 30)] === 'wall-stone');
     expect(wallsOf(ana)?.[tile(20, 30)]).toBe('wall-brick');
     const late = await join('Beto');
     await waitFor(() => wallsOf(late)?.[tile(20, 30)] === 'wall-brick');
@@ -432,11 +432,11 @@ describe('OfficeRoom: edited terrain', () => {
     const ana = await join('Ana');
     await waitFor(() => wallsOf(ana) !== null);
 
-    await server.terrain.setWalls([{ index: tile(21, 30), piece: 'wall-glass' }], null, nobody);
+    await server.terrain.setWalls([{ index: tile(21, 30), piece: 'wall-plaster' }], null, nobody);
     await server.terrain.setWalls([{ index: tile(20, 30), piece: 'wall-brick' }], null, nobody);
     await waitFor(() => wallsOf(ana)?.[tile(20, 30)] === 'wall-brick');
     // The layout's own posts come first; the painted ones follow in the order they were placed.
-    expect(ana.state.terrainWalls.endsWith(`,${tile(21, 30)}:glass,${tile(20, 30)}:brick`)).toBe(true);
+    expect(ana.state.terrainWalls.endsWith(`,${tile(21, 30)}:plaster,${tile(20, 30)}:brick`)).toBe(true);
 
     // A repaint makes the post the latest.
     await server.terrain.setWalls([{ index: tile(21, 30), piece: 'wall-stone' }], null, nobody);

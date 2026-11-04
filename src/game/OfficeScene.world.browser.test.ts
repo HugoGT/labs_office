@@ -653,7 +653,7 @@ describe('OfficeScene: edited terrain', () => {
 
   it('draws each material its own column where two meet, the same whatever the placement order (#223)', async () => {
     const { scene, handlers } = await bootConnected();
-    const walled = withWalls(BASE_LAYOUT.walls, [{ index: lawnTile, piece: 'wall-brick' }, { index: lawnTile + 1, piece: 'wall-glass' }]);
+    const walled = withWalls(BASE_LAYOUT.walls, [{ index: lawnTile, piece: 'wall-brick' }, { index: lawnTile + 1, piece: 'wall-plaster' }]);
     /** The sheet and the frame of every wall tile drawn in columns 67 and 68, by position. */
     const drawn = () =>
       (wallObjects(scene) as Phaser.GameObjects.Image[])
@@ -663,7 +663,7 @@ describe('OfficeScene: edited terrain', () => {
 
     handlers.onWalls!(walled, [lawnTile, lawnTile + 1]);
     const first = drawn();
-    expect(first.map(([, , key]) => key)).toEqual([...Array(3).fill(artSheetKey('wall-brick', 'sheet')), ...Array(3).fill(artSheetKey('wall-glass', 'sheet'))]);
+    expect(first.map(([, , key]) => key)).toEqual([...Array(3).fill(artSheetKey('wall-brick', 'sheet')), ...Array(3).fill(artSheetKey('wall-plaster', 'sheet'))]);
     // Each material ends its own run: both columns take the End frames.
     expect(first.map(([, , , frame]) => frame)).toEqual([
       wallFrameIndex('crownEnd', 67),
@@ -924,7 +924,7 @@ describe('OfficeScene: edited terrain', () => {
     const { scene, bridge } = await bootConnected();
     const before = wallObjects(scene).length;
 
-    bridge.emitCommand('terrainedit', { brush: { kind: 'wall', piece: 'wall-glass' }, previewWalls: [{ index: lawnTile, piece: 'wall-glass' }, { index: lawnTile + 1, piece: 'wall-glass' }] });
+    bridge.emitCommand('terrainedit', { brush: { kind: 'wall', piece: 'wall-plaster' }, previewWalls: [{ index: lawnTile, piece: 'wall-plaster' }, { index: lawnTile + 1, piece: 'wall-plaster' }] });
 
     expect(wallObjects(scene).length).toBeGreaterThan(before);
     expect(solidAt(scene, lawnVertex.x, lawnVertex.y)).toBe(false);

@@ -214,12 +214,12 @@ describe('decorPlacementAllowed: doors and windows in tile walls (#223, #233, S6
   const H = 12;
   const tile = (tx: number, ty: number): number => ty * W + tx;
   /**
-   * A lawn of 14x12 with a horizontal run on row 2 (columns 1..9, glass from 6 on) and a vertical
+   * A lawn of 14x12 with a horizontal run on row 2 (columns 1..9, plaster from 6 on) and a vertical
    * run in column 11 (rows 2..9), and the wall tiles they touch.
    */
   function walled(extra: ReadonlyArray<readonly [number, number]> = [], drop: ReadonlyArray<readonly [number, number]> = []): DecorGround {
     const walls = new Array<string | null>(W * H).fill(null);
-    for (let tx = 1; tx <= 9; tx += 1) walls[tile(tx, 2)] = tx >= 6 ? 'wall-glass' : 'wall-brick';
+    for (let tx = 1; tx <= 9; tx += 1) walls[tile(tx, 2)] = tx >= 6 ? 'wall-plaster' : 'wall-brick';
     for (let ty = 2; ty <= 9; ty += 1) walls[tile(11, ty)] = 'wall-brick';
     for (const [tx, ty] of extra) walls[tile(tx, ty)] = 'wall-brick';
     for (const [tx, ty] of drop) walls[tile(tx, ty)] = null;

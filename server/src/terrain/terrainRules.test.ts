@@ -221,10 +221,10 @@ describe('parseWallBatch', () => {
   const TILES = BASE_LAYOUT.width * BASE_LAYOUT.height;
 
   it('reads wall pieces and erasures on distinct tiles of the map', () => {
-    expect(parseWallBatch({ edits: [{ index: 0, piece: 'wall-brick' }, { index: TILES - 1, piece: null }, { index: 7, piece: 'wall-glass' }] }, TILES)).toEqual([
+    expect(parseWallBatch({ edits: [{ index: 0, piece: 'wall-brick' }, { index: TILES - 1, piece: null }, { index: 7, piece: 'wall-stone' }] }, TILES)).toEqual([
       { index: 0, piece: 'wall-brick' },
       { index: TILES - 1, piece: null },
-      { index: 7, piece: 'wall-glass' },
+      { index: 7, piece: 'wall-stone' },
     ]);
   });
 
@@ -238,6 +238,8 @@ describe('parseWallBatch', () => {
     ['a fractional tile', { edits: [{ index: 1.5, piece: 'wall-brick' }] }],
     ['a tile as text', { edits: [{ index: '3', piece: 'wall-brick' }] }],
     ['an unknown piece', { edits: [{ index: 3, piece: 'wall-lava' }] }],
+    // S17: the glass wall material is gone; it is refused like any unknown piece.
+    ['the removed glass wall', { edits: [{ index: 3, piece: 'wall-glass' }] }],
     ['a hedge', { edits: [{ index: 3, piece: 'hedge-boxwood' }] }],
     ['a missing piece', { edits: [{ index: 3 }] }],
     ['a repeated tile', { edits: [{ index: 3, piece: 'wall-brick' }, { index: 3, piece: null }] }],
@@ -420,14 +422,14 @@ describe('findDecorConflict', () => {
       if (!piece.startsWith('door-')) return infoOf(piece);
       return { kind: 'door', footprint: { w: piece === 'door-wood-double' ? 3 : 2, h: 1 } };
     };
-    type WallPiece = 'wall-brick' | 'wall-plaster' | 'wall-glass';
+    type WallPiece = 'wall-brick' | 'wall-plaster' | 'wall-stone';
     const walls = (...at2: [number, number, WallPiece?][]) => at2.map(([x, y, piece]) => ({ index: at(x, y), piece: piece ?? ('wall-brick' as WallPiece) }));
     const snapshotOf = (edits: ReturnType<typeof walls>) => terrainSnapshot(BASE_LAYOUT, BASE_LAYOUT.blocks, withWalls(BASE_LAYOUT.walls, edits));
     const check = (after: DecorItem[], placed: number[], snapshot: ReturnType<typeof snapshotOf>) => findDecorConflict(after, new Set(placed), doorInfo, snapshot, STATIC);
-    /** A horizontal run on row 22, columns 66..71 (glass from 69 on), and a vertical one in column 74, rows 18..26. */
+    /** A horizontal run on row 22, columns 66..71 (stone from 69 on), and a vertical one in column 74, rows 18..26. */
     const run = snapshotOf([
       ...walls([66, 22], [67, 22], [68, 22]),
-      ...walls([69, 22, 'wall-glass'], [70, 22, 'wall-glass'], [71, 22, 'wall-glass']),
+      ...walls([69, 22, 'wall-stone'], [70, 22, 'wall-stone'], [71, 22, 'wall-stone']),
       ...[18, 19, 20, 21, 22, 23, 24, 25, 26].map((ty) => ({ index: at(74, ty), piece: 'wall-plaster' as WallPiece })),
     ]);
 

@@ -132,7 +132,6 @@ export const WALL_PIECE_LABELS: Readonly<Record<WallPieceId, string>> = {
   'wall-brick': 'Ladrillo',
   'wall-stone': 'Piedra',
   'wall-plaster': 'Yeso',
-  'wall-glass': 'Vidrio',
 };
 
 /** The wall eraser says only this, in its text, its tooltip and its accessible name (#223). */
@@ -146,7 +145,6 @@ const WALL_FLAT_COLORS: Readonly<Record<WallPieceId, number>> = {
   'wall-brick': 0x9a4a3a,
   'wall-stone': 0x7d8288,
   'wall-plaster': 0xd8d2c4,
-  'wall-glass': 0x9cc9de,
 };
 
 /** The 16px wall frame at three canvas pixels per art pixel: the 48px thumbnail, still pixel exact. */

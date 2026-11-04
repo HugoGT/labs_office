@@ -462,12 +462,16 @@ ALTER TABLE terrain_blocks ADD COLUMN IF NOT EXISTS floor_piece text CHECK (floo
 -- retired, so the one-time grid move below never touches it.
 CREATE TABLE IF NOT EXISTS terrain_walls (
   tile_index integer PRIMARY KEY CHECK (tile_index >= 0),
-  piece_id text NOT NULL CHECK (piece_id IN ('wall-brick', 'wall-stone', 'wall-plaster', 'wall-glass')),
+  piece_id text NOT NULL CHECK (piece_id IN ('wall-brick', 'wall-stone', 'wall-plaster')),
   updated_by uuid REFERENCES users(id),
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 ALTER TABLE terrain_walls DROP CONSTRAINT IF EXISTS terrain_walls_piece_id_check;
-ALTER TABLE terrain_walls ADD CONSTRAINT terrain_walls_piece_id_check CHECK (piece_id IN ('wall-brick', 'wall-stone', 'wall-plaster', 'wall-glass'));
+-- The glass wall material was removed (wall-glass, "Vidrio"): its stored walls
+-- are deleted, not converted, before the refreshed check would refuse them.
+-- Its art_pieces row is retired by the pack sync, like any piece a newer pack drops.
+DELETE FROM terrain_walls WHERE piece_id = 'wall-glass';
+ALTER TABLE terrain_walls ADD CONSTRAINT terrain_walls_piece_id_check CHECK (piece_id IN ('wall-brick', 'wall-stone', 'wall-plaster'));
 
 -- LEGACY since the office decor layer (#208): read only by its one-time copy
 -- at the end of this file. Placed chairs (terrain editor). One row per TILE holding a chair an admin

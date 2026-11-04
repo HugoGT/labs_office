@@ -2,7 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import { TILE, PLAYER_SPAWN_TX, PLAYER_SPAWN_TY } from '../../../src/game/mapData.ts';
 import { AVATAR_BODY_CENTER_OFFSET, BASE_LAYOUT as OFFICE_LAYOUT, BLOCK_TILES, blockIndexAt, blockTileRect, isPositionWalkable, isTileWalkable, withWalls, type LayoutMaterial } from '../../../src/game/officeLayout.ts';
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_SEATS as BASE_MAP_SEATS, LEGACY_TERRAIN as BASE_TERRAIN } from '../../../src/test/legacyOffice.ts';
+import type { DirectoryPool } from '../directory/pgDirectory.ts';
 import { createMemoryTerrain } from './memoryTerrain.ts';
+import { createPgTerrain } from './pgTerrain.ts';
 import type { TerrainStore } from './terrainPort.ts';
 import { InvalidTerrainEditError, TerrainProtectedError, type TerrainProtections } from './terrainRules.ts';
 import { DecorOutsideAreaError, DeskChairLimitError, createTerrainRuntime } from './terrainRuntime.ts';
@@ -189,16 +191,28 @@ describe('createTerrainRuntime walls', () => {
     await expect(runtime.setWalls([{ index: FREE, piece: 'wall-brick' }], null, NONE)).rejects.toThrow(/no terrain store/);
   });
 
+  it('loads cleanly over a database still holding a glass wall, a material that no longer exists (S17): that tile keeps the layout', async () => {
+    const wallRows = [{ tile_index: FREE, piece_id: 'wall-glass' }, { tile_index: FREE + 1, piece_id: 'wall-brick' }];
+    const run = async (text: string) => ({ rows: /from terrain_walls/i.test(text) ? wallRows : [], rowCount: 0 });
+    const pool: DirectoryPool = { query: run, async connect() { return { query: run, release() {} }; }, async end() {} };
+    const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store: createPgTerrain(pool) });
+
+    await runtime.load();
+
+    expect(runtime.walls()[FREE]).toBe(BASE_LAYOUT.walls[FREE]);
+    expect(runtime.walls()[FREE + 1]).toBe('wall-brick');
+  });
+
   it('loads stored walls over the layout ones, ignoring walls off the map or any of whose tiles touches the spawn area', async () => {
     const spawn = at(PLAYER_SPAWN_TX, PLAYER_SPAWN_TY);
     // Two rows below the spawn tile and one column right: the wall's upper tile is the corner of its ring.
     const nearSpawn = at(PLAYER_SPAWN_TX + 1, PLAYER_SPAWN_TY + 2);
-    const store = createMemoryTerrain([], [[FREE, 'wall-glass'], [W * BASE_LAYOUT.height, 'wall-brick'], [spawn, 'wall-stone'], [nearSpawn, 'wall-stone']]);
+    const store = createMemoryTerrain([], [[FREE, 'wall-plaster'], [W * BASE_LAYOUT.height, 'wall-brick'], [spawn, 'wall-stone'], [nearSpawn, 'wall-stone']]);
     const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store });
 
     await runtime.load();
 
-    expect(runtime.walls()[FREE]).toBe('wall-glass');
+    expect(runtime.walls()[FREE]).toBe('wall-plaster');
     expect(runtime.walls()).toHaveLength(W * BASE_LAYOUT.height);
     expect(runtime.walls()[spawn]).toBe(BASE_LAYOUT.walls[spawn]);
     expect(runtime.walls()[nearSpawn]).toBe(BASE_LAYOUT.walls[nearSpawn]);
@@ -298,7 +312,7 @@ describe('createTerrainRuntime walls', () => {
 
   describe('placement order (#223)', () => {
     it('loads the stored walls in the order the store lists them, the layout ones unlisted', async () => {
-      const store = createMemoryTerrain([], [[FREE + 3, 'wall-glass'], [FREE, 'wall-brick'], [FREE + 1, 'wall-stone']]);
+      const store = createMemoryTerrain([], [[FREE + 3, 'wall-plaster'], [FREE, 'wall-brick'], [FREE + 1, 'wall-stone']]);
       const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store });
 
       expect(runtime.snapshot().wallOrder).toEqual([]);
@@ -314,7 +328,7 @@ describe('createTerrainRuntime walls', () => {
 
       await runtime.setWalls([{ index: FREE + 2, piece: 'wall-brick' }, { index: FREE, piece: 'wall-brick' }], null, NONE);
       expect(runtime.snapshot().wallOrder).toEqual([FREE + 2, FREE]);
-      await runtime.setWalls([{ index: FREE + 1, piece: 'wall-glass' }], null, NONE);
+      await runtime.setWalls([{ index: FREE + 1, piece: 'wall-plaster' }], null, NONE);
       expect(runtime.snapshot().wallOrder).toEqual([FREE + 2, FREE, FREE + 1]);
       // A repaint makes the post the latest, in the runtime and in what a reload reads back.
       await runtime.setWalls([{ index: FREE + 2, piece: 'wall-stone' }], null, NONE);
@@ -358,7 +372,7 @@ describe('createTerrainRuntime walls', () => {
       const shared = at(lawn.tx + BLOCK_TILES, lawn.ty + 4);
       const border = at(lawn.tx + 4, lawn.ty);
       const older = at(lake.tx + 4, lake.ty + 4);
-      const store = createMemoryTerrain([[LAKE, 'void']], [[inside, 'wall-brick'], [inside + 1, 'wall-brick'], [shared, 'wall-plaster'], [border, 'wall-stone'], [older, 'wall-glass']]);
+      const store = createMemoryTerrain([[LAKE, 'void']], [[inside, 'wall-brick'], [inside + 1, 'wall-brick'], [shared, 'wall-plaster'], [border, 'wall-stone'], [older, 'wall-brick']]);
       const saveBlocks = vi.spyOn(store, 'saveBlocks');
       const saveWalls = vi.spyOn(store, 'saveWalls');
       const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store });
@@ -370,14 +384,14 @@ describe('createTerrainRuntime walls', () => {
 
       expect(new Map(await store.loadBlocks())).toEqual(new Map([[LAKE, 'void'], [LAWN, 'void'], [LAWN + 1, 'void']]));
       expect(store.actorOf(LAWN)).toBe('admin-1');
-      expect(new Map(await store.loadWalls())).toEqual(new Map([[border, 'wall-stone'], [older, 'wall-glass']]));
+      expect(new Map(await store.loadWalls())).toEqual(new Map([[border, 'wall-stone'], [older, 'wall-brick']]));
       expect(saveBlocks).not.toHaveBeenCalled();
       expect(saveWalls).not.toHaveBeenCalled();
       expect(runtime.walls()[inside]).toBeNull();
       expect(runtime.walls()[inside + 1]).toBeNull();
       expect(runtime.walls()[shared]).toBeNull();
       expect(runtime.walls()[border]).toBe('wall-stone');
-      expect(runtime.walls()[older]).toBe('wall-glass');
+      expect(runtime.walls()[older]).toBe('wall-brick');
       expect(runtime.snapshot().walls).toEqual(runtime.walls());
       expect(listener).toHaveBeenCalledExactlyOnceWith(runtime.blocks());
     });
@@ -471,13 +485,13 @@ describe('createTerrainRuntime walls', () => {
       throw new Error('desks unavailable');
     });
     const block = runtime.setBlock({ index: LAWN, material: 'sand', actorId: null }, NONE);
-    const erase = runtime.setWalls([{ index: FREE, piece: null }, { index: FREE + 2, piece: 'wall-glass' }], null, NONE);
+    const erase = runtime.setWalls([{ index: FREE, piece: null }, { index: FREE + 2, piece: 'wall-plaster' }], null, NONE);
 
     await Promise.all([wall, block, erase]);
     await expect(failed).rejects.toThrow('desks unavailable');
     expect(runtime.walls()[FREE]).toBeNull();
     expect(runtime.walls()[FREE + 1]).toBeNull();
-    expect(runtime.walls()[FREE + 2]).toBe('wall-glass');
+    expect(runtime.walls()[FREE + 2]).toBe('wall-plaster');
     expect(runtime.snapshot().materials[FREE]).toBe('sand');
   });
   it('runs an exclusive task in the edit queue, with the snapshot the edits before it left', async () => {
@@ -884,11 +898,11 @@ describe('createTerrainRuntime doors and windows in tile walls (#223, #233, S6-S
     { id: 'door-glass-window', kind: 'door', retired: false, footprint: { w: 2, h: 1 } },
   ];
   /**
-   * A horizontal run on row 22, columns 65..71 (glass from 69 on), and a vertical run down
+   * A horizontal run on row 22, columns 65..71 (plaster from 69 on), and a vertical run down
    * column 65, rows 23..29: its dark top is rows 21..27, its face rows 28..30.
    */
-  const WALL: [number, 'wall-brick' | 'wall-glass'][] = [];
-  for (let tx = 65; tx <= 71; tx += 1) WALL.push([at(tx, 22), tx >= 69 ? 'wall-glass' : 'wall-brick']);
+  const WALL: [number, 'wall-brick' | 'wall-plaster'][] = [];
+  for (let tx = 65; tx <= 71; tx += 1) WALL.push([at(tx, 22), tx >= 69 ? 'wall-plaster' : 'wall-brick']);
   for (let ty = 23; ty <= 29; ty += 1) WALL.push([at(65, ty), 'wall-brick']);
   const DOOR = { piece: 'door-wood', rotation: 0 } as const;
   const DOUBLE = { piece: 'door-wood-double', rotation: 0 } as const;
@@ -1104,10 +1118,10 @@ describe('createTerrainRuntime carry', () => {
     { id: 'chair-wood', kind: 'chair', retired: false },
     { id: 'door-wood', kind: 'door', retired: false, footprint: { w: 2, h: 1 } },
   ];
-  /** A room of tiles 65..68 x 22..25 (walls placed on the ring 65..69 x 22..26, each covering a tile above and below), the top-right corner glass. */
+  /** A room of tiles 65..68 x 22..25 (walls placed on the ring 65..69 x 22..26, each covering a tile above and below), the top-right corner plaster. */
   const ROOM = { x: 65, y: 22, w: 4, h: 4 };
-  const WALL: [number, 'wall-brick' | 'wall-glass'][] = [];
-  for (let tx = 65; tx <= 69; tx += 1) WALL.push([at(tx, 22), tx === 69 ? 'wall-glass' : 'wall-brick'], [at(tx, 26), 'wall-brick']);
+  const WALL: [number, 'wall-brick' | 'wall-plaster'][] = [];
+  for (let tx = 65; tx <= 69; tx += 1) WALL.push([at(tx, 22), tx === 69 ? 'wall-plaster' : 'wall-brick'], [at(tx, 26), 'wall-brick']);
   for (let ty = 23; ty <= 25; ty += 1) WALL.push([at(65, ty), 'wall-brick'], [at(69, ty), 'wall-brick']);
   /** On row 24, the only row inside the room that its top and bottom walls leave free. */
   const CHAIR = { index: at(66, 24), piece: 'chair-wood', rotation: 90 } as const;

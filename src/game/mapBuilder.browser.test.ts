@@ -314,7 +314,7 @@ describe('placeWalls', () => {
     const walls = new Array<string | null>(width * height).fill(null);
     walls[width + 1] = 'wall-brick';
     walls[width + 2] = 'wall-brick';
-    walls[2 * width + 4] = 'wall-glass';
+    walls[2 * width + 4] = 'wall-plaster';
     const grid = { width, height, walls };
     const result = await withArtScene((scene, art) => {
       const drawn = placeWalls(scene, grid, art);
@@ -325,7 +325,7 @@ describe('placeWalls', () => {
 
     expect(result.count).toBe(wallSprites(grid).length);
     expect(result.keys.filter((key) => key === artSheetKey('wall-brick', 'sheet')).length).toBe(wallSprites(grid).filter((sprite) => sprite.piece === 'wall-brick').length);
-    expect(result.keys).toContain(artSheetKey('wall-glass', 'sheet'));
+    expect(result.keys).toContain(artSheetKey('wall-plaster', 'sheet'));
     expect(result.left).toBe(0);
   });
 

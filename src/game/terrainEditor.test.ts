@@ -82,7 +82,7 @@ describe('sameBrush', () => {
     expect(sameBrush({ kind: 'floor', material: 'grass' }, { kind: 'floor', material: 'sand' })).toBe(false);
     expect(sameBrush({ kind: 'wall', piece: 'wall-brick' }, { kind: 'wall', piece: 'wall-brick' })).toBe(true);
     expect(sameBrush({ kind: 'wall', piece: null }, { kind: 'wall', piece: null })).toBe(true);
-    expect(sameBrush({ kind: 'wall', piece: null }, { kind: 'wall', piece: 'wall-glass' })).toBe(false);
+    expect(sameBrush({ kind: 'wall', piece: null }, { kind: 'wall', piece: 'wall-plaster' })).toBe(false);
     expect(sameBrush({ kind: 'floor', material: 'void' }, { kind: 'wall', piece: null })).toBe(false);
     expect(sameBrush(null, undefined)).toBe(true);
     expect(sameBrush(null, { kind: 'wall', piece: null })).toBe(false);

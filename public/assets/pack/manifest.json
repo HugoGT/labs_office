@@ -2010,27 +2010,6 @@
       ]
     },
     {
-      "id": "wall-glass",
-      "kind": "wall",
-      "name": "Vidrio",
-      "author": "HugoGT",
-      "license": "proprietary-internal",
-      "material": "glass",
-      "heightTiles": 3,
-      "topHeight": 19,
-      "translucent": true,
-      "files": [
-        {
-          "role": "sheet",
-          "path": "wall/glass.png",
-          "imageKind": "wall",
-          "width": 224,
-          "height": 96,
-          "sha256": "b7809e3a7851826d4f71aed4f75aca624bf98fb23ba56f27766679c89b8e9a7f"
-        }
-      ]
-    },
-    {
       "id": "tileset-terrain",
       "kind": "tileset",
       "name": "Terreno",

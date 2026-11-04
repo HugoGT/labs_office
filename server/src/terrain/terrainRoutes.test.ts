@@ -274,13 +274,13 @@ describe('handleSetTerrainWalls', () => {
   it('lets an admin place and remove walls in one request, recording who did it', async () => {
     const { deps, store, terrain } = await harness();
 
-    const placed = await handleSetTerrainWalls(BEARER_ADMIN, { edits: [{ index: FREE, piece: 'wall-brick' }, { index: FREE + 1, piece: 'wall-glass' }] }, deps);
+    const placed = await handleSetTerrainWalls(BEARER_ADMIN, { edits: [{ index: FREE, piece: 'wall-brick' }, { index: FREE + 1, piece: 'wall-plaster' }] }, deps);
     expect(placed).toEqual({ status: 200, body: { updated: 2 } });
-    expect(terrain.walls()[FREE + 1]).toBe('wall-glass');
+    expect(terrain.walls()[FREE + 1]).toBe('wall-plaster');
     expect(store.wallActorOf(FREE)).toBe(ADMIN.id);
 
     expect((await handleSetTerrainWalls(BEARER_ADMIN, { edits: [{ index: FREE, piece: null }] }, deps)).status).toBe(200);
-    expect([...(await store.loadWalls())]).toEqual([[FREE + 1, 'wall-glass']]);
+    expect([...(await store.loadWalls())]).toEqual([[FREE + 1, 'wall-plaster']]);
   });
 
   it('answers 400 to malformed batches, without writing anything', async () => {

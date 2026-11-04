@@ -64,7 +64,7 @@ describe('useWallEditor', () => {
 
   it('puts the picked wall down on Escape, and leaves an Escape with nothing picked to the menu', () => {
     const { result } = setup();
-    act(() => result.current.pick('wall-glass'));
+    act(() => result.current.pick('wall-plaster'));
 
     const first = new KeyboardEvent('keydown', { key: 'Escape', cancelable: true });
     act(() => {
@@ -150,13 +150,13 @@ describe('useWallEditor', () => {
     act(() => result.current.pick('wall-brick'));
     act(() => bridge.emit('wallpick', { index: TILE_A }));
     act(() => bridge.emit('wallpick', { index: TILE_B }));
-    act(() => result.current.pick('wall-glass'));
+    act(() => result.current.pick('wall-plaster'));
     act(() => bridge.emit('wallpick', { index: TILE_B }));
 
     await act(async () => calls[0]!.resolve());
     expect(calls[1]!.edits).toEqual([{ index: TILE_B, piece: 'wall-brick' }]);
     await act(async () => calls[1]!.resolve());
-    expect(calls[2]!.edits).toEqual([{ index: TILE_B, piece: 'wall-glass' }]);
+    expect(calls[2]!.edits).toEqual([{ index: TILE_B, piece: 'wall-plaster' }]);
     await act(async () => calls[2]!.resolve());
   });
 
@@ -304,11 +304,11 @@ describe('useWallEditor: what the eraser would take (#241)', () => {
     const { terrain, calls } = deferredWalls();
     const { result } = renderHook(() => useWallEditor({ bridge, terrain, eraseDecor: () => false }));
     act(() => bridge.emit('terrain', { blocks: BASE_LAYOUT.blocks, walls: BASE_LAYOUT.walls.map(() => null), colors: NO_COLORS }));
-    act(() => result.current.pick('wall-glass'));
+    act(() => result.current.pick('wall-plaster'));
 
     act(() => bridge.emit('wallpick', { index: TILE_B }));
     await waitFor(() => expect(calls).toHaveLength(1));
-    expect(calls[0]!.edits).toEqual([{ index: TILE_B, piece: 'wall-glass' }]);
+    expect(calls[0]!.edits).toEqual([{ index: TILE_B, piece: 'wall-plaster' }]);
   });
 });
 
