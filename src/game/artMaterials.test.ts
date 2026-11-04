@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import exportedManifest from '../../public/assets/pack/manifest.json?raw';
-import { SOFA, facingColumn } from './artContract';
+import { SOFA, WALL_FRAMES, facingColumn } from './artContract';
 import {
   chairPreviewFrames,
   sofaPreviewFrames,
@@ -214,9 +214,8 @@ describe('previewFrame', () => {
     expect(previewFrame(floor)).toEqual({ x: 0, y: 0, width: 96, height: 96 });
   });
 
-  it('a wall previews the joint of a straight east-west run, how a painted line of wall reads', () => {
-    // Frame 1 + mask: east (2) and west (8).
-    expect(previewFrame(catalog().wall[0]!)).toEqual({ x: 11 * 16, y: 0, width: 16, height: 16 });
+  it('a wall previews the face tile of its first variant, the material as a painted wall shows it', () => {
+    expect(previewFrame(catalog().wall[0]!)).toEqual({ x: WALL_FRAMES.face * 32, y: 0, width: 32, height: 32 });
   });
 });
 

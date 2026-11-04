@@ -17,6 +17,7 @@ import {
   terrainMaterialAt,
   terrainSnapshot,
   wallFootprintRects,
+  wallPostTiles,
   type OfficeLayout,
 } from './officeLayout';
 import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_TERRAIN as BASE_TERRAIN } from '../test/legacyOffice';
@@ -148,156 +149,99 @@ describe('fallbackTerrainData', () => {
 });
 
 describe('wallSprites', () => {
-  it('runs a wall along the grid lines between its posts: joints by their connections, bodies in between', () => {
-    // An L of posts on the vertices (2,2) (3,2) (3,3): the top-left corners of those tiles.
-    const layout = blankLayout({ walls: tiles(18, { '2,2': 'wall-brick', '3,2': 'wall-brick', '3,3': 'wall-brick' }) });
-    const sprites = wallSprites(layout);
-    const joints = sprites.filter((sprite) => sprite.part === 'joint');
-    const bodies = sprites.filter((sprite) => sprite.part === 'body');
-
-    expect(joints).toEqual([
-      { piece: 'wall-brick', part: 'joint', frame: wallFrameIndex({ piece: 'joint', mask: 2 }), x: 2 * TILE - 8, y: 2 * TILE - 8, depthY: 2 * TILE + 8 },
-      { piece: 'wall-brick', part: 'joint', frame: wallFrameIndex({ piece: 'joint', mask: 8 | 4 }), x: 3 * TILE - 8, y: 2 * TILE - 8, depthY: 2 * TILE + 8 },
-      { piece: 'wall-brick', part: 'joint', frame: wallFrameIndex({ piece: 'joint', mask: 1 }), x: 3 * TILE - 8, y: 3 * TILE - 8, depthY: 3 * TILE + 8 },
-    ]);
-    expect(bodies).toEqual([
-      { piece: 'wall-brick', part: 'body', frame: wallFrameIndex({ piece: 'body', axis: 'horizontal' }), x: 2 * TILE + 8, y: 2 * TILE - 8, depthY: 2 * TILE + 8 },
-      { piece: 'wall-brick', part: 'body', frame: wallFrameIndex({ piece: 'body', axis: 'vertical' }), x: 3 * TILE - 8, y: 2 * TILE + 8, depthY: 2 * TILE + 24 },
-    ]);
+  const brick = (tx: number, ty: number, frame: Parameters<typeof wallFrameIndex>[0], bottom: number) => ({
+    piece: 'wall-brick',
+    frame: wallFrameIndex(frame, tx),
+    x: tx * TILE,
+    y: ty * TILE,
+    depthY: (bottom + 1) * TILE,
   });
 
-  it('joins walls of different materials (#223): connected joints, the later post laid over the earlier one', () => {
-    // The same L, its last post glass and the latest one placed: it joins the brick corner.
-    const walls = tiles(18, { '2,2': 'wall-brick', '3,2': 'wall-brick', '3,3': 'wall-glass' });
-    const sprites = wallSprites(blankLayout({ walls }));
-    const above = (sprite: { depthY: number }, base: number): boolean => sprite.depthY > base && sprite.depthY < base + 1;
-
-    const joints = sprites.filter((sprite) => sprite.part === 'joint');
-    expect(joints.map(({ piece, frame }) => [piece, frame])).toEqual([
-      ['wall-brick', wallFrameIndex({ piece: 'joint', mask: 2 })],
-      // The earlier corner draws connected toward the later wall: no rounded cap on that side.
-      ['wall-brick', wallFrameIndex({ piece: 'joint', mask: 8 | 4 })],
-      ['wall-glass', wallFrameIndex({ piece: 'joint', mask: 1 })],
-    ]);
-    // The body between them is the later post's material, over the earlier wall.
-    const bodies = sprites.filter((sprite) => sprite.part === 'body');
-    expect(bodies.map(({ piece, x, y }) => [piece, x, y])).toEqual([
-      ['wall-brick', 2 * TILE + 8, 2 * TILE - 8],
-      ['wall-glass', 3 * TILE - 8, 2 * TILE + 8],
-    ]);
-    expect(above(bodies[1]!, 2 * TILE + 24)).toBe(true);
-    expect(above(joints[2]!, 3 * TILE + 8)).toBe(true);
-    // The earlier wall is not raised: only what the later one lays over it.
-    expect(joints[1]!.depthY).toBe(2 * TILE + 8);
-    expect(bodies[0]!.depthY).toBe(2 * TILE + 8);
-  });
-
-  it('lays whichever post was placed last over the other, whatever its tile order', () => {
-    const walls = tiles(18, { '2,2': 'wall-brick', '3,2': 'wall-glass' });
-    const byIndex = wallSprites(blankLayout({ walls }));
-    expect(byIndex.filter((sprite) => sprite.part === 'body').map(({ piece }) => piece)).toEqual(['wall-glass']);
-
-    // The brick post at tile 2,2 placed after the glass one: its material wins the body.
-    const brickLast = wallSprites({ ...blankLayout({ walls }), wallOrder: [2 * 18 + 3, 2 * 18 + 2] });
-    expect(brickLast.filter((sprite) => sprite.part === 'body').map(({ piece }) => piece)).toEqual(['wall-brick']);
-    expect(brickLast.filter((sprite) => sprite.part === 'joint').map(({ frame }) => frame)).toEqual([
-      wallFrameIndex({ piece: 'joint', mask: 2 }),
-      wallFrameIndex({ piece: 'joint', mask: 8 }),
-    ]);
-  });
-
-  it('draws three materials in a row as one wall, each cut cleanly by the later one', () => {
-    const walls = tiles(18, { '2,2': 'wall-plaster', '3,2': 'wall-glass', '4,2': 'wall-stone' });
-    const sprites = wallSprites({ ...blankLayout({ walls }), wallOrder: [2 * 18 + 2, 2 * 18 + 3, 2 * 18 + 4] });
-
-    expect(sprites.filter((sprite) => sprite.part === 'joint').map(({ piece, frame }) => [piece, frame])).toEqual([
-      ['wall-plaster', wallFrameIndex({ piece: 'joint', mask: 2 })],
-      ['wall-glass', wallFrameIndex({ piece: 'joint', mask: 2 | 8 })],
-      ['wall-stone', wallFrameIndex({ piece: 'joint', mask: 8 })],
-    ]);
-    expect(sprites.filter((sprite) => sprite.part === 'body').map(({ piece }) => piece)).toEqual(['wall-glass', 'wall-stone']);
-    const [glassBody, stoneBody] = sprites.filter((sprite) => sprite.part === 'body');
-    expect(stoneBody!.depthY).toBeGreaterThan(glassBody!.depthY);
-  });
-
-  it('draws a wall of one material exactly as before, whatever the placement order', () => {
-    const walls = tiles(18, { '2,2': 'wall-brick', '3,2': 'wall-brick', '3,3': 'wall-brick' });
-    const plain = wallSprites(blankLayout({ walls }));
-
-    expect(wallSprites({ ...blankLayout({ walls }), wallOrder: [3 * 18 + 3, 2 * 18 + 2, 2 * 18 + 3] })).toEqual(plain);
-    expect(plain.map(({ depthY }) => depthY)).toEqual([2 * TILE + 8, 2 * TILE + 8, 3 * TILE + 8, 2 * TILE + 8, 2 * TILE + 24]);
-  });
-
-  it('leaves out the body of a door opening (#223), its joints still drawn connected', () => {
-    const layout = blankLayout({ walls: tiles(18, { '2,2': 'wall-brick', '3,2': 'wall-brick', '4,2': 'wall-brick' }) });
-    const sprites = wallSprites({ ...layout, openings: [{ col: 2, row: 2, axis: 'horizontal' }] });
-
-    expect(sprites.filter((sprite) => sprite.part === 'joint').map(({ frame }) => frame)).toEqual([
-      wallFrameIndex({ piece: 'joint', mask: 2 }),
-      wallFrameIndex({ piece: 'joint', mask: 2 | 8 }),
-      wallFrameIndex({ piece: 'joint', mask: 8 }),
-    ]);
-    expect(sprites.filter((sprite) => sprite.part === 'body')).toEqual([
-      { piece: 'wall-brick', part: 'body', frame: wallFrameIndex({ piece: 'body', axis: 'horizontal' }), x: 3 * TILE + 8, y: 2 * TILE - 8, depthY: 2 * TILE + 8 },
-    ]);
-    // Without openings every body is drawn as before.
-    expect(wallSprites({ ...layout, openings: [] })).toEqual(wallSprites(layout));
-  });
-
-  it('draws no joint at a post whose only connections are open door edges: two doors read as one opening (#223)', () => {
-    const layout = blankLayout({ walls: tiles(18, { '2,2': 'wall-brick', '3,2': 'wall-brick', '4,2': 'wall-brick', '5,2': 'wall-brick' }) });
-    const doors = [{ col: 2, row: 2, axis: 'horizontal' as const }, { col: 3, row: 2, axis: 'horizontal' as const }];
-    const joints = (grid: Parameters<typeof wallSprites>[0]) => wallSprites(grid).filter((sprite) => sprite.part === 'joint').map(({ frame, x }) => [frame, x]);
-
-    // Post 3,2 sits between the two leaves and nothing else meets it: it draws nothing. The posts at the ends of the opening stay.
-    expect(joints({ ...layout, openings: doors })).toEqual([
-      [wallFrameIndex({ piece: 'joint', mask: 2 }), 2 * TILE - 8],
-      [wallFrameIndex({ piece: 'joint', mask: 2 | 8 }), 4 * TILE - 8],
-      [wallFrameIndex({ piece: 'joint', mask: 8 }), 5 * TILE - 8],
-    ]);
-    // Neither door leaves a body behind.
-    expect(wallSprites({ ...layout, openings: doors }).filter((sprite) => sprite.part === 'body')).toHaveLength(1);
-  });
-
-  it('draws no joint at a post inside a door span, whether or not the wall continues past it', () => {
-    // A double door over edges 2, 3 and 4 of row 2: the post at 3 stands with a wall only on one side, the one at 4 is gone.
-    const layout = blankLayout({ walls: tiles(18, { '2,2': 'wall-brick', '3,2': 'wall-brick', '5,2': 'wall-brick' }) });
-    const door = [2, 3, 4].map((col) => ({ col, row: 2, axis: 'horizontal' as const }));
-    const joints = wallSprites({ ...layout, openings: door }).filter((sprite) => sprite.part === 'joint').map(({ x }) => x);
-
-    expect(joints).toEqual([2 * TILE - 8, 5 * TILE - 8]);
-  });
-
-  it('keeps the joint of a post between two doors where another wall meets it (a T) (#223)', () => {
-    const layout = blankLayout({ walls: tiles(18, { '2,2': 'wall-brick', '3,2': 'wall-brick', '4,2': 'wall-brick', '3,3': 'wall-brick' }) });
-    const doors = [{ col: 2, row: 2, axis: 'horizontal' as const }, { col: 3, row: 2, axis: 'horizontal' as const }];
-    const tee = wallSprites({ ...layout, openings: doors }).filter((sprite) => sprite.part === 'joint' && sprite.x === 3 * TILE - 8 && sprite.y === 2 * TILE - 8);
-
-    expect(tee.map(({ frame }) => frame)).toEqual([wallFrameIndex({ piece: 'joint', mask: 2 | 4 | 8 })]);
-  });
-
-  it('draws exactly the rectangles the wall blocks', () => {
-    const layout = blankLayout({ walls: tiles(18, { '2,2': 'wall-brick', '3,2': 'wall-brick', '3,3': 'wall-glass' }) });
-    const drawn = wallSprites(layout).map(({ x, y }) => ({ x, y, w: 16, h: 16 }));
-
-    expect(drawn).toEqual(wallFootprintRects(layout));
-  });
-
-  it('shows a lone post instead of dropping it', () => {
-    const sprites = wallSprites(blankLayout({ walls: tiles(18, { '5,5': 'wall-stone' }) }));
+  it('stands a horizontal run on whole tiles: crown, face and base per column, the End frames only on its last one', () => {
+    // Three walls placed on row 4: each covers rows 3 to 5 of its column.
+    const sprites = wallSprites(blankLayout({ walls: tiles(18, { '2,4': 'wall-brick', '3,4': 'wall-brick', '4,4': 'wall-brick' }) }));
 
     expect(sprites).toEqual([
-      { piece: 'wall-stone', part: 'joint', frame: wallFrameIndex({ piece: 'body', axis: 'vertical' }), x: 5 * TILE - 8, y: 5 * TILE - 8, depthY: 5 * TILE + 8 },
+      brick(2, 3, 'crown', 5),
+      brick(2, 4, 'face', 5),
+      brick(2, 5, 'base', 5),
+      brick(3, 3, 'crown', 5),
+      brick(3, 4, 'face', 5),
+      brick(3, 5, 'base', 5),
+      brick(4, 3, 'crownEnd', 5),
+      brick(4, 4, 'faceEnd', 5),
+      brick(4, 5, 'baseEnd', 5),
     ]);
   });
 
-  it('closes both rooms of the office except their doors', () => {
-    const joints = wallSprites(BASE_LAYOUT).filter((sprite) => sprite.part === 'joint');
+  it('picks the variant row of each frame by the tile column modulo 3, so a face repeats every three tiles', () => {
+    const walls = tiles(18, Object.fromEntries([1, 2, 3, 4, 5].map((tx) => [`${tx},4`, 'wall-stone'])));
+    const faces = wallSprites(blankLayout({ walls })).filter(({ y }) => y === 4 * TILE);
 
-    // Two rings of posts on the vertices one tile inside each 13x14 room (12x13
-    // posts, 46 each), less the three posts around each two-tile door.
-    expect(joints).toHaveLength(2 * (2 * 12 + 2 * 13 - 4 - 3));
-    for (const ty of [8, 9, 10]) expect(joints.some((joint) => joint.x === 51 * TILE - 8 && joint.y === ty * TILE - 8)).toBe(false);
+    expect(faces.map(({ frame }) => frame)).toEqual([
+      wallFrameIndex('face', 1),
+      wallFrameIndex('face', 2),
+      wallFrameIndex('face', 0),
+      wallFrameIndex('face', 1),
+      wallFrameIndex('faceEnd', 2),
+    ]);
+    expect(wallFrameIndex('face', 1)).not.toBe(wallFrameIndex('face', 2));
+  });
+
+  it('shows only the front of a vertical run: the top band (cap) above the face of its lowest wall', () => {
+    // Walls on rows 3, 4 and 5 of column 8 cover rows 2 to 6 as one stretch; a lone column ends every run.
+    const sprites = wallSprites(blankLayout({ walls: tiles(18, { '8,3': 'wall-brick', '8,4': 'wall-brick', '8,5': 'wall-brick' }) }));
+
+    expect(sprites).toEqual([
+      brick(8, 2, 'cap', 6),
+      brick(8, 3, 'cap', 6),
+      brick(8, 4, 'crownEnd', 6),
+      brick(8, 5, 'faceEnd', 6),
+      brick(8, 6, 'baseEnd', 6),
+    ]);
+  });
+
+  it('sorts every tile of a stretch by its bottom edge, so the wall is one block an avatar is behind or in front of', () => {
+    const sprites = wallSprites(blankLayout({ walls: tiles(18, { '8,3': 'wall-brick', '8,4': 'wall-brick' }) }));
+
+    expect(new Set(sprites.map(({ depthY }) => depthY))).toEqual(new Set([6 * TILE]));
+  });
+
+  it('ends a run where the material changes: each material closes its own right edge', () => {
+    const sprites = wallSprites(blankLayout({ walls: tiles(18, { '2,4': 'wall-brick', '3,4': 'wall-glass', '4,4': 'wall-glass' }) }));
+
+    expect(sprites.filter(({ y }) => y === 4 * TILE).map(({ piece, frame }) => [piece, frame])).toEqual([
+      ['wall-brick', wallFrameIndex('faceEnd', 2)],
+      ['wall-glass', wallFrameIndex('face', 3)],
+      ['wall-glass', wallFrameIndex('faceEnd', 4)],
+    ]);
+  });
+
+  it('clips a wall at the edge of the map: one placed on the top row keeps its face and base', () => {
+    const sprites = wallSprites(blankLayout({ walls: tiles(18, { '5,0': 'wall-brick' }) }));
+
+    expect(sprites).toEqual([brick(5, 0, 'faceEnd', 1), brick(5, 1, 'baseEnd', 1)]);
+  });
+
+  it('draws exactly the tiles the wall blocks, one sprite each', () => {
+    const layout = blankLayout({ walls: tiles(18, { '2,2': 'wall-brick', '3,2': 'wall-brick', '3,4': 'wall-glass', '9,6': 'wall-stone' }) });
+    const drawn = wallSprites(layout).map(({ x, y }) => `${x},${y}`);
+    const blocked = wallFootprintRects(layout).flatMap(({ x, y, h }) => Array.from({ length: h / TILE }, (_, row) => `${x},${y + row * TILE}`));
+
+    expect(drawn).toHaveLength(new Set(drawn).size);
+    expect(new Set(drawn)).toEqual(new Set(blocked));
+  });
+
+  it('draws every tile the walls of the office cover, once', () => {
+    const covered = new Set<number>();
+    BASE_LAYOUT.walls.forEach((wall, index) => {
+      if (wall != null) for (const tile of wallPostTiles(BASE_LAYOUT, index)) covered.add(tile);
+    });
+    const drawn = wallSprites(BASE_LAYOUT).map(({ x, y }) => (y / TILE) * BASE_LAYOUT.width + x / TILE);
+
+    expect(covered.size).toBeGreaterThan(0);
+    expect(drawn).toHaveLength(covered.size);
+    expect(new Set(drawn)).toEqual(covered);
   });
 });
 

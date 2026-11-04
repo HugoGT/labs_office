@@ -53,18 +53,20 @@ describe('buildTerrainGrid: painted walls', () => {
     const walls = withWalls(LEGACY_LAYOUT.walls, [{ index, piece: 'wall-brick' }, { index: firstLayoutWall, piece: null }]);
     const grid = buildTerrainGrid(terrainSnapshot(LEGACY_LAYOUT, LEGACY_LAYOUT.blocks, walls), LEGACY_LAYOUT, []);
 
-    // The post stands on the top-left corner of the tile: the four tiles around it.
-    for (const [tx, ty] of [[66, 21], [67, 21], [66, 22], [67, 22]] as const) {
-      expect(grid.solid[ty][tx]).toBe(true);
-      expect(grid.terrainSolid[ty][tx]).toBe(false);
-      // A floor runs under a wall: walls stand on grid lines.
-      expect(grid.walled[ty][tx]).toBe(false);
+    // The wall stands on the tile and covers the ones above and below it.
+    for (const ty of [21, 22, 23]) {
+      expect(grid.solid[ty][67]).toBe(true);
+      expect(grid.terrainSolid[ty][67]).toBe(false);
+      // A floor runs under a wall: the wall stands over it.
+      expect(grid.walled[ty][67]).toBe(false);
     }
+    expect(grid.solid[22][66]).toBe(false);
     expect(grid.solid[22][68]).toBe(false);
-    expect(grid.solid[23][67]).toBe(false);
+    expect(grid.solid[20][67]).toBe(false);
+    expect(grid.solid[24][67]).toBe(false);
     // Arcade collides with the walls' own rectangles, merged into straight runs.
     expect(grid.wallRects).toEqual(wallColliderRects({ width: MAP_W, height: MAP_H, walls }));
-    expect(grid.wallRects).toContainEqual({ x: 67 * TILE - 8, y: 22 * TILE - 8, w: 16, h: 16 });
+    expect(grid.wallRects).toContainEqual({ x: 67 * TILE, y: 21 * TILE, w: TILE, h: 3 * TILE });
   });
 });
 
@@ -103,11 +105,12 @@ describe('buildTerrainGrid', () => {
     }
   });
 
-  it('gives each room its two-tile door on the left wall only, onto the corridor (app.js:240-249)', () => {
+  it('closes each room with tile walls one tile inside its edge, open only at its door on the left wall, onto the corridor', () => {
     const grid = buildTerrainGrid();
+    // The fixture places its walls one tile inside each room's edge; each covers the tiles above and below it.
     const doorPlan = [
-      { doorY: [8, 9], floor: 'carpet' },
-      { doorY: [24, 25], floor: 'wood' },
+      { doorY: 9, floor: 'carpet' },
+      { doorY: 25, floor: 'wood' },
     ];
 
     BUILT_IN_SPACES.forEach((room, ri) => {
@@ -119,21 +122,18 @@ describe('buildTerrainGrid', () => {
 
       for (let y = y0; y <= y1; y++) {
         for (let x = x0; x <= x1; x++) {
-          const isWall = x === x0 || x === x1 || y === y0 || y === y1;
           expect(grid.terrain[y][x]).toBe(floor);
-          if (!isWall) continue;
-          const isDoor = x === x0 && doorY.includes(y);
-          // Walls stand on grid lines (posts on the vertices inside the ring): the
-          // tile helpers see the ring blocked, a room floor still runs under it.
+          // Walls stand over the floor: the tile helpers see them blocked, a room floor still runs under them.
           expect(grid.walled[y][x]).toBe(false);
-          expect(grid.solid[y][x]).toBe(!isDoor);
         }
+        expect(grid.solid[y][x0 + 1], `${x0 + 1},${y}`).toBe(y !== doorY);
+        expect(grid.solid[y][x1], `${x1},${y}`).toBe(true);
+      }
+      for (let x = x0 + 1; x <= x1; x++) {
+        for (const y of [y0, y0 + 1, y0 + 2, y1 - 1, y1]) expect(grid.solid[y][x], `${x},${y}`).toBe(true);
       }
 
-      for (const y of doorY) {
-        expect(grid.solid[y][48]).toBe(false);
-        expect(grid.solid[y][49]).toBe(false);
-      }
+      for (const x of [48, 49, x0, x0 + 1]) expect(grid.solid[doorY][x], `${x},${doorY}`).toBe(false);
     });
   });
 

@@ -6,18 +6,16 @@
  */
 
 import {
+  ART_TILE,
   TERRAIN_VOID_COLOR,
   bridgeFrameIndex,
   hedgeFrameIndex,
   terrainDecalIndex,
   terrainLayerData,
-  wallBodyRect,
-  wallFrameIndex,
-  wallJointRect,
-  type Rect,
   type TerrainMaterial,
+  wallFrameIndex,
 } from './artContract';
-import { LAYOUT_MATERIALS, doorOnlyPost, openEdge, openingSet, orderedWallPosts, terrainMaterialAt, wallsJoin, type LayoutMaterial, type LayoutProp, type OfficeLayout, type TerrainSnapshot, type WallGrid } from './officeLayout';
+import { LAYOUT_MATERIALS, terrainMaterialAt, wallTileFrames, type LayoutMaterial, type LayoutProp, type OfficeLayout, type TerrainSnapshot, type WallGrid } from './officeLayout';
 
 /**
  * The color of the void: the camera background around and under the world,
@@ -90,19 +88,28 @@ export function fallbackTerrainData(terrain: TerrainSnapshot): number[][] {
 
 export interface WallSprite {
   readonly piece: string;
-  readonly part: 'joint' | 'body';
   readonly frame: number;
   readonly x: number;
   readonly y: number;
   /**
-   * Bottom edge of the piece: what it y-sorts by. A piece of the wall laid
-   * over another material (#223) adds a fraction of a pixel, so it covers
-   * what shares its edge without ever passing a piece a pixel below.
+   * What the piece y-sorts by: the bottom of its whole stretch, so a wall
+   * is one block an avatar is either behind (north of it) or in front of.
    */
   readonly depthY: number;
 }
 
-/** Connection bits of walls and hedges, like the pack's joint masks. */
+/** The sprite of every wall tile (`wallTileFrames`), its frame picked by tile column (`wallFrameIndex`). */
+export function wallSprites(grid: WallGrid): WallSprite[] {
+  return wallTileFrames(grid).map(({ tx, ty, piece, frame, depthY }) => ({
+    piece,
+    frame: wallFrameIndex(frame, tx),
+    x: tx * ART_TILE,
+    y: ty * ART_TILE,
+    depthY,
+  }));
+}
+
+/** Connection bits of hedges, like the pack's hedge frames. */
 const NORTH = 1;
 const EAST = 2;
 const SOUTH = 4;
@@ -111,78 +118,6 @@ const WEST = 8;
 function neighborMask(cells: readonly (string | null)[], width: number, height: number, tx: number, ty: number): number {
   const at = (x: number, y: number): boolean => x >= 0 && y >= 0 && x < width && y < height && cells[y * width + x] !== null;
   return (at(tx, ty - 1) ? NORTH : 0) | (at(tx + 1, ty) ? EAST : 0) | (at(tx, ty + 1) ? SOUTH : 0) | (at(tx - 1, ty) ? WEST : 0);
-}
-
-/**
- * The sprites of a wall grid: the layout's, or the live walls of a snapshot
- * (painted walls). Each entry is a post on the top-left vertex of its tile,
- * drawn on the pack's own geometry: the joint centered on the vertex, the
- * bodies along the grid lines to its neighbors, so a wall sits on the edge
- * between two terrains, half on each. They draw exactly the rectangles the
- * wall blocks (`wallFootprintRects`). A door's opening (#223) draws no body,
- * the door stands there; its joints keep their connected frames, so the wall
- * reads as one around the door. A post only open door edges meet (between the
- * two leaves of a double door) draws nothing: it is no wall any more.
- *
- * Neighboring posts join whatever their material (#223). Where two of
- * different materials meet, the one placed last (`wallOrder`, else the tile
- * order) is laid over the other: each joint keeps its own material and
- * connected frame, and the body between them is the later material, a clean
- * cut where one wall ends and the other begins. Same-material walls draw
- * exactly as if the order did not exist.
- */
-export function wallSprites({ width, height, walls, openings = [], wallOrder = [] }: WallGrid): WallSprite[] {
-  const joints: WallSprite[] = [];
-  const bodies: WallSprite[] = [];
-  const grid = { width, height, walls };
-  const open = openingSet({ width, height, walls, openings });
-  const posts = orderedWallPosts(walls, wallOrder);
-  const rank = new Map(posts.map((index, position) => [index, position]));
-  /** A fraction of a pixel, more for a later post: what a piece laid over another material adds to its depth. */
-  const lift = (index: number): number => (rank.get(index)! + 1) / (posts.length + 1);
-  const sprite = (piece: string, part: WallSprite['part'], frame: number, rect: Rect, extra = 0): WallSprite => ({
-    piece,
-    part,
-    frame,
-    x: rect.x,
-    y: rect.y,
-    depthY: rect.y + rect.height + extra,
-  });
-  /** The later of two joined posts, when their materials differ: the one laid over the other. */
-  const later = (a: number, b: number): number | null => (walls[a] === walls[b] ? null : rank.get(a)! > rank.get(b)! ? a : b);
-  for (let ty = 0; ty < height; ty += 1) {
-    for (let tx = 0; tx < width; tx += 1) {
-      const index = ty * width + tx;
-      const piece = walls[index];
-      if (piece === null || piece === undefined) continue;
-      // Nothing but open door edges meet here (between two doors): no wall is left to join.
-      if (doorOnlyPost(grid, open, tx, ty)) continue;
-      const neighbors = [
-        [NORTH, tx, ty - 1],
-        [EAST, tx + 1, ty],
-        [SOUTH, tx, ty + 1],
-        [WEST, tx - 1, ty],
-      ] as const;
-      let mask = 0;
-      let over = false;
-      for (const [bit, nx, ny] of neighbors) {
-        if (!wallsJoin(grid, tx, ty, nx, ny)) continue;
-        mask |= bit;
-        over ||= later(index, ny * width + nx) === index;
-      }
-      // A lone post has no joint frame (masks start at 1): it stands as a vertical body.
-      const frame = mask === 0 ? wallFrameIndex({ piece: 'body', axis: 'vertical' }) : wallFrameIndex({ piece: 'joint', mask });
-      joints.push(sprite(piece, 'joint', frame, wallJointRect({ col: tx, row: ty }), over ? lift(index) : 0));
-      // The body between two joined posts takes the material of the later one.
-      const body = (axis: 'horizontal' | 'vertical', next: number): void => {
-        const top = later(index, next);
-        bodies.push(sprite(walls[top ?? index]!, 'body', wallFrameIndex({ piece: 'body', axis }), wallBodyRect({ col: tx, row: ty, axis }), top === null ? 0 : lift(top)));
-      };
-      if (mask & EAST && !openEdge(grid, open, tx, ty, 'horizontal')) body('horizontal', index + 1);
-      if (mask & SOUTH && !openEdge(grid, open, tx, ty, 'vertical')) body('vertical', index + width);
-    }
-  }
-  return [...joints, ...bodies];
 }
 
 export interface HedgeSprite {

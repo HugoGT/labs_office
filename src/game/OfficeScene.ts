@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { WALL, doorFrameIndex, doorLeafDepthYs, doorHingeOf, doorPlacement, doorSlices, propPlacement, tableFrameIndex, type ArtFacing, type ArtPiece, type GridEdge, type Point } from './artContract';
+import { EDGE_WALL_THICKNESS, doorFrameIndex, doorLeafDepthYs, doorHingeOf, doorPlacement, doorSlices, propPlacement, tableFrameIndex, type ArtFacing, type ArtPiece, type GridEdge, type Point } from './artContract';
 import { artUploadsManifestUrl, findPiece, type ArtAppearance } from './artPack';
 import { artCustomCharactersUrl } from './customCharacterArt';
 import { ArtPackLoader } from './artPackLoader';
@@ -1891,7 +1891,7 @@ export class OfficeScene extends Phaser.Scene {
       this.add
         .rectangle(x, y, horizontal ? span * TILE : DOOR_PLACEHOLDER_THICKNESS, horizontal ? DOOR_PLACEHOLDER_THICKNESS : span * TILE, ART_FALLBACK_COLOR, ART_FALLBACK_ALPHA)
         // The bottom of the wall body it replaces: half a wall below the edge's middle either way.
-        .setDepth(worldAssetDepth(y + WALL.thickness / 2))
+        .setDepth(worldAssetDepth(y + EDGE_WALL_THICKNESS / 2))
         .setName(decorObjectName(item.index)),
     ];
   }

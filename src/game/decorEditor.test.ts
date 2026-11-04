@@ -314,21 +314,19 @@ describe('decorPlacementAllowed: doors (#223, #233)', () => {
     expect(decorPlacementAllowed(first, doorInfo, walled(), null, at(5, 4), { ...doorBrush(0), from: at(3, 4) })).toBe(true);
   });
 
-  it('keeps a piece that replaces a door off the wall the door leaves closed, as with no door there', () => {
+  it('keeps a piece that replaces a door off the wall under it, as with no door there', () => {
+    // Door openings do not cut tile walls (doors move onto tile walls in their own change): the door's tiles stay wall tiles.
     const door: DecorItem = { index: at(3, 4), piece: 'door-wood', rotation: 0 };
-    // The live ground with the door open: its tiles touch no wall rectangle.
     const plain = walled();
-    const openings = [{ col: 3, row: 4, axis: 'horizontal' as const }, { col: 4, row: 4, axis: 'horizontal' as const }];
-    const open = { ...plain, openings, wallTiles: coveredTiles(wallFootprintRects({ width: WIDTH, height: HEIGHT, walls: plain.walls!, openings }), WIDTH, HEIGHT) };
-    expect(open.wallTiles[at(3, 4)]).toBe(false);
+    expect(plain.wallTiles[at(3, 4)]).toBe(true);
     expect(decorPlacementAllowed([], doorInfo, plain, null, at(3, 4), chairBrush())).toBe(false);
-    expect(decorPlacementAllowed([door], doorInfo, open, null, at(3, 4), chairBrush())).toBe(false);
-    expect(decorPlacementAllowed([door], doorInfo, open, null, at(4, 4), chairBrush())).toBe(false);
-    // Moving the door away and a chair onto its other tile: the wall closes there too.
-    expect(decorPlacementAllowed([door], doorInfo, open, null, at(3, 3), { ...chairBrush(), from: at(3, 4) })).toBe(false);
+    expect(decorPlacementAllowed([door], doorInfo, plain, null, at(3, 4), chairBrush())).toBe(false);
+    expect(decorPlacementAllowed([door], doorInfo, plain, null, at(4, 4), chairBrush())).toBe(false);
+    // Moving the door away and a chair onto the wall above it: still the wall.
+    expect(decorPlacementAllowed([door], doorInfo, plain, null, at(3, 3), { ...chairBrush(), from: at(3, 4) })).toBe(false);
     // Another door over it still goes, and a chair anywhere else is judged as before.
-    expect(decorPlacementAllowed([door], doorInfo, open, null, at(3, 4), doorBrush(180))).toBe(true);
-    expect(decorPlacementAllowed([door], doorInfo, open, null, at(9, 3), chairBrush())).toBe(true);
+    expect(decorPlacementAllowed([door], doorInfo, plain, null, at(3, 4), doorBrush(180))).toBe(true);
+    expect(decorPlacementAllowed([door], doorInfo, plain, null, at(9, 3), chairBrush())).toBe(true);
   });
 
   it('still keeps every other piece off the tiles a wall touches', () => {

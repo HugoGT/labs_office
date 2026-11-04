@@ -5,6 +5,8 @@
  */
 import {
   ART_TILE,
+  WALL,
+  wallFrameIndex,
   BRIDGE,
   CHAIR,
   CHARACTER_SEATED,
@@ -39,12 +41,12 @@ import {
 } from '../../src/game/artContract.ts';
 import { PixelBuffer } from '../../src/art/pixelBuffer.ts';
 import type { Terrain } from './domain/tiles.ts';
-import { groupWallGeometry, resolveWallGeometry } from './domain/wallGeometry.ts';
-import { WallMap, type WallMaterial } from './domain/wallMap.ts';
+import { type WallMaterial } from './domain/wallMap.ts';
+import { wallTileFrames } from '../../src/game/officeLayout.ts';
 import { BACKDROP, crop, upscale } from './imageOps.ts';
 import { treeSprite } from './domain/props.ts';
 import { ROOM_TABLE_FOOTPRINTS, type RoomTable } from './domain/tables.ts';
-import { terrainLayerImage, wallLayer, type PackSheets } from './sheets.ts';
+import { terrainLayerImage, type PackSheets } from './sheets.ts';
 
 /** Nearest-neighbor zoom of every preview; production files stay at 1x. */
 export const PREVIEW_SCALE = 2;
@@ -157,20 +159,23 @@ function floorsPreview(sheets: PackSheets): PixelBuffer {
 
 /** The art demo's pairing of wall material and floor. */
 const WALL_FLOORS: Readonly<Record<WallMaterial, Terrain>> = { brick: 'wood', stone: 'grass', plaster: 'water', glass: 'plain' };
-const ROOM_COLS = 7;
-const ROOM_ROWS = 6;
+const ROOM_COLS = 8;
+const ROOM_ROWS = 9;
 
-/** A room with a doorway and a cross of inner walls: every joint shape, ends included. */
-function roomMap(material: WallMaterial): WallMap {
-  const map = new WallMap(ROOM_COLS, ROOM_ROWS);
-  map.run({ col: 1, row: 1 }, 'east', 5, material);
-  map.run({ col: 1, row: 1 }, 'south', 4, material);
-  map.run({ col: 6, row: 1 }, 'south', 4, material);
-  map.run({ col: 1, row: 5 }, 'east', 2, material);
-  map.run({ col: 4, row: 5 }, 'east', 2, material);
-  map.run({ col: 3, row: 1 }, 'south', 3, material);
-  map.run({ col: 1, row: 3 }, 'east', 4, material);
-  return map;
+/** A room seen from the front: a top wall, two side runs, a bottom wall with a doorway and a short inner wall. */
+function roomWalls(material: WallMaterial): (string | null)[] {
+  const walls = new Array<string | null>(ROOM_COLS * ROOM_ROWS).fill(null);
+  const put = (tx: number, ty: number): void => {
+    walls[ty * ROOM_COLS + tx] = `wall-${material}`;
+  };
+  for (let tx = 0; tx < ROOM_COLS; tx += 1) put(tx, 1);
+  for (let ty = 2; ty < ROOM_ROWS - 1; ty += 1) {
+    put(0, ty);
+    put(ROOM_COLS - 1, ty);
+  }
+  for (let tx = 0; tx < ROOM_COLS; tx += 1) if (tx !== 3 && tx !== 4) put(tx, ROOM_ROWS - 2);
+  put(5, 4);
+  return walls;
 }
 
 function wallsPreview(sheets: PackSheets): PixelBuffer {
@@ -180,9 +185,11 @@ function wallsPreview(sheets: PackSheets): PixelBuffer {
   sheets.walls.forEach(({ material, image }, index) => {
     const floor = sheets.floors.find((entry) => entry.terrain === WALL_FLOORS[material])!.image;
     const room = tiledFloor(floor, ROOM_COLS, ROOM_ROWS);
-    for (const group of groupWallGeometry(resolveWallGeometry(roomMap(material)))) {
-      const layer = wallLayer(image, group);
-      room.blit(layer.image, layer.left, layer.top);
+    for (const { tx, ty, frame } of wallTileFrames({ width: ROOM_COLS, height: ROOM_ROWS, walls: roomWalls(material) })) {
+      const index = wallFrameIndex(frame, tx);
+      const sx = (index % WALL.columns) * ART_TILE;
+      const sy = Math.floor(index / WALL.columns) * ART_TILE;
+      room.blit(crop(image, sx, sy, ART_TILE, ART_TILE), tx * ART_TILE, ty * ART_TILE);
     }
     out.blit(room, GAP + index * (width + GAP), GAP);
   });

@@ -179,13 +179,10 @@ export interface FloorSpec extends ImageSpecBase {
 
 export interface WallSpec extends ImageSpecBase {
   readonly kind: 'wall';
-  /** Distance between two grid vertices: one wall segment. */
-  readonly segmentLength: number;
-  readonly thickness: number;
-  /** Square piece centered on each vertex that holds a wall. */
-  readonly jointSize: number;
-  /** What is left of a segment between two joints. */
-  readonly bodyLength: number;
+  /** Tiles a wall covers from top to bottom: the one it is placed on is the middle one. */
+  readonly heightTiles: number;
+  /** Pixels of the dark top band of a wall column, seen from above. */
+  readonly topHeight: number;
 }
 
 /** `ground`: drawn over the terrain and under everything else. `sorted`: depth sorted by its anchor. */
@@ -444,27 +441,57 @@ export const FLOOR: FloorSpec = {
   maxColors: MAX_COLORS_PER_IMAGE,
 };
 
-const WALL_THICKNESS = 16;
+/** Legacy edge-wall thickness, still used by the door geometry until doors move to tiles. */
+export const EDGE_WALL_THICKNESS = 16;
+const WALL_THICKNESS = EDGE_WALL_THICKNESS;
 
 /**
- * Walls live on the edges of the 32px grid (the art was drawn for a 96px one).
- * Every piece is 16x16: frame 0 the horizontal body, 1 the vertical body, then
- * `1 + mask` the joint whose walls leave toward the sides in `mask`.
+ * Walls stand on whole tiles (the edge walls they replace sat on grid lines).
+ * A wall is placed on one tile and covers it plus the tile above and below:
+ * a column one tile wide and `heightTiles` tall, drawn as a dark top band
+ * `topHeight` pixels tall over the material's face. Where walls stack into a
+ * vertical run only the bottom of the run shows the face; above it the run
+ * is all top band. Frames are 32x32: a row per variant (`WALL_VARIANTS`),
+ * in the order of `WALL_FRAMES` across.
  */
 export const WALL: WallSpec = {
   kind: 'wall',
-  frame: { width: WALL_THICKNESS, height: WALL_THICKNESS },
-  columns: 2 + 15,
-  rows: 1,
-  segmentLength: ART_TILE,
-  thickness: WALL_THICKNESS,
-  jointSize: WALL_THICKNESS,
-  bodyLength: ART_TILE - WALL_THICKNESS,
+  frame: { width: ART_TILE, height: ART_TILE },
+  columns: 7,
+  rows: 3,
+  heightTiles: 3,
+  topHeight: 19,
   // Glass is translucent; a wall piece covers its whole frame, so no corner rule.
   alpha: 'partial',
   transparentCorners: false,
   maxColors: MAX_COLORS_PER_IMAGE,
 };
+
+/** Near black with a blue cast: the top of every wall, whatever its material. */
+export const WALL_TOP_COLOR = '#1b1a2b';
+
+/**
+ * Frames of a wall sheet: `cap` is all top band (the upper tiles of a
+ * vertical run), `crown` the tile where the top band meets the face, then
+ * the `face` and the `base` (bottom tile, with the outline on the floor).
+ * The `End` frames are the same tiles for the last wall of a horizontal run,
+ * which closes its right edge (brick mortar); walls in the middle of a run
+ * leave it open so two of them never show a double joint.
+ */
+export const WALL_FRAMES = { cap: 0, crown: 1, face: 2, base: 3, crownEnd: 4, faceEnd: 5, baseEnd: 6 } as const;
+export type WallFrame = keyof typeof WALL_FRAMES;
+
+/**
+ * A wall face repeats every `WALL_VARIANTS` tiles across instead of every
+ * tile, so a pattern can hold pieces longer than a tile allows (stone blocks
+ * of 12 to 24px). The variant of a wall is its tile column modulo this.
+ */
+export const WALL_VARIANTS = WALL.rows;
+
+/** Sheet index of a wall frame for the wall standing in tile column `tx`. */
+export function wallFrameIndex(frame: WallFrame, tx: number): number {
+  return (((tx % WALL_VARIANTS) + WALL_VARIANTS) % WALL_VARIANTS) * WALL.columns + WALL_FRAMES[frame];
+}
 
 // --- Terrain (#123) ------------------------------------------------------------------------------
 
@@ -1034,7 +1061,7 @@ export function doorSlices(edge: GridEdge, piece: string): { readonly leaves: re
   // `along` cuts the frame across the span from `from` for `size` pixels, whole the other way.
   const along = (from: number, size: number): Rect =>
     horizontal ? { x: from, y: 0, width: size, height: DOOR.frame.height } : { x: 0, y: from, width: DOOR.frame.width, height: size };
-  const joint = (vertex: GridVertex): number => wallJointRect(vertex).y + WALL.jointSize - 1;
+  const joint = (vertex: GridVertex): number => wallJointRect(vertex).y + WALL_THICKNESS - 1;
   const leafLength = length - 2 * jamb;
   return {
     leaves:
@@ -1198,32 +1225,24 @@ export interface Rect extends Point, Size {}
 
 const HALF_THICKNESS = WALL_THICKNESS / 2;
 
-/** World pixels of the joint centered on a vertex. */
+/** World pixels of the (legacy) edge-wall joint centered on a vertex: door geometry still hangs off it. */
 export function wallJointRect(vertex: GridVertex): Rect {
   return {
-    x: vertex.col * WALL.segmentLength - HALF_THICKNESS,
-    y: vertex.row * WALL.segmentLength - HALF_THICKNESS,
-    width: WALL.jointSize,
-    height: WALL.jointSize,
+    x: vertex.col * ART_TILE - HALF_THICKNESS,
+    y: vertex.row * ART_TILE - HALF_THICKNESS,
+    width: WALL_THICKNESS,
+    height: WALL_THICKNESS,
   };
 }
 
 /** World pixels of the body between the two joints of an edge. */
 export function wallBodyRect(edge: GridEdge): Rect {
-  const x = edge.col * WALL.segmentLength;
-  const y = edge.row * WALL.segmentLength;
+  const x = edge.col * ART_TILE;
+  const y = edge.row * ART_TILE;
+  const length = ART_TILE - WALL_THICKNESS;
   return edge.axis === 'horizontal'
-    ? { x: x + HALF_THICKNESS, y: y - HALF_THICKNESS, width: WALL.bodyLength, height: WALL.thickness }
-    : { x: x - HALF_THICKNESS, y: y + HALF_THICKNESS, width: WALL.thickness, height: WALL.bodyLength };
-}
-
-/** Connection mask bits: north 1, east 2, south 4, west 8. */
-export type WallPiece = { readonly piece: 'body'; readonly axis: GridEdge['axis'] } | { readonly piece: 'joint'; readonly mask: number };
-
-export function wallFrameIndex(piece: WallPiece): number {
-  if (piece.piece === 'body') return piece.axis === 'horizontal' ? 0 : 1;
-  if (!Number.isInteger(piece.mask) || piece.mask < 1 || piece.mask > 15) throw new Error(`Invalid wall joint mask ${piece.mask}`);
-  return 1 + piece.mask;
+    ? { x: x + HALF_THICKNESS, y: y - HALF_THICKNESS, width: length, height: WALL_THICKNESS }
+    : { x: x - HALF_THICKNESS, y: y + HALF_THICKNESS, width: WALL_THICKNESS, height: length };
 }
 
 // --- Pack manifest -----------------------------------------------------------------------------
@@ -1333,8 +1352,8 @@ export interface ArtFloorPiece extends ArtPieceBase {
 export interface ArtWallPiece extends ArtPieceBase {
   readonly kind: 'wall';
   readonly material: string;
-  readonly segmentLength: number;
-  readonly thickness: number;
+  readonly heightTiles: number;
+  readonly topHeight: number;
   readonly translucent: boolean;
 }
 

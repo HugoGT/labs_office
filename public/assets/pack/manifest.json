@@ -1953,17 +1953,17 @@
       "author": "HugoGT",
       "license": "proprietary-internal",
       "material": "brick",
-      "segmentLength": 32,
-      "thickness": 16,
+      "heightTiles": 3,
+      "topHeight": 19,
       "translucent": false,
       "files": [
         {
           "role": "sheet",
           "path": "wall/brick.png",
           "imageKind": "wall",
-          "width": 272,
-          "height": 16,
-          "sha256": "aa1800494e0bdc8b1563d067bdeebb643a33313bddc962fc3ff7a68d29687737"
+          "width": 224,
+          "height": 96,
+          "sha256": "eb1de1ad88cda128725392b0efe9e5704cc24255fefb71c05c7d7ac96a5cff56"
         }
       ]
     },
@@ -1974,17 +1974,17 @@
       "author": "HugoGT",
       "license": "proprietary-internal",
       "material": "stone",
-      "segmentLength": 32,
-      "thickness": 16,
+      "heightTiles": 3,
+      "topHeight": 19,
       "translucent": false,
       "files": [
         {
           "role": "sheet",
           "path": "wall/stone.png",
           "imageKind": "wall",
-          "width": 272,
-          "height": 16,
-          "sha256": "58ea77706dfa7376d00665e17067ae22ccc8c5ec68d38033065b6eacd54fc3e9"
+          "width": 224,
+          "height": 96,
+          "sha256": "8a443c2f235862df0f1b09e2cc41b29c29e72fb51e9bca8593b04dd53466bdcb"
         }
       ]
     },
@@ -1995,17 +1995,17 @@
       "author": "HugoGT",
       "license": "proprietary-internal",
       "material": "plaster",
-      "segmentLength": 32,
-      "thickness": 16,
+      "heightTiles": 3,
+      "topHeight": 19,
       "translucent": false,
       "files": [
         {
           "role": "sheet",
           "path": "wall/plaster.png",
           "imageKind": "wall",
-          "width": 272,
-          "height": 16,
-          "sha256": "8f1d2d60684255dc0c17444de3e581172ed49c782a83fef58201e70efca38a76"
+          "width": 224,
+          "height": 96,
+          "sha256": "6163106f748edc7fc114b1ef7d6044a16793bbbbdd6cc44a9675f59e73737622"
         }
       ]
     },
@@ -2016,17 +2016,17 @@
       "author": "HugoGT",
       "license": "proprietary-internal",
       "material": "glass",
-      "segmentLength": 32,
-      "thickness": 16,
+      "heightTiles": 3,
+      "topHeight": 19,
       "translucent": true,
       "files": [
         {
           "role": "sheet",
           "path": "wall/glass.png",
           "imageKind": "wall",
-          "width": 272,
-          "height": 16,
-          "sha256": "a01988983d5413efddb608fb6ed3634736c1a869b8b021ac6137c1abb8ca6623"
+          "width": 224,
+          "height": 96,
+          "sha256": "b7809e3a7851826d4f71aed4f75aca624bf98fb23ba56f27766679c89b8e9a7f"
         }
       ]
     },

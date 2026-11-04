@@ -6,7 +6,7 @@ import { MAP_W } from '../game/mapData';
 import type { OfficeBridge } from '../game/officeBridge';
 import { decorFootprint, decorInfoFromPieceId, type DecorItem, type DecorPieceInfo } from '../game/officeDecor';
 import { doorPosts, isDoorPiece } from '../game/officeDoors';
-import { BASE_LAYOUT, MAX_WALL_EDITS, type WallEdit, type WallPieceId } from '../game/officeLayout';
+import { BASE_LAYOUT, MAX_WALL_EDITS, wallPostTiles, type WallEdit, type WallPieceId } from '../game/officeLayout';
 import type { TerrainBrush } from '../game/terrainEditor';
 import { tileAreaRect, type TileRect } from '../game/terrainGrid';
 
@@ -173,9 +173,11 @@ export function useWallEditor({ bridge, terrain, eraseDecor, infoOf = decorInfoF
       setError(null);
       return;
     }
-    if (wallAfter(wallsRef.current, paintsRef.current, index) === brush.piece) return;
+    // A wall covers the tiles above and below the one it stands on: the eraser takes it from any of them.
+    const target = brush.piece === null ? ([index, index - MAP_W, index + MAP_W].find((candidate) => candidate >= 0 && wallAfter(wallsRef.current, paintsRef.current, candidate) != null) ?? index) : index;
+    if (wallAfter(wallsRef.current, paintsRef.current, target) === brush.piece) return;
     setError(null);
-    setPaints([...paintsRef.current, { index, piece: brush.piece, sent: false }]);
+    setPaints([...paintsRef.current, { index: target, piece: brush.piece, sent: false }]);
     void drain();
   }
 
@@ -222,8 +224,9 @@ export function useWallEditor({ bridge, terrain, eraseDecor, infoOf = decorInfoF
     const posts = new Set(takesDecor ? decor.flatMap((item) => (isDoorPiece(item.piece) ? doorPosts(item, MAP_W) : [])) : []);
     const after = [...walls];
     for (const paint of paints) after[paint.index] = paint.piece;
+    const map = { width: MAP_W, height: after.length / MAP_W };
     after.forEach((wall, index) => {
-      if (wall !== null) posts.add(index);
+      if (wall !== null) for (const tile of wallPostTiles(map, index)) posts.add(tile);
     });
     return [...posts].sort((a, b) => a - b);
   }, [brush, walls, paints, decor, takesDecor]);

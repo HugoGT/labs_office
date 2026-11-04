@@ -12,6 +12,7 @@ import {
   DOOR_HINGES,
   DOOR_VARIANTS,
   DOOR_STEPS,
+  EDGE_WALL_THICKNESS,
   doorLeafDepthYs,
   doorFrameIndex,
   doorHingeOf,
@@ -48,6 +49,9 @@ import {
   TREE,
   WALK_DIRECTIONS,
   WALL,
+  WALL_FRAMES,
+  WALL_TOP_COLOR,
+  WALL_VARIANTS,
   assembleFloorMotif,
   bridgeFrameIndex,
   countColors,
@@ -256,29 +260,37 @@ describe('floor motifs', () => {
   });
 });
 
-describe('wall segments on the 32px grid', () => {
-  it('uses one tile per segment, 16px thick, split into a joint and a body', () => {
-    expect(WALL.segmentLength).toBe(ART_TILE);
-    expect(WALL.thickness).toBe(16);
-    expect(WALL.jointSize + WALL.bodyLength).toBe(WALL.segmentLength);
-    expect(WALL.frame).toEqual({ width: 16, height: 16 });
+describe('tile walls', () => {
+  it('draws a wall as a column one tile wide and three tall: 32x32 frames, 7 per variant row, a 19px top band', () => {
+    expect(WALL.frame).toEqual({ width: ART_TILE, height: ART_TILE });
+    expect(WALL.heightTiles).toBe(3);
+    expect(WALL.topHeight).toBe(19);
+    expect(WALL.columns).toBe(Object.keys(WALL_FRAMES).length);
+    expect(WALL.rows).toBe(WALL_VARIANTS);
+    expect(WALL_VARIANTS).toBe(3);
+    expect(sheetSize(WALL)).toEqual({ width: 7 * ART_TILE, height: 3 * ART_TILE });
+    expect(WALL_TOP_COLOR).toBe('#1b1a2b');
   });
 
-  it('centers joints on vertices and fits bodies between them without overlap', () => {
+  it('numbers frames across in WALL_FRAMES order, one row per variant picked by the tile column modulo 3', () => {
+    expect(WALL_FRAMES).toEqual({ cap: 0, crown: 1, face: 2, base: 3, crownEnd: 4, faceEnd: 5, baseEnd: 6 });
+    expect(wallFrameIndex('cap', 0)).toBe(0);
+    expect(wallFrameIndex('face', 0)).toBe(2);
+    expect(wallFrameIndex('baseEnd', 0)).toBe(6);
+    expect(wallFrameIndex('crown', 1)).toBe(7 + 1);
+    expect(wallFrameIndex('base', 2)).toBe(2 * 7 + 3);
+    // Column 3 starts the pattern over; negative columns wrap instead of giving a negative frame.
+    expect(wallFrameIndex('face', 3)).toBe(wallFrameIndex('face', 0));
+    expect(wallFrameIndex('face', -1)).toBe(wallFrameIndex('face', 2));
+  });
+
+  it('keeps the legacy edge-wall joint and body rects the door geometry hangs off', () => {
+    expect(EDGE_WALL_THICKNESS).toBe(16);
     expect(wallJointRect({ col: 2, row: 1 })).toEqual({ x: 56, y: 24, width: 16, height: 16 });
     expect(wallBodyRect({ axis: 'horizontal', col: 2, row: 1 })).toEqual({ x: 72, y: 24, width: 16, height: 16 });
     expect(wallBodyRect({ axis: 'vertical', col: 2, row: 1 })).toEqual({ x: 56, y: 40, width: 16, height: 16 });
     // The next joint along the horizontal edge starts where the body ends.
     expect(wallJointRect({ col: 3, row: 1 }).x).toBe(72 + 16);
-  });
-
-  it('numbers frames: horizontal body, vertical body, then one joint per connection mask', () => {
-    expect(wallFrameIndex({ piece: 'body', axis: 'horizontal' })).toBe(0);
-    expect(wallFrameIndex({ piece: 'body', axis: 'vertical' })).toBe(1);
-    expect(wallFrameIndex({ piece: 'joint', mask: 1 })).toBe(2);
-    expect(wallFrameIndex({ piece: 'joint', mask: 15 })).toBe(16);
-    expect(WALL.columns).toBe(17);
-    expect(() => wallFrameIndex({ piece: 'joint', mask: 0 })).toThrow(/mask/);
   });
 });
 

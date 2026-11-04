@@ -19,7 +19,7 @@
  * `officeDecor.ts`: explicit `.ts` imports of other pure modules only.
  */
 
-import { DOOR_STEPS, WALL, doorHingeOf, doorSpanOf, doorVariantOf, type DoorHinge, type GridEdge } from './artContract.ts';
+import { DOOR_STEPS, EDGE_WALL_THICKNESS, doorHingeOf, doorSpanOf, doorVariantOf, type DoorHinge, type GridEdge } from './artContract.ts';
 import { AVATAR_BODY_CENTER_OFFSET, type GeometryPoint } from './avatarGeometry.ts';
 import { decorChairFacing, type DecorItem, type DecorTileRect } from './officeDecor.ts';
 import { wallFootprintRects, type WallGrid } from './officeLayout.ts';
@@ -97,7 +97,7 @@ export const DOOR_HINGE_STOP_PX = 16;
  * checks the body center, and the client is the stricter side.
  */
 export function doorHingeStops(items: readonly DecorItem[], grid: Pick<WallGrid, 'width' | 'height' | 'walls'>): CollisionRect[] {
-  const half = WALL.jointSize / 2;
+  const half = EDGE_WALL_THICKNESS / 2;
   return items.flatMap((item) => {
     if (!isDoorPiece(item.piece) || !doorOnWall(grid, item)) return [];
     const { col, row, axis } = doorEdge(item, grid.width);

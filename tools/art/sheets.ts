@@ -28,6 +28,8 @@ import {
   TERRAIN_VARIANTS,
   TERRAIN_VOID_EDGE_COMBOS,
   WALL,
+  WALL_FRAMES,
+  WALL_VARIANTS,
   bridgeFrameIndex,
   doorFrameIndex,
   facingColumn,
@@ -40,14 +42,11 @@ import {
   terrainVoidCapIndex,
   terrainVoidEdgeIndex,
   isTerrainBuiltFloor,
-  wallBodyRect,
-  wallFrameIndex,
-  wallJointRect,
   type ArtDeskFacing,
   type DoorVariant,
   type ArtFacing,
   type TerrainMaterial,
-  type WallPiece,
+  type WallFrame,
 } from '../../src/game/artContract.ts';
 import { CHAIR_MATERIALS, chairSprite, type ChairMaterial } from './domain/chairs.ts';
 import { SOFA_MATERIALS, SOFA_SEATS, sofaSprite, type SofaMaterial, type SofaSeats } from './domain/sofas.ts';
@@ -59,9 +58,8 @@ import { renderCharacterSheets } from '../../src/art/characterSheets.ts';
 import { ROOM_TABLES, roomTableSprite, TABLE_MATERIALS, tableSprite, type RoomTable, type TableMaterial } from './domain/tables.ts';
 import { decalTile, terrainBankTile, terrainEdgeTile, terrainVoidCapTile, terrainVoidEdgeTile } from './domain/terrainTiles.ts';
 import { TERRAINS, terrainTile, type Terrain } from './domain/tiles.ts';
-import type { WallGroup } from './domain/wallGeometry.ts';
 import { WALL_MATERIALS, type WallMaterial } from './domain/wallMap.ts';
-import { bodySprite, jointSprite } from './domain/walls.ts';
+import { wallFrame } from './domain/wallColumns.ts';
 import { crop, place } from './imageOps.ts';
 
 export { characterSeatedSheet, characterWalkSheet } from '../../src/art/characterSheets.ts';
@@ -132,33 +130,12 @@ export function floorSheet(terrain: Terrain): PixelBuffer {
 
 export function wallSheet(material: WallMaterial): PixelBuffer {
   const sheet = blankSheet(WALL);
-  const at = (piece: WallPiece): number => wallFrameIndex(piece) * WALL.frame.width;
-  place(sheet, bodySprite(material, 'horizontal').image, at({ piece: 'body', axis: 'horizontal' }), 0);
-  place(sheet, bodySprite(material, 'vertical').image, at({ piece: 'body', axis: 'vertical' }), 0);
-  for (let mask = 1; mask <= 15; mask += 1) place(sheet, jointSprite(material, mask).image, at({ piece: 'joint', mask }), 0);
+  for (let variant = 0; variant < WALL_VARIANTS; variant += 1) {
+    for (const frame of Object.keys(WALL_FRAMES) as WallFrame[]) {
+      place(sheet, wallFrame(material, frame, variant), WALL_FRAMES[frame] * WALL.frame.width, variant * WALL.frame.height);
+    }
+  }
   return sheet;
-}
-
-function sheetFrame(sheet: PixelBuffer, piece: WallPiece): PixelBuffer {
-  return crop(sheet, wallFrameIndex(piece) * WALL.frame.width, 0, WALL.frame.width, WALL.frame.height);
-}
-
-/**
- * Draws a wall group from its sheet the way the office will: each piece at its contract rect.
- * Pieces never overlap, so writing them unblended keeps glass from being composited twice.
- */
-export function wallLayer(sheet: PixelBuffer, group: WallGroup): { readonly image: PixelBuffer; readonly left: number; readonly top: number } {
-  const pieces = [
-    ...group.joints.map((joint) => ({ rect: wallJointRect(joint.vertex), frame: sheetFrame(sheet, { piece: 'joint', mask: joint.mask }) })),
-    ...group.bodies.map((body) => ({ rect: wallBodyRect(body.edge), frame: sheetFrame(sheet, { piece: 'body', axis: body.edge.axis }) })),
-  ];
-  const left = Math.min(...pieces.map(({ rect }) => rect.x));
-  const top = Math.min(...pieces.map(({ rect }) => rect.y));
-  const right = Math.max(...pieces.map(({ rect }) => rect.x + rect.width));
-  const bottom = Math.max(...pieces.map(({ rect }) => rect.y + rect.height));
-  const image = new PixelBuffer(right - left, bottom - top);
-  for (const { rect, frame } of pieces) place(image, frame, rect.x - left, rect.y - top);
-  return { image, left, top };
 }
 
 // --- Terrain -----------------------------------------------------------------------------------

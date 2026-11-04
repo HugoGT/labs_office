@@ -461,8 +461,9 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
                 : { x: 0, y: 350, w: 10000, h: 1 }];
               movement.buildPieceColliders();
             } else {
+              // A wall covers the tiles above and below the one it is placed on: placed on row 12 it starts on row 11, like the water.
               const blocked = (index: number) => horizontal
-                ? index % BASE_LAYOUT.width === 11 : Math.floor(index / BASE_LAYOUT.width) === 11;
+                ? index % BASE_LAYOUT.width === 11 : Math.floor(index / BASE_LAYOUT.width) === (obstacle === 'wall' ? 12 : 11);
               const tiles = BASE_LAYOUT.width * BASE_LAYOUT.height;
               const layout: OfficeLayout = {
                 ...BASE_LAYOUT, props: [], hedges: Array(tiles).fill(null),
@@ -740,10 +741,10 @@ describe('auto-walk around walls and desks (#219, #221)', () => {
   }
 
   /**
-   * A room whose walls run on the grid lines from vertex (20,3) to (26,9),
-   * its bottom wall missing the post at (23,9): a one-post door. The walls go
-   * in as the scene builds them: Arcade bodies, and the tiles they touch
-   * blocked in `grid.solid`.
+   * A room whose walls stand on the ring of tiles from (20,3) to (26,9), each
+   * covering the tiles above and below it, its bottom wall missing the one on
+   * (23,9): a one-tile door. The walls go in as the scene builds them: Arcade
+   * bodies, and the tiles they touch blocked in `grid.solid`.
    */
   function walledRoom(arena: Arena) {
     const { movement } = arena;
@@ -762,7 +763,8 @@ describe('auto-walk around walls and desks (#219, #221)', () => {
     const { player, movement, body } = arena;
     walledRoom(arena);
     const outside = positionForBodyTile({ tx: 23, ty: 12 });
-    const inside = positionForBodyTile({ tx: 24, ty: 4 });
+    // Rows 5 to 7 are the floor the top and bottom walls leave inside.
+    const inside = positionForBodyTile({ tx: 24, ty: 6 });
     body.reset(outside.x, outside.y);
 
     for (const goal of [inside, outside]) {
@@ -773,14 +775,14 @@ describe('auto-walk around walls and desks (#219, #221)', () => {
     }
   });
 
-  it('a double click reaches the floor along the inside of a wall (#221)', async () => {
+  it('a double click reaches the floor right against the inside of two walls (#221)', async () => {
     const arena = await movementArena();
     const { player, movement, body } = arena;
     walledRoom(arena);
     const start = positionForBodyTile({ tx: 23, ty: 6 });
     body.reset(start.x, start.y);
-    // Tile (22,3) touches the top wall: blocked for the tile helpers, but the body fits on it.
-    const goal = positionForBodyTile({ tx: 22, ty: 3 });
+    // Tile (21,5) is the inner corner: the top wall's bottom edge above it, the left wall's right edge beside it.
+    const goal = positionForBodyTile({ tx: 21, ty: 5 });
 
     arena.doubleClick(goal.x, goal.y);
     expect(movement.autoWalk).toBeDefined();

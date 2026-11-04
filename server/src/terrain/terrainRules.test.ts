@@ -265,14 +265,16 @@ describe('findWallConflict', () => {
     expect(findWallConflict([], MAP, STATIC, protections)).toBeNull();
   });
 
-  it('refuses a post whose footprint touches a seat, static furniture or the spawn area', () => {
+  it('refuses a wall any of whose three tiles is a seat, static furniture or the spawn area', () => {
     const seat = BASE_MAP_SEATS[0]!;
     expect(findWallConflict([seat.ty * W + seat.tx], MAP, STATIC, NONE)).toBe('placement');
-    // The vertex at the seat tile's bottom-right corner: its joint reaches into the seat.
-    expect(findWallConflict([(seat.ty + 1) * W + seat.tx + 1], MAP, STATIC, NONE)).toBe('placement');
+    // A wall placed on the tile below the seat covers the seat with its upper tile.
+    expect(findWallConflict([(seat.ty + 1) * W + seat.tx], MAP, STATIC, NONE)).toBe('placement');
     expect(findWallConflict([spawn], MAP, STATIC, NONE)).toBe('placement');
-    expect(findWallConflict([spawn + 2 * W + 2], MAP, STATIC, NONE)).toBe('placement');
-    expect(findWallConflict([spawn + 3 * W + 3], MAP, STATIC, NONE)).toBeNull();
+    // The spawn area reaches one tile around the spawn: a wall two rows below it still covers its corner.
+    expect(findWallConflict([spawn + 2 * W + 1], MAP, STATIC, NONE)).toBe('placement');
+    expect(findWallConflict([spawn + 3 * W + 1], MAP, STATIC, NONE)).toBeNull();
+    expect(findWallConflict([spawn + 2], MAP, STATIC, NONE)).toBeNull();
   });
 
   it('refuses to remove a post that ends a door (#223), never to repaint it or to change another post', () => {
@@ -286,15 +288,16 @@ describe('findWallConflict', () => {
     expect(findWallConflict([free], MAP, STATIC, NONE, [free + 2], doorPosts)).toBeNull();
   });
 
-  it('refuses a post on a desk, its edge lines included', () => {
+  it('refuses a wall any of whose three tiles is on a desk', () => {
     expect(findWallConflict([free], MAP, STATIC, { ...NONE, desks: [desk] })).toBe('placement');
-    // The desk's top-left and bottom-right corners: the post straddles the edge.
-    expect(findWallConflict([21 * W + 66], MAP, STATIC, { ...NONE, desks: [desk] })).toBe('placement');
-    expect(findWallConflict([24 * W + 69], MAP, STATIC, { ...NONE, desks: [desk] })).toBe('placement');
-    // A whole tile away.
+    // Above the desk's top-left corner and below its bottom-right one: the wall's end tile reaches in.
+    expect(findWallConflict([20 * W + 66], MAP, STATIC, { ...NONE, desks: [desk] })).toBe('placement');
+    expect(findWallConflict([24 * W + 68], MAP, STATIC, { ...NONE, desks: [desk] })).toBe('placement');
+    // Right beside, above or below the desk: no tile of the wall is on it.
     expect(findWallConflict([25 * W + 68], MAP, STATIC, { ...NONE, desks: [desk] })).toBeNull();
-    expect(findWallConflict([22 * W + 70], MAP, STATIC, { ...NONE, desks: [desk] })).toBeNull();
-    expect(findWallConflict([20 * W + 67], MAP, STATIC, { ...NONE, desks: [desk] })).toBeNull();
+    expect(findWallConflict([22 * W + 69], MAP, STATIC, { ...NONE, desks: [desk] })).toBeNull();
+    expect(findWallConflict([22 * W + 65], MAP, STATIC, { ...NONE, desks: [desk] })).toBeNull();
+    expect(findWallConflict([19 * W + 67], MAP, STATIC, { ...NONE, desks: [desk] })).toBeNull();
   });
 });
 

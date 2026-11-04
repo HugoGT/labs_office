@@ -435,9 +435,10 @@ function expectClearWalk(world: WalkWorld, from: { x: number; y: number }, route
 
 describe('planWalk against wall and piece rectangles (#219, #221)', () => {
   /**
-   * 12x12 open tiles with a room whose walls run on the grid lines from
-   * vertex (2,2) to (8,8). With a door, the bottom wall misses the post at
-   * (5,8): a one-post door, 48 px between the two joints beside it.
+   * 12x12 open tiles with a room whose walls stand on the ring of tiles from
+   * (2,2) to (8,8), each covering the tiles above and below it. With a door,
+   * the bottom wall misses the one at (5,8): a one-tile door, 32 px between
+   * the walls beside it.
    */
   function walledRoom({ door = true } = {}): WalkWorld {
     const width = 12;
@@ -450,7 +451,7 @@ describe('planWalk against wall and piece rectangles (#219, #221)', () => {
     return { terrainSolid: openGrid(width, height), rects: wallColliderRects({ width, height, walls }) };
   }
 
-  it('walks from the corridor into a walled room through a one-post door, and back out', () => {
+  it('walks from the corridor into a walled room through a one-tile door, and back out', () => {
     const room = walledRoom();
     const outside = centerOf(5, 10);
     const inside = centerOf(5, 4);
@@ -464,11 +465,11 @@ describe('planWalk against wall and piece rectangles (#219, #221)', () => {
     expect(out!.at(-1)).toEqual(outside);
   });
 
-  it('reaches the spots along both sides of a wall, which the whole-tile grid blocked', () => {
+  it('reaches the spots right against both sides of a wall', () => {
     const room = walledRoom();
     const from = centerOf(10, 10);
-    // Inside, against the top wall (line y = 64), and outside, against the right one (line x = 256).
-    for (const goal of [centerOf(3, 2), atBodyCenter(2 * TILE + 18, 4 * TILE + 16), atBodyCenter(8 * TILE + 18, 5 * TILE + 16)]) {
+    // Inside, in the corner of the top wall (bottom at y = 128) and the left one (right side at x = 96), and outside, against the right one (x = 288).
+    for (const goal of [centerOf(3, 4), atBodyCenter(3 * TILE + 10, 4 * TILE + 8), atBodyCenter(9 * TILE + 10, 5 * TILE + 16)]) {
       const route = planWalk(room, from, goal);
       expectClearWalk(room, from, route);
       expect(route!.at(-1)).toEqual(goal);
@@ -527,8 +528,8 @@ describe('planWalk against wall and piece rectangles (#219, #221)', () => {
   });
 });
 
-describe('planWalk through a door (#221, #223)', () => {
-  /** The legacy office cut by a brick wall along row 22, from one side of the map to the other. */
+describe('planWalk through a gap in a wall (#221)', () => {
+  /** The legacy office cut by a brick wall placed along row 22 (it covers rows 21 to 23), from one side of the map to the other. */
   const walled: OfficeLayout = {
     ...LEGACY_LAYOUT,
     props: [],
@@ -536,21 +537,23 @@ describe('planWalk through a door (#221, #223)', () => {
     ground: LEGACY_LAYOUT.ground.map(() => 'grass'),
     walls: LEGACY_LAYOUT.walls.map((_, index) => (Math.floor(index / LEGACY_LAYOUT.width) === 22 ? 'wall-brick' : null)),
   };
-  const DOOR = { col: 67, row: 22, axis: 'horizontal' as const };
+  /** The same wall missing the one placed on (67, 22): a one-tile gap. */
+  const gapped: OfficeLayout = { ...walled, walls: walled.walls.map((wall, index) => (index === 22 * LEGACY_LAYOUT.width + 67 ? null : wall)) };
   const from = positionForBodyTile(tile(67, 17));
   const goal = positionForBodyTile(tile(67, 27));
   /** What the scene hands the planner: the terrain tiles and the wall rectangles of a snapshot's grid. */
   const worldOf = (grid: ReturnType<typeof buildTerrainGrid>): WalkWorld => ({ terrainSolid: grid.terrainSolid, rects: grid.wallRects });
 
-  it('finds no way across a closed wall, and walks straight through the door that opens it', () => {
+  it('finds no way across a closed wall, and walks straight through a one-tile gap in it', () => {
     const closed = buildTerrainGrid(terrainSnapshot(walled), walled, []);
     expect(planWalk(worldOf(closed), from, goal)).toBeNull();
 
-    const open = buildTerrainGrid(terrainSnapshot(walled, walled.blocks, walled.walls, [DOOR]), walled, []);
-    expect(open.solid[21]![67]).toBe(false);
-    expect(open.solid[22]![67]).toBe(false);
-    expect(open.solid[22]![66]).toBe(true);
-    expect(open.solid[22]![68]).toBe(true);
+    const open = buildTerrainGrid(terrainSnapshot(gapped), gapped, []);
+    for (const ty of [21, 22, 23]) {
+      expect(open.solid[ty]![67]).toBe(false);
+      expect(open.solid[ty]![66]).toBe(true);
+      expect(open.solid[ty]![68]).toBe(true);
+    }
     const route = planWalk(worldOf(open), from, goal);
     expectClearWalk(worldOf(open), from, route);
     expect(route!.at(-1)).toEqual(goal);

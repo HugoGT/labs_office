@@ -260,13 +260,50 @@ describe('useWallEditor: what the eraser would take (#241)', () => {
     expect(commands.at(-1)).toEqual({ brush: { kind: 'wall', piece: 'wall-brick' } });
 
     act(() => result.current.pick(null));
-    expect(commands.at(-1)?.erasable).toEqual([TILE_A, TILE_B, DOOR, DOOR + 1, DOOR + 2]);
+    // Each wall covers the tile it stands on and the ones above and below it.
+    const W = BASE_LAYOUT.width;
+    expect(commands.at(-1)?.erasable).toEqual([TILE_A - W, TILE_B - W, TILE_A, TILE_B, DOOR, DOOR + 1, DOOR + 2, TILE_A + W, TILE_B + W]);
     expect(commands.at(-1)?.erasableDecor).toEqual([{ x0: 69, y0: 22, x1: 69, y1: 22 }]);
 
-    // An erase on its way already leaves its post with nothing to take.
+    // An erase on its way already leaves its wall with nothing to take.
     act(() => bridge.emit('wallpick', { index: TILE_A }));
     await waitFor(() => expect(calls).toHaveLength(1));
-    expect(commands.at(-1)?.erasable).toEqual([TILE_B, DOOR, DOOR + 1, DOOR + 2]);
+    expect(commands.at(-1)?.erasable).toEqual([TILE_B - W, TILE_B, DOOR, DOOR + 1, DOOR + 2, TILE_B + W]);
+  });
+
+  it('erases a wall from any of its three tiles, and nothing from a tile no wall covers', async () => {
+    const bridge = createOfficeBridge();
+    const { terrain, calls } = deferredWalls();
+    const empty = BASE_LAYOUT.walls.map(() => null);
+    const W = BASE_LAYOUT.width;
+    const { result } = renderHook(() => useWallEditor({ bridge, terrain, eraseDecor: () => false }));
+    act(() => bridge.emit('terrain', { blocks: BASE_LAYOUT.blocks, walls: withWalls(empty, [{ index: TILE_A, piece: 'wall-stone' }, { index: TILE_C, piece: 'wall-brick' }]), colors: NO_COLORS }));
+    act(() => result.current.pick(null));
+
+    // Two tiles above the wall: nothing covers it, nothing is sent.
+    act(() => bridge.emit('wallpick', { index: TILE_A - 2 * W }));
+    // The tile above the wall on TILE_A takes that wall.
+    act(() => bridge.emit('wallpick', { index: TILE_A - W }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.edits).toEqual([{ index: TILE_A, piece: null }]);
+    await act(async () => calls[0]!.resolve());
+
+    // The tile below the wall on TILE_C takes that one.
+    act(() => bridge.emit('wallpick', { index: TILE_C + W }));
+    await waitFor(() => expect(calls).toHaveLength(2));
+    expect(calls[1]!.edits).toEqual([{ index: TILE_C, piece: null }]);
+  });
+
+  it('paints a picked wall on the tile under the pointer: that tile is its middle', async () => {
+    const bridge = createOfficeBridge();
+    const { terrain, calls } = deferredWalls();
+    const { result } = renderHook(() => useWallEditor({ bridge, terrain, eraseDecor: () => false }));
+    act(() => bridge.emit('terrain', { blocks: BASE_LAYOUT.blocks, walls: BASE_LAYOUT.walls.map(() => null), colors: NO_COLORS }));
+    act(() => result.current.pick('wall-glass'));
+
+    act(() => bridge.emit('wallpick', { index: TILE_B }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.edits).toEqual([{ index: TILE_B, piece: 'wall-glass' }]);
   });
 });
 

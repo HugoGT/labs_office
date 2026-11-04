@@ -29,6 +29,9 @@ import {
   TERRAIN_VOID_EDGE_COMBOS,
   WALK_DIRECTIONS,
   WALL,
+  WALL_FRAMES,
+  WALL_TOP_COLOR,
+  WALL_VARIANTS,
   bridgeFrameIndex,
   doorFrameIndex,
   facingColumn,
@@ -42,6 +45,7 @@ import {
   validateArtImage,
   wallFrameIndex,
   type TerrainMaterial,
+  type WallFrame,
 } from '../../src/game/artContract.ts';
 import { ANCHOR_X, ANCHOR_Y, FRAME_HEIGHT, FRAME_WIDTH } from '../../src/art/camera.ts';
 import { chairSprite, CHAIR_MATERIALS } from './domain/chairs.ts';
@@ -55,9 +59,8 @@ import { buildCharacterSprites } from '../../src/art/spriteSheet.ts';
 import { tableSprite, TABLE_MATERIALS } from './domain/tables.ts';
 import { terrainTile, TERRAINS, TILE_SIZE } from './domain/tiles.ts';
 import { WALK_FRAME_COUNT } from '../../src/art/walkCycle.ts';
-import { groupWallGeometry, resolveWallGeometry } from './domain/wallGeometry.ts';
-import { WALL_MATERIALS, WallMap } from './domain/wallMap.ts';
-import { composeWalls } from './domain/wallRenderer.ts';
+import { wallColumn, wallFrame } from './domain/wallColumns.ts';
+import { WALL_MATERIALS } from './domain/wallMap.ts';
 import { crop } from './imageOps.ts';
 import { DOOR_MATERIALS, doorSprite } from './domain/doors.ts';
 import { bridgeSprite, hedgeSprite, PLANT_KINDS, plantSprite, TREE_KINDS, treeSprite } from './domain/props.ts';
@@ -78,7 +81,6 @@ import {
   terrainLayerImage,
   terrainTilesetSheet,
   treeSheet,
-  wallLayer,
   wallSheet,
 } from './sheets.ts';
 
@@ -192,27 +194,78 @@ describe('floor sheet', () => {
 });
 
 describe('wall sheet', () => {
-  it('holds both 16x16 bodies and the 15 joints in contract frame order, and rebuilds any wall', () => {
-    const map = new WallMap(6, 5);
-    map.run({ col: 1, row: 1 }, 'east', 4, 'brick');
-    map.run({ col: 1, row: 1 }, 'south', 3, 'brick');
-    map.run({ col: 5, row: 1 }, 'south', 3, 'brick');
-    map.run({ col: 1, row: 4 }, 'east', 1, 'brick');
-    map.run({ col: 3, row: 4 }, 'east', 2, 'brick');
-    map.run({ col: 3, row: 1 }, 'south', 2, 'brick');
-    const geometry = resolveWallGeometry(map);
+  const frames = Object.keys(WALL_FRAMES) as WallFrame[];
+  const frameAt = (sheet: PixelBuffer, frame: WallFrame, variant: number): PixelBuffer =>
+    crop(sheet, WALL_FRAMES[frame] * WALL.frame.width, variant * WALL.frame.height, WALL.frame.width, WALL.frame.height);
+  const top = WALL_TOP_COLOR.match(/[0-9a-f]{2}/gi)!.map((hex) => parseInt(hex, 16));
+  const isTop = (image: PixelBuffer, x: number, y: number): boolean => {
+    const { r, g, b, a } = image.getPixel(x, y);
+    return r === top[0] && g === top[1] && b === top[2] && a === 255;
+  };
+
+  it('holds every frame of every variant where the contract numbers it, and is deterministic', () => {
     for (const material of WALL_MATERIALS) {
       const sheet = wallSheet(material);
       expect(validateArtImage('wall', sheet), material).toEqual([]);
-      expect(sheet.width).toBe(WALL.frame.width * (1 + wallFrameIndex({ piece: 'joint', mask: 15 })));
-      const [group] = groupWallGeometry({
-        joints: geometry.joints.map((joint) => ({ ...joint, material })),
-        bodies: geometry.bodies.map((body) => ({ ...body, material })),
-      });
-      const expected = composeWalls(group!);
-      const drawn = wallLayer(sheet, group!);
-      expect([drawn.left, drawn.top], material).toEqual([expected.left, expected.top]);
-      expect(pixels(drawn.image), material).toEqual(pixels(expected.image));
+      expect([sheet.width, sheet.height]).toEqual([7 * ART_TILE, WALL_VARIANTS * ART_TILE]);
+      for (let variant = 0; variant < WALL_VARIANTS; variant += 1) {
+        for (const frame of frames) {
+          const index = wallFrameIndex(frame, variant);
+          const indexed = crop(sheet, (index % WALL.columns) * ART_TILE, Math.floor(index / WALL.columns) * ART_TILE, ART_TILE, ART_TILE);
+          expect(pixels(indexed), `${material} ${frame} ${variant}`).toEqual(pixels(wallFrame(material, frame, variant)));
+        }
+      }
+      expect(pixels(wallSheet(material)), material).toEqual(pixels(sheet));
+    }
+  });
+
+  it('stacks crown, face and base into the wall column: a 19px top band over the material face', () => {
+    for (const material of WALL_MATERIALS) {
+      const sheet = wallSheet(material);
+      for (let variant = 0; variant < WALL_VARIANTS; variant += 1) {
+        const column = crop(wallColumn(material), variant * ART_TILE, 0, ART_TILE, WALL.heightTiles * ART_TILE);
+        (['crown', 'face', 'base'] as const).forEach((frame, row) => {
+          expect(pixels(frameAt(sheet, frame, variant)), `${material} ${frame}`).toEqual(pixels(crop(column, 0, row * ART_TILE, ART_TILE, ART_TILE)));
+        });
+        const crown = frameAt(sheet, 'crown', variant);
+        for (let x = 0; x < ART_TILE; x += 1) {
+          for (let y = 0; y < WALL.topHeight; y += 1) expect(isTop(crown, x, y), `${material} ${x},${y}`).toBe(true);
+        }
+        expect(Array.from({ length: ART_TILE }, (_, x) => isTop(crown, x, WALL.topHeight)).every(Boolean), material).toBe(false);
+        // The cap, for the upper tiles of a vertical run, is all top band.
+        const cap = frameAt(sheet, 'cap', variant);
+        for (let y = 0; y < ART_TILE; y += 1) for (let x = 0; x < ART_TILE; x += 1) expect(isTop(cap, x, y)).toBe(true);
+      }
+    }
+  });
+
+  it('closes only the right edge in the End frames, and only brick draws a joint there', () => {
+    for (const material of WALL_MATERIALS) {
+      const sheet = wallSheet(material);
+      for (const frame of ['crown', 'face', 'base'] as const) {
+        const open = frameAt(sheet, frame, 0);
+        const closed = frameAt(sheet, `${frame}End`, 0);
+        expect(pixels(crop(closed, 0, 0, ART_TILE - 1, ART_TILE)), `${material} ${frame}`).toEqual(pixels(crop(open, 0, 0, ART_TILE - 1, ART_TILE)));
+        if (material !== 'brick') expect(pixels(closed), `${material} ${frame}`).toEqual(pixels(open));
+      }
+      if (material === 'brick') expect(pixels(frameAt(sheet, 'faceEnd', 0))).not.toEqual(pixels(frameAt(sheet, 'face', 0)));
+    }
+  });
+
+  it('draws four different materials, solid ones opaque and glass translucent, each face varying across its three variants', () => {
+    const faces = WALL_MATERIALS.map((material) => pixels(frameAt(wallSheet(material), 'face', 0)));
+    expect(new Set(faces.map((face) => face.join())).size).toBe(WALL_MATERIALS.length);
+    for (const material of WALL_MATERIALS) {
+      const sheet = wallSheet(material);
+      const alphas = new Set<number>();
+      for (let y = 0; y < sheet.height; y += 1) for (let x = 0; x < sheet.width; x += 1) alphas.add(sheet.getPixel(x, y).a);
+      if (material === 'glass') expect([...alphas].some((alpha) => alpha > 0 && alpha < 255)).toBe(true);
+      else expect([...alphas]).toEqual([255]);
+    }
+    for (const material of ['brick', 'stone'] as const) {
+      const sheet = wallSheet(material);
+      const variants = [0, 1, 2].map((variant) => pixels(frameAt(sheet, 'face', variant)).join());
+      expect(new Set(variants).size, material).toBe(WALL_VARIANTS);
     }
   });
 });

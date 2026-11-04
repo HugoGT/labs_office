@@ -16,6 +16,7 @@
 import Phaser from 'phaser';
 import { DECOR_DELETE_COLOR } from './DecorEditLayer';
 import { LAYOUT_GHOST_DEPTH } from './depthLayers';
+import { WALL } from './artContract';
 import { TILE } from './mapData';
 import type { OfficeBridge } from './officeBridge';
 import { BLOCK_TILES, type OfficeLayout } from './officeLayout';
@@ -49,8 +50,8 @@ export class TerrainEditLayer {
   private erasable: ReadonlySet<number> = new Set();
   /** Floors paint 9x9 blocks. */
   private readonly blocks: StrokeGrid;
-  /** Walls paint single posts, on the grid vertices. */
-  private readonly vertices: StrokeGrid;
+  /** Walls are placed on tiles: the one picked is the middle of the wall. */
+  private readonly wallTiles: StrokeGrid;
   /** World point of the last pointer event of a held stroke, or `null` while no stroke is held. */
   private stroke: { x: number; y: number } | null = null;
   /** The last pick a stroke reported (`index`, or `index:tile` for a wall), not reported again in a row. */
@@ -77,7 +78,7 @@ export class TerrainEditLayer {
     this.ghost = ghost;
     this.outlines = new ContextOutlines(scene);
     this.blocks = { columns: layout.width / BLOCK_TILES, rows: layout.height / BLOCK_TILES, cellSize: BLOCK_TILES * TILE };
-    this.vertices = { columns: layout.width, rows: layout.height, cellSize: TILE, snap: 'vertex' };
+    this.wallTiles = { columns: layout.width, rows: layout.height, cellSize: TILE };
     this.unsubscribeCommand = bridge.onCommand('terrainedit', (command) => this.applyCommand(command));
     scene.input.on('pointermove', this.onPointerMove);
     scene.input.on('pointerdown', this.onPointerDown);
@@ -95,9 +96,9 @@ export class TerrainEditLayer {
     this.ghost?.destroy();
   }
 
-  /** The grid a brush paints on: blocks for a floor, vertices for a wall. */
+  /** The grid a brush paints on: blocks for a floor, tiles for a wall. */
   private gridOf(brush: TerrainBrush): StrokeGrid {
-    return brush.kind === 'floor' ? this.blocks : this.vertices;
+    return brush.kind === 'floor' ? this.blocks : this.wallTiles;
   }
 
   /** Reports the cells from `from` (the press when `null`) to the pointer, skipping the one just reported. */
@@ -108,7 +109,7 @@ export class TerrainEditLayer {
     this.stroke = to;
     // Only the eraser needs the tile (a decor piece goes by it): a painted wall goes post by post.
     if (brush.kind === 'wall' && brush.piece === null) {
-      for (const pick of postsAlongStroke(this.vertices, from, to)) {
+      for (const pick of postsAlongStroke(this.wallTiles, from, to)) {
         const key = `${pick.index}:${pick.tile}`;
         if (key === this.lastPicked) continue;
         this.lastPicked = key;
@@ -182,8 +183,10 @@ export class TerrainEditLayer {
     this.hovered = index;
     this.hoveredDecor = this.decorUnderPointer();
     const rect = this.hoveredDecor;
+    // A wall covers the tile it is placed on plus the ones above and below: the box shows all of it.
+    const tall = this.command.brush.kind === 'wall' ? WALL.heightTiles : 1;
     const width = rect === null ? grid.cellSize : (rect.x1 - rect.x0 + 1) * TILE;
-    const height = rect === null ? grid.cellSize : (rect.y1 - rect.y0 + 1) * TILE;
+    const height = rect === null ? grid.cellSize * tall : (rect.y1 - rect.y0 + 1) * TILE;
     this.hover ??= this.scene.add
       .rectangle(0, 0, width, height)
       .setStrokeStyle(STROKE_WIDTH, HOVER_STROKE_COLOR)

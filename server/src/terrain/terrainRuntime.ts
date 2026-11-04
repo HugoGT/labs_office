@@ -306,18 +306,18 @@ export function createTerrainRuntime({
   }
 
   /**
-   * The posts around the `voided` blocks that `next` leaves with void on
-   * every tile their footprint touches (#217): nothing to stand on. A post on
-   * the border of what remains keeps its ground on one side and stays.
+   * The walls around the `voided` blocks that `next` leaves with void on
+   * every tile they cover (#217): nothing to stand on. A wall on the border
+   * of what remains keeps ground under one of its tiles and stays.
    */
   function floatingPosts(voided: readonly number[], next: TerrainSnapshot): number[] {
     const { width, height } = layout;
     const posts = new Set<number>();
     for (const block of voided) {
       const { tx, ty, w, h } = blockTileRect(width, block);
-      // Every vertex on or inside the block's outline; the grid has none past the map's last column or row.
-      for (let y = ty; y <= Math.min(ty + h, height - 1); y += 1) {
-        for (let x = tx; x <= Math.min(tx + w, width - 1); x += 1) {
+      // Every wall that covers a tile of the block: its columns, from the row above it to the row below it.
+      for (let y = Math.max(ty - 1, 0); y <= Math.min(ty + h, height - 1); y += 1) {
+        for (let x = tx; x <= Math.min(tx + w - 1, width - 1); x += 1) {
           const post = y * width + x;
           if (walls[post] == null || posts.has(post)) continue;
           if (wallPostTiles(layout, post).every((tile) => next.materials[tile] === 'void')) posts.add(post);
