@@ -10,8 +10,8 @@
  * sides agree on who is inside.
  */
 
-import { TILE, type SpaceArea } from './mapData.ts';
-import { doorFarSide, type DoorLeaf } from './officeDoors.ts';
+import type { SpaceArea } from './mapData.ts';
+import { doorFarSide, doorLine, type DoorLeaf } from './officeDoors.ts';
 import { detectSpace, type Point } from './proximity.ts';
 
 /**
@@ -64,7 +64,7 @@ export function lockedDoorAhead(
   for (const door of doors) {
     const across = doorFarSide(door, position);
     if (across === null) continue;
-    const toward = door.edge.axis === 'horizontal' ? (across.y - door.edge.row * TILE) * heading.y : (across.x - door.edge.col * TILE) * heading.x;
+    const toward = ((door.axis === 'horizontal' ? across.y : across.x) - doorLine(door)) * (door.axis === 'horizontal' ? heading.y : heading.x);
     if (toward <= 0) continue;
     const space = lockedSpaceEntered(position, across, spaces, locked);
     if (space !== null) return space;

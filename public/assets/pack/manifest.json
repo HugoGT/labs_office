@@ -2480,7 +2480,7 @@
           "imageKind": "door",
           "width": 512,
           "height": 1024,
-          "sha256": "9e0dcd367ab6bb3965a9223ac92e5786b26edf37a50f0b1a78e7c0bd2f264652"
+          "sha256": "f8bc1fc4d36e2fddaa42b972cc0c53deb893ce9e0ecedba400d5d27124be0e70"
         }
       ]
     },
@@ -2507,7 +2507,34 @@
           "imageKind": "door",
           "width": 512,
           "height": 1024,
-          "sha256": "84548dc6bf36a1780764fd92784dffd3dd81de629938cc8ffda483fd1d3ec180"
+          "sha256": "e3a819d32782c76b41a7b5764f8941ac4edff5acbc91d2b4bde7aedc916f2d44"
+        }
+      ]
+    },
+    {
+      "id": "door-glass-window",
+      "kind": "door",
+      "name": "Ventana",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "glass",
+      "variant": "window",
+      "anchor": {
+        "x": 64,
+        "y": 64
+      },
+      "footprint": {
+        "w": 2,
+        "h": 1
+      },
+      "files": [
+        {
+          "role": "sheet",
+          "path": "door/glass-window.png",
+          "imageKind": "door",
+          "width": 512,
+          "height": 1024,
+          "sha256": "6486bf76c59451e5b04f60e4df52bad85e2427235aa0fc9276ee4b0bda69d0c4"
         }
       ]
     }

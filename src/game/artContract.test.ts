@@ -12,9 +12,12 @@ import {
   DOOR_HINGES,
   DOOR_VARIANTS,
   DOOR_STEPS,
-  EDGE_WALL_THICKNESS,
+  DOOR_FRONT,
+  WINDOW_FRONT,
+  doorAxisOf,
   doorLeafDepthYs,
   doorFrameIndex,
+  doorFrontInset,
   doorHingeOf,
   doorSpanOf,
   doorVariantOf,
@@ -77,9 +80,7 @@ import {
   terrainVoidMask,
   validateArtImage,
   walkRowForFacing,
-  wallBodyRect,
   wallFrameIndex,
-  wallJointRect,
   type ArtImageKind,
   type RgbaImage,
   type TerrainMaterial,
@@ -284,14 +285,6 @@ describe('tile walls', () => {
     expect(wallFrameIndex('face', -1)).toBe(wallFrameIndex('face', 2));
   });
 
-  it('keeps the legacy edge-wall joint and body rects the door geometry hangs off', () => {
-    expect(EDGE_WALL_THICKNESS).toBe(16);
-    expect(wallJointRect({ col: 2, row: 1 })).toEqual({ x: 56, y: 24, width: 16, height: 16 });
-    expect(wallBodyRect({ axis: 'horizontal', col: 2, row: 1 })).toEqual({ x: 72, y: 24, width: 16, height: 16 });
-    expect(wallBodyRect({ axis: 'vertical', col: 2, row: 1 })).toEqual({ x: 56, y: 40, width: 16, height: 16 });
-    // The next joint along the horizontal edge starts where the body ends.
-    expect(wallJointRect({ col: 3, row: 1 }).x).toBe(72 + 16);
-  });
 });
 
 describe('countColors', () => {
@@ -835,14 +828,26 @@ describe('doors (#223, #233)', () => {
     expect(doorFrameIndex(180, 'end', 3)).toBe(30);
   });
 
-  it('states the two variants: 1.4 tiles of leaf and 0.3 of jamb each side, 2.2 and 0.4 for the double door', () => {
-    expect(DOOR_VARIANTS).toEqual(['single', 'double']);
+  it('states the three variants: 1.4 tiles of leaf and 0.3 of jamb each side, 2.2 and 0.4 for the double door, a window 1.4 wide in 2 tiles', () => {
+    expect(DOOR_VARIANTS).toEqual(['single', 'double', 'window']);
     expect(DOOR.variants).toEqual({
-      single: { span: 2, leafLength: 44, jamb: 10 },
-      double: { span: 3, leafLength: 70, jamb: 13 },
+      single: { span: 2, leafLength: 44, jamb: 10, frontWidth: 44 },
+      double: { span: 3, leafLength: 70, jamb: 13, frontWidth: 96 },
+      window: { span: 2, leafLength: 44, jamb: 10, frontWidth: 44 },
     });
     // Leaf and both jambs fill the span, in pixels.
     for (const { span, leafLength, jamb } of Object.values(DOOR.variants)) expect(leafLength + 2 * jamb).toBe(span * ART_TILE);
+  });
+
+  it('shows a single door 1.4 tiles wide from the front: 0.1 of frame each side of a 1.2 doorway, the wall on the rest', () => {
+    const { frontWidth } = DOOR.variants.single;
+    expect(frontWidth / ART_TILE).toBeCloseTo(1.4, 1);
+    expect((frontWidth - 2 * DOOR_FRONT.frame) / ART_TILE).toBeCloseTo(1.2, 1);
+    expect(doorFrontInset('door-wood')).toBe(10);
+    // The double door and the window keep their own: the double fills its span.
+    expect(doorFrontInset('door-wood-double')).toBe(0);
+    // A window is as wide as a single door's frame in its two tiles (L24).
+    expect(doorFrontInset('door-glass-window')).toBe(10);
   });
 
   it('tells the double door from the single one by the piece id: 2 and 3 tiles of wall', () => {
@@ -850,6 +855,21 @@ describe('doors (#223, #233)', () => {
     expect(doorVariantOf('door-wood-double')).toBe('double');
     expect(doorSpanOf('door-wood')).toBe(2);
     expect(doorSpanOf('door-wood-double')).toBe(3);
+    expect(doorVariantOf('door-glass-window')).toBe('window');
+    expect(doorSpanOf('door-glass-window')).toBe(2);
+  });
+
+  it('stands a door in a horizontal run for 0 and 180 and in a vertical one for 90 and 270 (tile walls)', () => {
+    expect(([0, 90, 180, 270] as const).map(doorAxisOf)).toEqual(['horizontal', 'vertical', 'horizontal', 'vertical']);
+  });
+
+  it('fills the bottom two tiles of the wall with a front door, and its face from the dark band down to the bottom tile with a window (S10, S11)', () => {
+    // Frame pixels, the frame's top on the top of the wall: the wall is 96px tall, its dark band 19px.
+    expect(DOOR_FRONT).toEqual({ top: 32, bottom: 96, frame: 3 });
+    expect(WINDOW_FRONT).toEqual({ top: 31, bottom: 64 });
+    // 0.4 tiles under the band, the wall between them (L22, L23), and over the bottom tile, which stays the wall's.
+    expect((WINDOW_FRONT.top - WALL.topHeight) / ART_TILE).toBeCloseTo(0.4, 1);
+    expect(WINDOW_FRONT.bottom).toBe(WALL.frame.height * 2);
   });
 
   it('hinges a single door at the end its turn puts it at, going round clockwise from the west end, and a double door at its start', () => {
@@ -858,60 +878,48 @@ describe('doors (#223, #233)', () => {
     for (const rotation of [0, 90, 180, 270] as const) expect(doorHingeOf('door-wood-double', rotation)).toBe('start');
   });
 
-  it('draws a door with its anchor on the middle of its span', () => {
+  it('draws a door with its anchor on the middle of its span: on the top of the bottom tile of the wall in a horizontal run, the middle of the column in a vertical one', () => {
     for (const span of [2, 3]) {
-      expect(doorPlacement({ col: 4, row: 6, axis: 'horizontal' }, span)).toEqual({ x: 4 * 32 + (span * 32) / 2 - 64, y: 6 * 32 - 64 });
-      expect(doorPlacement({ col: 4, row: 6, axis: 'vertical' }, span)).toEqual({ x: 4 * 32 - 64, y: 6 * 32 + (span * 32) / 2 - 64 });
+      // The frame's top is the top of the wall: the wall of row 6 covers rows 5 to 7.
+      expect(doorPlacement('horizontal', 4, 6, span)).toEqual({ x: 4 * 32 + (span * 32) / 2 - 64, y: 5 * 32 });
+      expect(doorPlacement('vertical', 4, 6, span)).toEqual({ x: 4 * 32 + 16 - 64, y: 6 * 32 + (span * 32) / 2 - 64 });
     }
   });
 
-  it('cuts a door frame into its leaves and the two jambs, each jamb sorted just under the post joint it merges with', () => {
-    // A single door on the horizontal edge at (4, 6): the span runs from frame x 32 to 96, the jambs are 10px.
-    const horizontal = doorSlices({ col: 4, row: 6, axis: 'horizontal' }, 'door-wood');
-    expect(horizontal.leaves).toEqual([{ x: 42, y: 0, width: 44, height: 128 }]);
-    expect(horizontal.jambs).toEqual([
-      { crop: { x: 32, y: 0, width: 10, height: 128 }, depthY: 6 * 32 + 7 },
-      { crop: { x: 86, y: 0, width: 10, height: 128 }, depthY: 6 * 32 + 7 },
+  it('cuts the frame of a door in a vertical run into its leaves and the two jambs, each jamb sorted by its own bottom', () => {
+    const single = doorSlices(6, 'door-wood');
+    expect(single.leaves).toEqual([{ x: 0, y: 42, width: 128, height: 44 }]);
+    expect(single.jambs).toEqual([
+      { crop: { x: 0, y: 32, width: 128, height: 10 }, depthY: 6 * 32 + 10 },
+      { crop: { x: 0, y: 86, width: 128, height: 10 }, depthY: 8 * 32 },
     ]);
-    // A double door down the vertical edge at (4, 6), 3 tiles: the end jamb sorts under the joint three rows down, not the first one.
-    const vertical = doorSlices({ col: 4, row: 6, axis: 'vertical' }, 'door-wood-double');
+    // A double door from row 6, 3 tiles: the end jamb sorts at the bottom of the span, three rows down.
+    const vertical = doorSlices(6, 'door-wood-double');
     // Its two leaves are cut apart at the middle of the span, so each sorts on its own.
     expect(vertical.leaves).toEqual([
       { x: 0, y: 29, width: 128, height: 35 },
       { x: 0, y: 64, width: 128, height: 35 },
     ]);
     expect(vertical.jambs).toEqual([
-      { crop: { x: 0, y: 16, width: 128, height: 13 }, depthY: 6 * 32 + 7 },
-      { crop: { x: 0, y: 99, width: 128, height: 13 }, depthY: 9 * 32 + 7 },
+      { crop: { x: 0, y: 16, width: 128, height: 13 }, depthY: 6 * 32 + 13 },
+      { crop: { x: 0, y: 99, width: 128, height: 13 }, depthY: 9 * 32 },
     ]);
   });
 
-  it('sorts each leaf of a door by the lowest pixel it draws in each frame, so an avatar below the leaf stands in front of it', () => {
-    const horizontal = { col: 4, row: 6, axis: 'horizontal' } as const;
-    const vertical = { col: 4, row: 6, axis: 'vertical' } as const;
-    // Horizontal, opening down: the leaf lies on the edge, then swings its whole length below it.
-    expect(doorLeafDepthYs(horizontal, 'door-wood', 0, 'start', 0)[0]).toBeCloseTo(6 * 32 + 3);
-    expect(doorLeafDepthYs(horizontal, 'door-wood', 0, 'start', 1)[0]).toBeCloseTo(6 * 32 + 44 * Math.sin(Math.PI / 6) + 3);
-    expect(doorLeafDepthYs(horizontal, 'door-wood', 0, 'start', 3)[0]).toBeCloseTo(6 * 32 + 44 + 3);
-    // Opening up, the leaf never goes below the edge.
-    expect(doorLeafDepthYs(horizontal, 'door-wood', 180, 'start', 3)[0]).toBeCloseTo(6 * 32 + 3);
+  it('sorts each leaf of a door in a vertical run by the lowest pixel it draws in each frame, so an avatar below the leaf stands in front of it', () => {
     // Vertical, hinged at its north end: the leaf runs down the span when closed, and hangs from the hinge when open.
-    expect(doorLeafDepthYs(vertical, 'door-wood', 90, 'start', 0)).toHaveLength(1);
-    expect(doorLeafDepthYs(vertical, 'door-wood', 90, 'start', 0)[0]).toBeCloseTo(6 * 32 + 10 + 44);
-    expect(doorLeafDepthYs(vertical, 'door-wood', 90, 'start', 3)[0]).toBeCloseTo(6 * 32 + 10 + 3);
-    expect(doorLeafDepthYs(vertical, 'door-wood', 90, 'start', 2)[0]).toBeCloseTo(6 * 32 + 10 + 44 * Math.cos(Math.PI / 3) + 3 * Math.sin(Math.PI / 3));
+    expect(doorLeafDepthYs(6, 'door-wood', 'start', 0)).toHaveLength(1);
+    expect(doorLeafDepthYs(6, 'door-wood', 'start', 0)[0]).toBeCloseTo(6 * 32 + 10 + 44);
+    expect(doorLeafDepthYs(6, 'door-wood', 'start', 3)[0]).toBeCloseTo(6 * 32 + 10 + 3);
+    expect(doorLeafDepthYs(6, 'door-wood', 'start', 2)[0]).toBeCloseTo(6 * 32 + 10 + 44 * Math.cos(Math.PI / 3) + 3 * Math.sin(Math.PI / 3));
     // A double door hinges its first leaf at the north end and its second at the south end: open, each sorts at its own hinge,
     // so the first one no longer takes the depth of the second and covers an avatar standing below it.
-    const closed = doorLeafDepthYs(vertical, 'door-wood-double', 90, 'start', 0);
+    const closed = doorLeafDepthYs(6, 'door-wood-double', 'start', 0);
     expect(closed[0]).toBeCloseTo(6 * 32 + 13 + 35);
     expect(closed[1]).toBeCloseTo(6 * 32 + 83);
-    const open = doorLeafDepthYs(vertical, 'door-wood-double', 90, 'start', 3);
+    const open = doorLeafDepthYs(6, 'door-wood-double', 'start', 3);
     expect(open[0]).toBeCloseTo(6 * 32 + 13 + 3);
     expect(open[1]).toBeCloseTo(6 * 32 + 83 + 3);
-    // On a horizontal edge both leaves swing the same way, so they sort together.
-    const across = doorLeafDepthYs(horizontal, 'door-wood-double', 0, 'start', 3);
-    expect(across[0]).toBeCloseTo(6 * 32 + 35 + 3);
-    expect(across[1]).toBeCloseTo(6 * 32 + 35 + 3);
   });
 
 });

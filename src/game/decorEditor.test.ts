@@ -202,136 +202,107 @@ describe('decorPickAt', () => {
   });
 });
 
-describe('decorPlacementAllowed: doors (#223, #233)', () => {
+describe('decorPlacementAllowed: doors and windows in tile walls (#223, #233, S6-S10)', () => {
   const DOOR: DecorPieceInfo = { kind: 'door', footprint: { w: 2, h: 1 } };
   const DOUBLE: DecorPieceInfo = { kind: 'door', footprint: { w: 3, h: 1 } };
-  const doorBrush = (rotation: 0 | 90 | 180 | 270 = 0): DecorBrush => ({ kind: 'piece', piece: 'door-wood', info: DOOR, rotation });
-  const doubleBrush = (rotation: 0 | 90 | 180 | 270 = 0): DecorBrush => ({ kind: 'piece', piece: 'door-wood-double', info: DOUBLE, rotation });
+  const brush = (piece: string, rotation: 0 | 90 | 180 | 270 = 0): DecorBrush => ({ kind: 'piece', piece, info: piece.endsWith('-double') ? DOUBLE : DOOR, rotation });
+  const doorBrush = (rotation: 0 | 90 | 180 | 270 = 0): DecorBrush => brush('door-wood', rotation);
+  const doubleBrush = (rotation: 0 | 90 | 180 | 270 = 0): DecorBrush => brush('door-wood-double', rotation);
+  const windowBrush = (rotation: 0 | 90 | 180 | 270 = 0): DecorBrush => brush('door-glass-window', rotation);
   const doorInfo = (piece: string): DecorPieceInfo | null => (piece === 'door-wood-double' ? DOUBLE : piece.startsWith('door-') ? DOOR : infoOf(piece));
-  /** The lawn of `ground()` with a wall post (grid vertex) of brick on each given `[col, row]`, and the wall tiles those posts touch. */
-  function withPosts(posts: ReadonlyArray<readonly [number, number]>): DecorGround {
-    const walls = new Array<string | null>(WIDTH * HEIGHT).fill(null);
-    for (const [col, row] of posts) walls[at(col, row)] = 'wall-brick';
-    const wallTiles = coveredTiles(wallFootprintRects({ width: WIDTH, height: HEIGHT, walls }), WIDTH, HEIGHT);
-    return { ...ground(), walls, wallTiles };
-  }
+  const W = 14;
+  const H = 12;
+  const tile = (tx: number, ty: number): number => ty * W + tx;
   /**
-   * A closed room of tiles 2..6 x 4..6 (brick posts all round vertices
-   * 2..7 x 4..7, the corner (7, 4) glass) and a brick stub on row 1 (posts 2..4).
+   * A lawn of 14x12 with a horizontal run on row 2 (columns 1..9, glass from 6 on) and a vertical
+   * run in column 11 (rows 2..9), and the wall tiles they touch.
    */
-  function walled(): DecorGround {
-    const posts: Array<[number, number]> = [];
-    for (let tx = 2; tx <= 7; tx += 1) posts.push([tx, 4], [tx, 7]);
-    for (const ty of [5, 6]) posts.push([2, ty], [7, ty]);
-    for (const tx of [2, 3, 4]) posts.push([tx, 1]);
-    const base = withPosts(posts);
-    const walls = [...base.walls!];
-    walls[at(7, 4)] = 'wall-glass';
-    return { ...base, walls };
+  function walled(extra: ReadonlyArray<readonly [number, number]> = [], drop: ReadonlyArray<readonly [number, number]> = []): DecorGround {
+    const walls = new Array<string | null>(W * H).fill(null);
+    for (let tx = 1; tx <= 9; tx += 1) walls[tile(tx, 2)] = tx >= 6 ? 'wall-glass' : 'wall-brick';
+    for (let ty = 2; ty <= 9; ty += 1) walls[tile(11, ty)] = 'wall-brick';
+    for (const [tx, ty] of extra) walls[tile(tx, ty)] = 'wall-brick';
+    for (const [tx, ty] of drop) walls[tile(tx, ty)] = null;
+    const wallTiles = coveredTiles(wallFootprintRects({ width: W, height: H, walls }), W, H);
+    return { width: W, height: H, walkable: new Array<boolean>(W * H).fill(true), wallTiles, walls };
   }
   const none: readonly DecorItem[] = [];
 
-  it('takes a door two tiles wide between a post at each end of its span, turned either way along the wall', () => {
-    expect(decorPlacementAllowed(none, infoOf, walled(), null, at(3, 4), doorBrush(0))).toBe(true);
-    expect(decorPlacementAllowed(none, infoOf, walled(), null, at(5, 4), doorBrush(180))).toBe(true);
-    expect(decorPlacementAllowed(none, infoOf, walled(), null, at(2, 5), doorBrush(90))).toBe(true);
-    expect(decorPlacementAllowed(none, infoOf, walled(), null, at(7, 5), doorBrush(270))).toBe(true);
-    expect(decorPlacementAllowed(none, infoOf, walled(), null, at(3, 7), doorBrush(0))).toBe(true);
+  it('takes a door or a window between two walls of a horizontal run, turned either way along it, of any material (S7, S10, S11)', () => {
+    expect(decorPlacementAllowed(none, infoOf, walled(), null, tile(2, 2), doorBrush(0))).toBe(true);
+    expect(decorPlacementAllowed(none, infoOf, walled(), null, tile(4, 2), doorBrush(180))).toBe(true);
+    expect(decorPlacementAllowed(none, infoOf, walled(), null, tile(5, 2), doorBrush(0))).toBe(true);
+    expect(decorPlacementAllowed(none, infoOf, walled(), null, tile(2, 2), doubleBrush(0))).toBe(true);
+    expect(decorPlacementAllowed(none, infoOf, walled(), null, tile(6, 2), windowBrush(0))).toBe(true);
+    expect(decorPlacementAllowed(none, infoOf, walled(), null, tile(6, 2), windowBrush(180))).toBe(true);
   });
 
-  it('takes a double door three tiles wide between the posts at its two ends, and refuses it where its span has none', () => {
-    expect(decorPlacementAllowed(none, infoOf, walled(), null, at(2, 4), doubleBrush(0))).toBe(true);
-    expect(decorPlacementAllowed(none, infoOf, walled(), null, at(3, 7), doubleBrush(180))).toBe(true);
-    expect(decorPlacementAllowed(none, infoOf, withPosts([[2, 3], [2, 6]]), null, at(2, 3), doubleBrush(90))).toBe(true);
-    // The span of three needs a post three vertices away: (5, 4) has none at (8, 4), and the room's left wall has none at (2, 8).
-    expect(decorPlacementAllowed(none, infoOf, walled(), null, at(5, 4), doubleBrush(0))).toBe(false);
-    expect(decorPlacementAllowed(none, infoOf, walled(), null, at(2, 5), doubleBrush(90))).toBe(false);
-    // A door two tiles wide fits there, where the double one does not.
-    expect(decorPlacementAllowed(none, infoOf, walled(), null, at(5, 4), doorBrush(0))).toBe(true);
+  it('refuses a door or a window with no wall past either end or under its span, or off the run (S7)', () => {
+    for (const piece of [doorBrush(0), windowBrush(0)]) {
+      expect(decorPlacementAllowed(none, infoOf, walled(), null, tile(1, 2), piece)).toBe(false);
+      expect(decorPlacementAllowed(none, infoOf, walled(), null, tile(8, 2), piece)).toBe(false);
+      expect(decorPlacementAllowed(none, infoOf, walled(), null, tile(3, 3), piece)).toBe(false);
+      expect(decorPlacementAllowed(none, infoOf, walled([], [[4, 2]]), null, tile(3, 2), piece)).toBe(false);
+      expect(decorPlacementAllowed(none, infoOf, ground(), null, at(3, 4), piece)).toBe(false);
+    }
+    expect(decorPlacementAllowed(none, infoOf, walled(), null, tile(7, 2), doubleBrush(0))).toBe(false);
   });
 
-  it('takes a door between two different materials (S16)', () => {
-    // Brick on one end, glass on the other.
-    expect(decorPlacementAllowed(none, infoOf, walled(), null, at(5, 4), doorBrush(0))).toBe(true);
+  it('never puts a window in a vertical run, where a door goes in its dark top (S8, S9)', () => {
+    expect(decorPlacementAllowed(none, infoOf, walled(), null, tile(11, 3), windowBrush(90))).toBe(false);
+    expect(decorPlacementAllowed(none, infoOf, walled(), null, tile(11, 3), windowBrush(270))).toBe(false);
+    expect(decorPlacementAllowed(none, infoOf, walled(), null, tile(11, 3), doorBrush(90))).toBe(true);
+    expect(decorPlacementAllowed(none, infoOf, walled(), null, tile(11, 3), doubleBrush(270))).toBe(true);
+    // The run's face, its bottom three tiles, takes none.
+    expect(decorPlacementAllowed(none, infoOf, walled(), null, tile(11, 7), doorBrush(90))).toBe(false);
   });
 
-  it('takes a door between two lone posts, whatever walls run from them and with no wall between (S3)', () => {
-    expect(decorPlacementAllowed(none, infoOf, withPosts([[3, 4], [5, 4]]), null, at(3, 4), doorBrush(0))).toBe(true);
-    expect(decorPlacementAllowed(none, infoOf, withPosts([[3, 4], [3, 6]]), null, at(3, 4), doorBrush(90))).toBe(true);
-    // An L: the wall turns at the corner (3, 4) and runs down, the span goes right to a post that has another wall running up.
-    const bent = withPosts([[3, 4], [3, 5], [3, 6], [3, 7], [5, 4], [5, 3], [5, 2]]);
-    expect(decorPlacementAllowed(none, infoOf, bent, null, at(3, 4), doorBrush(0))).toBe(true);
-    // An open room (no walls closing it) takes the door as well.
-    const open = walled();
-    const walls = [...open.walls!];
-    walls[at(7, 5)] = null;
-    expect(decorPlacementAllowed(none, infoOf, { ...open, walls }, null, at(3, 4), doorBrush(0))).toBe(true);
-  });
-
-  it('refuses a door with a post missing at either end, off a wall, across the wall line or on a wall end', () => {
-    const noEnd = walled();
-    const walls = [...noEnd.walls!];
-    walls[at(5, 4)] = null;
-    expect(decorPlacementAllowed(none, infoOf, { ...noEnd, walls }, null, at(3, 4), doorBrush(0))).toBe(false);
-    expect(decorPlacementAllowed(none, infoOf, { ...noEnd, walls }, null, at(5, 4), doorBrush(0))).toBe(false);
-    expect(decorPlacementAllowed(none, infoOf, withPosts([[3, 4]]), null, at(3, 4), doorBrush(0))).toBe(false);
-    expect(decorPlacementAllowed(none, infoOf, withPosts([[5, 4]]), null, at(3, 4), doorBrush(0))).toBe(false);
-    expect(decorPlacementAllowed(none, infoOf, walled(), null, at(3, 6), doorBrush(0))).toBe(false);
-    expect(decorPlacementAllowed(none, infoOf, walled(), null, at(3, 4), doorBrush(90))).toBe(false);
-    expect(decorPlacementAllowed(none, infoOf, walled(), null, at(1, 4), doorBrush(0))).toBe(false);
-    expect(decorPlacementAllowed(none, infoOf, walled(), null, at(6, 4), doorBrush(0))).toBe(false);
-    expect(decorPlacementAllowed(none, infoOf, ground(), null, at(3, 4), doorBrush(0))).toBe(false);
-  });
-
-  it('refuses a door whose span leaves the map', () => {
-    expect(decorPlacementAllowed(none, infoOf, withPosts([[8, 4], [9, 4]]), null, at(8, 4), doorBrush(0))).toBe(false);
-    expect(decorPlacementAllowed(none, infoOf, withPosts([[8, 4]]), null, at(8, 4), doorBrush(0))).toBe(false);
-    expect(decorPlacementAllowed(none, infoOf, withPosts([[3, 6], [3, 7]]), null, at(3, 6), doorBrush(90))).toBe(false);
-  });
-
-  it('refuses a door whose side tiles are water or another item, and never in a desk', () => {
+  it('refuses a door in a vertical run whose sides are water, a wall or another item, and any door in a desk', () => {
     const wet = walled();
     const walkable = [...wet.walkable];
-    walkable[at(4, 3)] = false;
-    expect(decorPlacementAllowed(none, infoOf, { ...wet, walkable }, null, at(3, 4), doorBrush(0))).toBe(false);
-    // Water at the far end of a double door's span.
-    const wetEnd = [...wet.walkable];
-    wetEnd[at(4, 3)] = false;
-    expect(decorPlacementAllowed(none, infoOf, { ...wet, walkable: wetEnd }, null, at(2, 4), doubleBrush(0))).toBe(false);
-    expect(decorPlacementAllowed([{ index: at(3, 3), piece: 'chair-wood', rotation: 0 }], infoOf, walled(), null, at(3, 4), doorBrush(0))).toBe(false);
-    expect(decorPlacementAllowed([{ index: at(4, 4), piece: 'chair-wood', rotation: 0 }], infoOf, walled(), null, at(3, 4), doorBrush(0))).toBe(false);
-    expect(decorPlacementAllowed(none, infoOf, walled(), { x: 2, y: 3, w: 3, h: 3 }, at(3, 4), doorBrush(0))).toBe(false);
+    walkable[tile(12, 4)] = false;
+    expect(decorPlacementAllowed(none, infoOf, { ...wet, walkable }, null, tile(11, 3), doorBrush(90))).toBe(false);
+    expect(decorPlacementAllowed([{ index: tile(10, 3), piece: 'chair-wood', rotation: 0 }], infoOf, walled(), null, tile(11, 3), doorBrush(90))).toBe(false);
+    expect(decorPlacementAllowed(none, infoOf, walled([[12, 5]]), null, tile(11, 3), doorBrush(90))).toBe(false);
+    expect(decorPlacementAllowed(none, infoOf, walled(), { x: 1, y: 1, w: 3, h: 3 }, tile(2, 2), doorBrush(0))).toBe(false);
   });
 
-  it('keeps a door off another door it overlaps, but turns one in place or moves it', () => {
-    const first: DecorItem[] = [{ index: at(3, 4), piece: 'door-wood', rotation: 0 }];
-    // A single door and the one next to it share a tile: a double door is its own item now, not two of these.
-    expect(decorPlacementAllowed(first, doorInfo, walled(), null, at(4, 4), doorBrush(0))).toBe(false);
-    expect(decorPlacementAllowed(first, doorInfo, walled(), null, at(2, 4), doubleBrush(0))).toBe(false);
-    // Side by side without sharing a tile is fine, and so is turning one in place.
-    expect(decorPlacementAllowed(first, doorInfo, walled(), null, at(5, 4), doorBrush(0))).toBe(true);
-    expect(decorPlacementAllowed(first, doorInfo, walled(), null, at(3, 4), doorBrush(180))).toBe(true);
-    expect(decorPlacementAllowed(first, doorInfo, walled(), null, at(5, 4), { ...doorBrush(0), from: at(3, 4) })).toBe(true);
+  it('replaces a window with a door and a door with a window, and a door with another one, but no other piece (S6)', () => {
+    const window: DecorItem = { index: tile(2, 2), piece: 'door-glass-window', rotation: 0 };
+    const door: DecorItem = { index: tile(3, 2), piece: 'door-wood', rotation: 0 };
+    expect(decorPlacementAllowed([window], doorInfo, walled(), null, tile(2, 2), doorBrush(0))).toBe(true);
+    expect(decorPlacementAllowed([window], doorInfo, walled(), null, tile(3, 2), doorBrush(0))).toBe(true);
+    expect(decorPlacementAllowed([door], doorInfo, walled(), null, tile(4, 2), windowBrush(0))).toBe(true);
+    expect(decorPlacementAllowed([door], doorInfo, walled(), null, tile(2, 2), doubleBrush(0))).toBe(true);
+    // A chair over a door's doorway is refused as before.
+    expect(decorPlacementAllowed([door], doorInfo, walled(), null, tile(3, 1), chairBrush())).toBe(false);
   });
 
-  it('keeps a piece that replaces a door off the wall under it, as with no door there', () => {
-    // Door openings do not cut tile walls (doors move onto tile walls in their own change): the door's tiles stay wall tiles.
-    const door: DecorItem = { index: at(3, 4), piece: 'door-wood', rotation: 0 };
-    const plain = walled();
-    expect(plain.wallTiles[at(3, 4)]).toBe(true);
-    expect(decorPlacementAllowed([], doorInfo, plain, null, at(3, 4), chairBrush())).toBe(false);
-    expect(decorPlacementAllowed([door], doorInfo, plain, null, at(3, 4), chairBrush())).toBe(false);
-    expect(decorPlacementAllowed([door], doorInfo, plain, null, at(4, 4), chairBrush())).toBe(false);
-    // Moving the door away and a chair onto the wall above it: still the wall.
-    expect(decorPlacementAllowed([door], doorInfo, plain, null, at(3, 3), { ...chairBrush(), from: at(3, 4) })).toBe(false);
-    // Another door over it still goes, and a chair anywhere else is judged as before.
-    expect(decorPlacementAllowed([door], doorInfo, plain, null, at(3, 4), doorBrush(180))).toBe(true);
-    expect(decorPlacementAllowed([door], doorInfo, plain, null, at(9, 3), chairBrush())).toBe(true);
+  it('refuses a window over another window, and takes it right beside one (L23)', () => {
+    const window: DecorItem = { index: tile(2, 2), piece: 'door-glass-window', rotation: 0 };
+    expect(decorPlacementAllowed([window], doorInfo, walled(), null, tile(3, 2), windowBrush(0))).toBe(false);
+    expect(decorPlacementAllowed([window], doorInfo, walled(), null, tile(1, 2), windowBrush(0))).toBe(false);
+    expect(decorPlacementAllowed([window], doorInfo, walled(), null, tile(4, 2), windowBrush(0))).toBe(true);
+  });
+
+  it('takes a window right beside a door and a door right beside a window (L22)', () => {
+    const door: DecorItem = { index: tile(2, 2), piece: 'door-wood', rotation: 0 };
+    const window: DecorItem = { index: tile(2, 2), piece: 'door-glass-window', rotation: 0 };
+    // The piece spans columns 2-3: the brush on 4-5 is right beside it.
+    expect(decorPlacementAllowed([door], doorInfo, walled(), null, tile(4, 2), windowBrush(0))).toBe(true);
+    expect(decorPlacementAllowed([window], doorInfo, walled(), null, tile(4, 2), doorBrush(0))).toBe(true);
+    expect(decorPlacementAllowed([window], doorInfo, walled(), null, tile(4, 2), windowBrush(0))).toBe(true);
+  });
+
+  it('closes the wall of a door that leaves for a piece taking its place, as with no door there', () => {
+    const door: DecorItem = { index: tile(3, 2), piece: 'door-wood', rotation: 0 };
+    expect(decorPlacementAllowed([door], doorInfo, walled(), null, tile(3, 3), { ...chairBrush(), from: tile(3, 2) })).toBe(false);
+    expect(decorPlacementAllowed([door], doorInfo, walled(), null, tile(3, 6), { ...chairBrush(), from: tile(3, 2) })).toBe(true);
   });
 
   it('still keeps every other piece off the tiles a wall touches', () => {
-    expect(decorPlacementAllowed(none, infoOf, walled(), null, at(3, 4), chairBrush())).toBe(false);
-    expect(decorPlacementAllowed(none, infoOf, walled(), null, at(9, 3), chairBrush())).toBe(true);
+    expect(decorPlacementAllowed(none, infoOf, walled(), null, tile(3, 3), chairBrush())).toBe(false);
+    expect(decorPlacementAllowed(none, infoOf, walled(), null, tile(3, 6), chairBrush())).toBe(true);
   });
 });
 

@@ -1,243 +1,291 @@
 /**
- * Doors (#223, #233): a door is an item of the office decor layer
- * (`officeDecor.ts`) that stands on a wall's grid line instead of on a tile.
- * Its anchor tile names the first edge it spans: the top edge of the tile for
- * rotation 0 and 180, the left one for 90 and 270. A door spans 2 tiles of the
- * line, a double door 3 (`doorSpanOf`): the leaf in the middle and a jamb at
- * each end that merges with the wall there. Its rotation is the side it opens
- * into, the chair's facing (`decorChairFacing`: 0 down, 90 right, 180 up, 270
- * left). A door goes between two standing wall posts (`doorOnWall`), one at
- * each end of its span, of any material and with any wall around them: a
- * corner works as well as a straight wall, and the edges between them need no
- * wall.
+ * Doors and windows (#223, #233, tile walls): a door or a window is an item
+ * of the office decor layer (`officeDecor.ts`) that stands in a wall run
+ * instead of on the floor. Its anchor is the wall tile (the tile a wall is
+ * placed on, `wallPostTiles`) of its first column (rotations 0 and 180, a
+ * horizontal run) or row (90 and 270, a vertical run), and it spans 2 wall
+ * tiles from there, a double door 3 (`doorSpanOf`). Its rotation is the side
+ * it opens into, the chair's facing (`decorChairFacing`: 0 down, 90 right,
+ * 180 up, 270 left).
  *
- * A door opens the edges it spans: the snapshot leaves their wall body out and
- * clips the posts' joints along them (`terrainSnapshot`, `wallFootprintRects`),
- * so the room, Arcade and the double-click path all let people through.
+ * It goes between two walls (`doorOnWall`, S7): the run holds a wall on every
+ * tile of its span and on the tile past each end. In a horizontal run a door
+ * takes the bottom two tiles of the wall and lets people through its whole
+ * height (S10); in a vertical one it takes its own tiles, dark top included
+ * (S9). A window only stands in a horizontal run (S8), never opens the wall,
+ * and is drawn over its face (S11). A door or window placed over another
+ * replaces it (S6, `doorsReplacedBy`), and the wall under one that goes stays.
  *
  * Shared by the room, the server's rules and the scene. Import-free like
  * `officeDecor.ts`: explicit `.ts` imports of other pure modules only.
  */
 
-import { DOOR_STEPS, EDGE_WALL_THICKNESS, doorHingeOf, doorSpanOf, doorVariantOf, type DoorHinge, type GridEdge } from './artContract.ts';
+import { DOOR_FRONT, DOOR_STEPS, doorAxisOf, doorFrontInset, doorHingeOf, doorSpanOf, doorVariantOf, type DoorAxis, type DoorHinge } from './artContract.ts';
 import { AVATAR_BODY_CENTER_OFFSET, type GeometryPoint } from './avatarGeometry.ts';
-import { decorChairFacing, type DecorItem, type DecorTileRect } from './officeDecor.ts';
-import { wallFootprintRects, type WallGrid } from './officeLayout.ts';
+import { decorChairFacing, decorFootprint, isRotatable, rectTiles, type DecorEdit, type DecorItem, type DecorKind, type DecorTileRect } from './officeDecor.ts';
+import { wallFootprintRects, type WallGrid, type WallOpening } from './officeLayout.ts';
 import { coveredTiles, type CollisionRect } from './pieceCollisions.ts';
 
 /** Same as `TILE` in mapData.ts (pinned by the tests through the footprint pixels). */
 const DOOR_TILE = 32;
 
-/** How far past its tiles, across the edge, an avatar's body center opens a door: it swings open just before someone reaches it. */
+/** How far past its tiles, across the wall, an avatar's body center opens a door: it swings open just before someone reaches it. */
 export const DOOR_OPEN_REACH_PX = 6;
 
 const DOOR_PREFIX = 'door-';
 
-/** Whether a piece of the decor layer is a door, by its id (`<kind>-<name>`). */
+type DoorPlacement = Pick<DecorItem, 'index' | 'rotation' | 'piece'>;
+
+/** Whether a piece of the decor layer stands in a wall, a door or a window, by its id (`<kind>-<name>`). */
 export function isDoorPiece(piece: string): boolean {
   return piece.startsWith(DOOR_PREFIX);
+}
+
+/** Whether a piece of the decor layer is a window (`door-<material>-window`): it stands in a wall but never opens it. */
+export function isWindowPiece(piece: string): boolean {
+  return isDoorPiece(piece) && doorVariantOf(piece) === 'window';
 }
 
 function anchorOf(item: Pick<DecorItem, 'index'>, width: number): { tx: number; ty: number } {
   return { tx: item.index % width, ty: Math.floor(item.index / width) };
 }
 
-/** How many tiles of wall a door spans: 2 for a door, 3 for a double door. */
+/** How many wall tiles a door spans: 2 for a door or a window, 3 for a double door. */
 export function doorSpan(item: Pick<DecorItem, 'piece'>): number {
   return doorSpanOf(item.piece);
 }
 
-/** The first grid edge a door stands on: the top edge of its anchor tile for 0 and 180, the left edge for 90 and 270. */
-export function doorEdge(item: Pick<DecorItem, 'index' | 'rotation'>, width: number): GridEdge {
+/** The wall run a door stands in: horizontal for 0 and 180, vertical for 90 and 270. */
+export function doorAxis(item: Pick<DecorItem, 'rotation'>): DoorAxis {
+  return doorAxisOf(item.rotation);
+}
+
+/** The tile `step` wall tiles along a door's run from its anchor (negative: before it). */
+function alongRun(item: DoorPlacement, width: number, step: number): { tx: number; ty: number } {
   const { tx, ty } = anchorOf(item, width);
-  return { col: tx, row: ty, axis: item.rotation === 0 || item.rotation === 180 ? 'horizontal' : 'vertical' };
+  return doorAxis(item) === 'horizontal' ? { tx: tx + step, ty } : { tx, ty: ty + step };
 }
 
-/** Every grid edge a door spans, its start (west or north) first. */
-export function doorEdges(item: Pick<DecorItem, 'index' | 'rotation' | 'piece'>, width: number): GridEdge[] {
-  const first = doorEdge(item, width);
-  return Array.from({ length: doorSpan(item) }, (_, step) => (first.axis === 'horizontal' ? { ...first, col: first.col + step } : { ...first, row: first.row + step }));
+/** The wall tiles (row major) a door spans, its start (west or north) first. */
+export function doorTiles(item: DoorPlacement, width: number): number[] {
+  return Array.from({ length: doorSpan(item) }, (_, step) => {
+    const { tx, ty } = alongRun(item, width, step);
+    return ty * width + tx;
+  });
 }
 
-/** The two posts (grid vertices, row major) at the ends of a door's span: its start (west or north) first. */
-export function doorEndPosts(item: Pick<DecorItem, 'index' | 'rotation' | 'piece'>, width: number): [number, number] {
-  const { col, row, axis } = doorEdge(item, width);
-  const span = doorSpan(item);
-  return axis === 'horizontal' ? [row * width + col, row * width + col + span] : [row * width + col, (row + span) * width + col];
+/** The two wall tiles just past the ends of a door's span, the walls it stands between: its start (west or north) first. */
+export function doorEndPosts(item: DoorPlacement, width: number): [number, number] {
+  const before = alongRun(item, width, -1);
+  const after = alongRun(item, width, doorSpan(item));
+  return [before.ty * width + before.tx, after.ty * width + after.tx];
+}
+
+/** Every wall tile a door needs, start first: the wall before it, the ones it spans and the wall after it. */
+export function doorPosts(item: DoorPlacement, width: number): number[] {
+  const [start, end] = doorEndPosts(item, width);
+  return [start, ...doorTiles(item, width), end];
 }
 
 /**
- * Whether a door may stand where it is (#233): a wall post at each end of its
- * span, of any material and whatever walls meet there (a corner or a wall
- * running on both work), and nothing else: the edges between the posts need
- * no wall, since the door fills them. The one rule of the editor's ghost and
- * the room.
+ * Whether a door or window may stand where it is (S7, S8, S9, S10), the one
+ * rule of the editor's ghost and the room: a wall, of any material, on every
+ * tile it spans and on the tile past each end, all on the map. A window only
+ * stands in a horizontal run. In a horizontal run, the columns it spans hold
+ * that one wall and nothing stacked on it, so it stands in the wall's face; in
+ * a vertical run, its tiles are above the run's face, in its dark top.
  */
-export function doorOnWall(grid: Pick<WallGrid, 'width' | 'height' | 'walls'>, item: Pick<DecorItem, 'index' | 'rotation' | 'piece'>): boolean {
-  const { col, row, axis } = doorEdge(item, grid.width);
+export function doorOnWall(grid: Pick<WallGrid, 'width' | 'height' | 'walls'>, item: DoorPlacement): boolean {
+  const { width, height, walls } = grid;
+  const horizontal = doorAxis(item) === 'horizontal';
+  if (!horizontal && isWindowPiece(item.piece)) return false;
+  const standing = (tx: number, ty: number): boolean => tx >= 0 && ty >= 0 && tx < width && ty < height && walls[ty * width + tx] != null;
   const span = doorSpan(item);
-  const [endCol, endRow] = axis === 'horizontal' ? [col + span, row] : [col, row + span];
-  if (col < 0 || row < 0 || endCol >= grid.width || endRow >= grid.height) return false;
-  return grid.walls[row * grid.width + col] != null && grid.walls[endRow * grid.width + endCol] != null;
+  for (let step = -1; step <= span; step += 1) {
+    const { tx, ty } = alongRun(item, width, step);
+    if (!standing(tx, ty)) return false;
+  }
+  if (horizontal) {
+    for (let step = 0; step < span; step += 1) {
+      const { tx, ty } = alongRun(item, width, step);
+      if ([ty - 2, ty - 1, ty + 1, ty + 2].some((row) => standing(tx, row))) return false;
+    }
+    return true;
+  }
+  // The run must still be covered two tiles under the door's last tile: its face is the run's bottom three tiles.
+  const last = alongRun(item, width, span - 1);
+  const below = last.ty + 3;
+  return [below - 1, below, below + 1].some((row) => standing(last.tx, row));
 }
 
 /**
- * How far past its post, into the opening, a door's hinge blocks: the jamb
+ * The tiles of a door's footprint (`decorFootprint`) that are its own wall:
+ * the whole footprint in a horizontal run, the column in a vertical one. The
+ * room's and the ghost's "off every wall tile" rule skips them; a vertical
+ * door's tiles on each side, where its leaf swings, keep it.
+ */
+export function doorOwnWallTiles(item: DoorPlacement, width: number): Set<number> {
+  const rect = decorFootprint(item, { kind: 'door', footprint: { w: doorSpan(item), h: 1 } }, width);
+  const own = doorAxis(item) === 'horizontal' ? rect : { ...rect, x: rect.x + 1, w: 1 };
+  return new Set(rectTiles(own, width));
+}
+
+/**
+ * How far past its end, into the doorway, a door's hinge blocks: the jamb
  * and the thickness of the open leaf (`DOOR`: 10 + 6px), so a body leaving
  * along the hinge keeps off the open leaf.
  */
 export const DOOR_HINGE_STOP_PX = 16;
 
 /**
- * The strips each door on a wall (`doorOnWall`) blocks past its hinge post:
- * the post's joint is clipped at its vertex (`wallColliderRects`), and the
- * strip runs `DOOR_HINGE_STOP_PX` on from there along the opening, the
- * wall's thickness across. A single door has one hinge (`doorHingeOf`), a
- * double door one at each end. Arcade and the auto-walk only: the room
- * checks the body center, and the client is the stricter side.
+ * The strips each door on its wall (`doorOnWall`) blocks past its hinge end:
+ * `DOOR_HINGE_STOP_PX` along the doorway from that end, the whole doorway
+ * across (the wall's three tiles in a horizontal run, the column in a
+ * vertical one). A single door has one hinge (`doorHingeOf`), a double door
+ * one at each end; a window has none. A horizontal door narrower than its
+ * span (`doorFrontInset`: a single door, 1.2 tiles of doorway in 2) blocks
+ * the wall left at each end and its frame's jamb instead, at both ends.
+ * Arcade and the auto-walk only: the room checks the body center, and the
+ * client is the stricter side.
  */
 export function doorHingeStops(items: readonly DecorItem[], grid: Pick<WallGrid, 'width' | 'height' | 'walls'>): CollisionRect[] {
-  const half = EDGE_WALL_THICKNESS / 2;
   return items.flatMap((item) => {
-    if (!isDoorPiece(item.piece) || !doorOnWall(grid, item)) return [];
-    const { col, row, axis } = doorEdge(item, grid.width);
+    if (!isDoorPiece(item.piece) || isWindowPiece(item.piece) || !doorOnWall(grid, item)) return [];
+    const { tx, ty } = anchorOf(item, grid.width);
     const span = doorSpan(item);
+    const inset = doorFrontInset(item.piece);
+    if (doorAxis(item) === 'horizontal' && inset > 0) {
+      // Narrower than its span: the wall left at each end and the frame's jamb block, whichever the hinge.
+      const w = inset + DOOR_FRONT.frame;
+      return [tx * DOOR_TILE, (tx + span) * DOOR_TILE - w].map((x): CollisionRect => ({ x, y: (ty - 1) * DOOR_TILE, w, h: 3 * DOOR_TILE }));
+    }
     const hinges: DoorHinge[] = doorVariantOf(item.piece) === 'double' ? ['start', 'end'] : [doorHingeOf(item.piece, item.rotation)];
     return hinges.map((hinge): CollisionRect => {
-      if (axis === 'horizontal') {
-        const x = (hinge === 'start' ? col : col + span) * DOOR_TILE;
-        return { x: hinge === 'start' ? x : x - DOOR_HINGE_STOP_PX, y: row * DOOR_TILE - half, w: DOOR_HINGE_STOP_PX, h: 2 * half };
+      if (doorAxis(item) === 'horizontal') {
+        const x = hinge === 'start' ? tx * DOOR_TILE : (tx + span) * DOOR_TILE - DOOR_HINGE_STOP_PX;
+        return { x, y: (ty - 1) * DOOR_TILE, w: DOOR_HINGE_STOP_PX, h: 3 * DOOR_TILE };
       }
-      const y = (hinge === 'start' ? row : row + span) * DOOR_TILE;
-      return { x: col * DOOR_TILE - half, y: hinge === 'start' ? y : y - DOOR_HINGE_STOP_PX, w: 2 * half, h: DOOR_HINGE_STOP_PX };
+      const y = hinge === 'start' ? ty * DOOR_TILE : (ty + span) * DOOR_TILE - DOOR_HINGE_STOP_PX;
+      return { x: tx * DOOR_TILE, y, w: DOOR_TILE, h: DOOR_HINGE_STOP_PX };
     });
   });
 }
 
-/** The posts strictly between a door's two end posts, in order: the wall a door stands in front of. */
-export function doorInnerPosts(item: Pick<DecorItem, 'index' | 'rotation' | 'piece'>, width: number): number[] {
-  const { col, row, axis } = doorEdge(item, width);
-  return Array.from({ length: doorSpan(item) - 1 }, (_, step) => (axis === 'horizontal' ? row * width + col + 1 + step : (row + 1 + step) * width + col));
-}
-
-/** Every post of a door's span, the ends and the ones between, start first: the vertices the eraser takes the door by. */
-export function doorPosts(item: Pick<DecorItem, 'index' | 'rotation' | 'piece'>, width: number): number[] {
-  const [start, end] = doorEndPosts(item, width);
-  return [start, ...doorInnerPosts(item, width), end];
-}
-
 /**
- * The vertices straight across each end of a door's span, one row (or column)
- * to each side: the posts a wall may end at, against the door's end post
- * (#233). Their footprint touches the door's own tiles, but a wall there
- * stands beside the doorway, not in it, so the door keeps its swing. The ones
- * off the map are left out.
+ * The openings the doors of a decor layer make in the walls of `grid`, in
+ * layer order: every door standing on its wall (`doorOnWall`). A window
+ * opens nothing, and a stored door off its wall opens nothing either.
  */
-export function doorShoulders(item: Pick<DecorItem, 'index' | 'rotation' | 'piece'>, width: number, height: number): number[] {
-  const { col, row, axis } = doorEdge(item, width);
-  const span = doorSpan(item);
-  const horizontal = axis === 'horizontal';
-  const shoulders: number[] = [];
-  for (const along of [0, span]) {
-    for (const across of [-1, 1]) {
-      const [tx, ty] = horizontal ? [col + along, row + across] : [col + across, row + along];
-      if (tx >= 0 && ty >= 0 && tx < width && ty < height) shoulders.push(ty * width + tx);
-    }
-  }
-  return shoulders;
-}
-
-/** The grid edges a door stands on, as one key: two doors with the same one cover the same wall. */
-function doorKey(item: Pick<DecorItem, 'index' | 'rotation' | 'piece'>, width: number): string {
-  const { col, row, axis } = doorEdge(item, width);
-  return `${axis}:${col}:${row}:${doorSpan(item)}`;
-}
-
-/**
- * The wall posts to erase when the doors of `before` become `after` (#233):
- * the standing ones strictly between the ends of a door that no longer
- * covers those edges (removed, or moved), so the wall that stood behind it
- * does not come back. Not an end post of a door that stays, and not one where
- * another wall meets it across the door's line (a T): that wall is not under
- * the door. A door only turned in place covers the same edges and takes none.
- */
-export function wallsUnderLeftDoors(before: readonly DecorItem[], after: readonly DecorItem[], walls: readonly (string | null)[], width: number): number[] {
-  const height = walls.length / width;
-  const stays = new Set(after.filter((item) => isDoorPiece(item.piece)).map((item) => doorKey(item, width)));
-  const ends = doorPostSet(after, width);
-  const standing = (tx: number, ty: number): boolean => tx >= 0 && ty >= 0 && tx < width && ty < height && walls[ty * width + tx] != null;
-  const erased = new Set<number>();
-  for (const item of before) {
-    if (!isDoorPiece(item.piece) || stays.has(doorKey(item, width))) continue;
-    const horizontal = doorEdge(item, width).axis === 'horizontal';
-    for (const post of doorInnerPosts(item, width)) {
-      const [tx, ty] = [post % width, Math.floor(post / width)];
-      const crossed = horizontal ? standing(tx, ty - 1) || standing(tx, ty + 1) : standing(tx - 1, ty) || standing(tx + 1, ty);
-      if (walls[post] != null && !ends.has(post) && !crossed) erased.add(post);
-    }
-  }
-  return [...erased];
-}
-
-/** The edges the doors of a decor layer open, in layer order: every edge of every door's span. */
-export function doorOpenings(items: readonly DecorItem[], width: number): GridEdge[] {
-  return items.flatMap((item) => (isDoorPiece(item.piece) ? doorEdges(item, width) : []));
+export function doorOpenings(items: readonly DecorItem[], grid: Pick<WallGrid, 'width' | 'height' | 'walls'>): WallOpening[] {
+  return items.flatMap((item): WallOpening[] => {
+    if (!isDoorPiece(item.piece) || isWindowPiece(item.piece) || !doorOnWall(grid, item)) return [];
+    const { tx, ty } = anchorOf(item, grid.width);
+    const axis = doorAxis(item);
+    const inset = axis === 'horizontal' ? doorFrontInset(item.piece) : 0;
+    return [{ axis, tx, ty, span: doorSpan(item), ...(inset > 0 ? { inset } : {}) }];
+  });
 }
 
 /**
  * The tiles a wall touches once the decor layer is `after` (#223): a door
  * that goes away closes its wall again, so whatever takes its tiles must
  * keep off them like off any wall. The ground's own `wallTiles` when the
- * doors are the same (the usual case), or when it has no walls to rebuild
+ * doors open the same (the usual case), or when it has no walls to rebuild
  * from. Shared by the editor's ghost and the room's decor rule.
  */
 export function wallTilesAfter(
-  ground: Pick<WallGrid, 'width' | 'height'> & { readonly walls?: WallGrid['walls']; readonly openings?: readonly GridEdge[]; readonly wallTiles: readonly boolean[] },
+  ground: Pick<WallGrid, 'width' | 'height'> & { readonly walls?: WallGrid['walls']; readonly openings?: readonly WallOpening[]; readonly wallTiles: readonly boolean[] },
   after: readonly DecorItem[],
 ): readonly boolean[] {
-  const openings = doorOpenings(after, ground.width);
-  if (ground.walls === undefined || JSON.stringify(openings) === JSON.stringify(ground.openings ?? [])) return ground.wallTiles;
+  if (ground.walls === undefined) return ground.wallTiles;
   const { width, height, walls } = ground;
+  const openings = doorOpenings(after, { width, height, walls });
+  if (JSON.stringify(openings) === JSON.stringify(ground.openings ?? [])) return ground.wallTiles;
   return coveredTiles(wallFootprintRects({ width, height, walls, openings }), width, height);
 }
 
-/** Every post that ends a door's span: removing one would leave the door off its wall (repainting one keeps the door). */
+/**
+ * Whether a picked piece turns (the wheel, R): what turns of its kind
+ * (`isRotatable`), but a window never does, it only stands in a horizontal
+ * run (S8, L23).
+ */
+export function decorPieceTurns(piece: string, kind: DecorKind): boolean {
+  return isRotatable(kind) && !isWindowPiece(piece);
+}
+
+/** Every wall tile a door or window needs (`doorPosts`): removing one would leave it off its wall (repainting one keeps it). */
 export function doorPostSet(items: readonly DecorItem[], width: number): Set<number> {
-  return new Set(items.flatMap((item) => (isDoorPiece(item.piece) ? doorEndPosts(item, width) : [])));
+  return new Set(items.flatMap((item) => (isDoorPiece(item.piece) ? doorPosts(item, width) : [])));
 }
 
 /**
- * One door as drawn: its first edge, its span, its footprint (the tiles on
- * each side along the span) and the side it opens to (its rotation). A
- * single door hinges at the end its rotation puts it at (`doorHingeOf`); a
- * double door is drawn whole.
+ * The anchors of the doors and windows of `items` that the ones `placed`
+ * replace (S6): every other one sharing a wall tile with one of them
+ * (`doorTiles`). A door takes the place of a window and the other way round,
+ * and of another door too; the wall under them stays. A window never takes
+ * the place of another window (L23): one over another is refused, like any
+ * two pieces on the same tiles.
+ */
+export function doorsReplacedBy(items: readonly DecorItem[], placed: readonly DoorPlacement[], width: number): number[] {
+  const placedDoors = placed.filter((item) => isDoorPiece(item.piece));
+  if (placedDoors.length === 0) return [];
+  const anchors = new Set(placedDoors.map((item) => item.index));
+  return items
+    .filter(
+      (item) =>
+        isDoorPiece(item.piece) &&
+        !anchors.has(item.index) &&
+        placedDoors.some((door) => !(isWindowPiece(door.piece) && isWindowPiece(item.piece)) && doorTiles(item, width).some((tile) => doorTiles(door, width).includes(tile))),
+    )
+    .map((item) => item.index);
+}
+
+/** The edits of a click with the removals of the doors and windows its placements replace (`doorsReplacedBy`), so the preview shows them gone too. */
+export function withReplacedDoors(items: readonly DecorItem[], click: readonly DecorEdit[], width: number): DecorEdit[] {
+  const placed = click.flatMap((edit): DoorPlacement[] => (edit.item === null ? [] : [{ index: edit.index, ...edit.item }]));
+  const leaving = new Set(click.filter((edit) => edit.item === null).map((edit) => edit.index));
+  const replaced = doorsReplacedBy(items, placed, width).filter((index) => !leaving.has(index));
+  return [...click, ...replaced.map((index): DecorEdit => ({ index, item: null }))];
+}
+
+/**
+ * One door as drawn: its wall run, its first wall tile, its span, its
+ * footprint (`decorFootprint`: the wall's three tiles across a horizontal
+ * run, the column and a tile on each side of a vertical one) and the side it
+ * opens to (its rotation). A single door hinges at the end its rotation puts
+ * it at (`doorHingeOf`); a double door is drawn whole. A window is no leaf.
  */
 export interface DoorLeaf {
   readonly index: number;
   readonly piece: string;
   readonly rotation: DecorItem['rotation'];
-  readonly edge: GridEdge;
+  readonly axis: DoorAxis;
+  readonly tx: number;
+  readonly ty: number;
   readonly span: number;
   readonly footprint: DecorTileRect;
   readonly hinge: DoorHinge;
 }
 
-function footprintOf(edge: GridEdge, span: number): DecorTileRect {
-  return edge.axis === 'horizontal' ? { x: edge.col, y: edge.row - 1, w: span, h: 2 } : { x: edge.col - 1, y: edge.row, w: 2, h: span };
-}
-
-/** The doors of the layer, in layer order. */
+/** The doors of the layer, in layer order; windows never open, so they are none. */
 export function doorLeaves(items: readonly DecorItem[], width: number): DoorLeaf[] {
   return items
-    .filter((item) => isDoorPiece(item.piece))
+    .filter((item) => isDoorPiece(item.piece) && !isWindowPiece(item.piece))
     .map((item) => {
-      const edge = doorEdge(item, width);
+      const { tx, ty } = anchorOf(item, width);
       const span = doorSpan(item);
-      return { index: item.index, piece: item.piece, rotation: item.rotation, edge, span, footprint: footprintOf(edge, span), hinge: doorHingeOf(item.piece, item.rotation) };
+      const footprint = decorFootprint(item, { kind: 'door', footprint: { w: span, h: 1 } }, width);
+      return { index: item.index, piece: item.piece, rotation: item.rotation, axis: doorAxis(item), tx, ty, span, footprint, hinge: doorHingeOf(item.piece, item.rotation) };
     });
 }
 
-/** Which side of its edge an open leaf swings to: the side it faces (`inside`), or the other one. */
+/** The line across the middle of a door's footprint, in world pixels: y for a horizontal run, x for a vertical one. */
+export function doorLine(leaf: DoorLeaf): number {
+  const { x, y, w, h } = leaf.footprint;
+  return leaf.axis === 'horizontal' ? (y + h / 2) * DOOR_TILE : (x + w / 2) * DOOR_TILE;
+}
+
+/** Which side of its wall an open leaf swings to: the side it faces (`inside`), or the other one. */
 export type DoorSwing = 'inside' | 'outside';
 
 /**
@@ -253,11 +301,11 @@ export function doorSwingRotation(rotation: DecorItem['rotation'], swing: DoorSw
 /**
  * The doors drawn open, each with the side it swings to (#223, S14): every
  * one a body (the center of each network position) is about to cross, lined
- * up with its span along the edge and on the footprint's tiles across it or
+ * up with its span along the wall and on the footprint's tiles across it or
  * within `DOOR_OPEN_REACH_PX` of them; walking past alongside the wall opens
  * nothing. A door swings away from the side its walker comes from. `previous` is the result of the last call: a door
  * already open keeps its swing until it closes, so it does not flip when the
- * body center passes the edge line mid crossing. Two bodies from opposite
+ * body center passes the door's line mid crossing. Two bodies from opposite
  * sides get that kept swing, else the one of the first body (in `positions`
  * order) that opens it. Drawing only: a door never blocks anyone, open or
  * closed. `keptShut` names the avatars a door does not open for (a locked
@@ -355,23 +403,23 @@ export function doorStepOf(progress: number): number {
 
 /**
  * Where a door leads a body at network position `position` lined up with it
- * (`openDoorLeaves`): the middle of the door's tile across its edge from the
- * body center, along that center. `null` for a body not lined up with it.
+ * (`openDoorLeaves`): the middle of the tile just past the wall on the other
+ * side from the body center, along that center. `null` for a body not lined
+ * up with it.
  */
 export function doorFarSide(leaf: DoorLeaf, position: GeometryPoint): GeometryPoint | null {
   const center = bodyCenter(position);
   if (!liningUp(leaf, center)) return null;
-  if (leaf.edge.axis === 'horizontal') {
-    const line = leaf.edge.row * DOOR_TILE;
-    return { x: center.x, y: center.y < line ? line + DOOR_TILE / 2 : line - DOOR_TILE / 2 };
-  }
-  const line = leaf.edge.col * DOOR_TILE;
-  return { x: center.x < line ? line + DOOR_TILE / 2 : line - DOOR_TILE / 2, y: center.y };
+  const line = doorLine(leaf);
+  // Past the wall: the row past a horizontal run's three tiles, the column beside a vertical one.
+  const reach = leaf.axis === 'horizontal' ? 2 * DOOR_TILE : DOOR_TILE;
+  if (leaf.axis === 'horizontal') return { x: center.x, y: center.y < line ? line + reach : line - reach };
+  return { x: center.x < line ? line + reach : line - reach, y: center.y };
 }
 
-/** Whether a body center is lined up with a door's span and close to its edge across it. */
+/** Whether a body center is lined up with a door's span and on its footprint across it, or a few pixels past it. */
 function liningUp(leaf: DoorLeaf, center: GeometryPoint): boolean {
-  const horizontal = leaf.edge.axis === 'horizontal';
+  const horizontal = leaf.axis === 'horizontal';
   const [along, across] = horizontal ? [center.x, center.y] : [center.y, center.x];
   const { x, y, w, h } = leaf.footprint;
   const [start, end, near, far] = horizontal ? [x, x + w, y, y + h] : [y, y + h, x, x + w];
@@ -383,9 +431,9 @@ function bodyCenter(position: GeometryPoint): GeometryPoint {
   return { x: position.x + AVATAR_BODY_CENTER_OFFSET.x, y: position.y + AVATAR_BODY_CENTER_OFFSET.y };
 }
 
-/** How far `point` is on the side a leaf opens to: positive there, zero on the edge line, negative on the other side. */
+/** How far `point` is on the side a leaf opens to: positive there, zero on the door's line (`doorLine`), negative on the other side. */
 function sideOf(leaf: DoorLeaf, point: GeometryPoint): number {
   const facing = decorChairFacing(leaf.rotation);
   const sign = facing === 'down' || facing === 'right' ? 1 : -1;
-  return leaf.edge.axis === 'horizontal' ? (point.y - leaf.edge.row * DOOR_TILE) * sign : (point.x - leaf.edge.col * DOOR_TILE) * sign;
+  return ((leaf.axis === 'horizontal' ? point.y : point.x) - doorLine(leaf)) * sign;
 }

@@ -251,10 +251,12 @@ export function decorInfoFromPieceId(piece: string): DecorPieceInfo | null {
  * along a row (0, 180) or a column (90, 270) with its anchor the middle tile,
  * the old decor table's edge middle; a plant or a room table is centered on
  * its anchor (`floor(w / 2)`, `floor(h / 2)` from its top-left), a room
- * table turned vertical (90) on its footprint swapped. A door (#223) stands
- * on the line that starts at an edge of its anchor tile, the top one for 0
- * and 180 and the left one for 90 and 270, runs its span (`footprint.w`) along
- * it, and covers the tile on each side of it. A sofa is centered like a room
+ * table turned vertical (90) on its footprint swapped. A door or window
+ * (#223, tile walls) stands in a wall run from its anchor, the wall tile of
+ * its first column (0 and 180) or row (90 and 270), for its span
+ * (`footprint.w`): across a horizontal run it covers the wall's three tiles,
+ * across a vertical one the column and the tile on each side, where its leaf
+ * swings. A sofa is centered like a room
  * table, along a row facing down or up (0, 180) and along a column turned
  * sideways (90, 270). An unknown
  * piece (`null`) keeps its anchor tile alone, so stored rows are never lost.
@@ -266,7 +268,7 @@ export function decorFootprint(item: DecorPlacement, info: DecorPieceInfo | null
   if (info.kind === 'chair') return { x: tx, y: ty, w: 1, h: 1 };
   if (info.kind === 'door') {
     const span = info.footprint.w;
-    return item.rotation === 0 || item.rotation === 180 ? { x: tx, y: ty - 1, w: span, h: 2 } : { x: tx - 1, y: ty, w: 2, h: span };
+    return item.rotation === 0 || item.rotation === 180 ? { x: tx, y: ty - 1, w: span, h: 3 } : { x: tx - 1, y: ty, w: 3, h: span };
   }
   if (info.kind === 'desk') {
     const horizontal = item.rotation === 0 || item.rotation === 180;

@@ -40,6 +40,8 @@ import {
   wallPostTiles,
   wallStretches,
   wallTileFrames,
+  wallOpeningHiddenTiles,
+  wallOpeningPassTiles,
   jitteredBlockMaterial,
   parseOfficeLayout,
   terrainMaterialAt,
@@ -904,16 +906,96 @@ describe('terrain walls', () => {
   });
 });
 
-describe('wall openings: doors (#223)', () => {
-  it('leaves tile walls whole for now: a door opening changes neither the footprint nor the colliders', () => {
-    // Doors move onto tile walls in their own change; until then an opening cuts nothing.
-    const width = 6;
-    const height = 5;
-    const walls = new Array<string | null>(width * height).fill(null);
-    for (const tx of [1, 2, 3, 4]) walls[2 * width + tx] = 'wall-brick';
-    const openings = [{ col: 2, row: 2, axis: 'horizontal' as const }];
+describe('wall openings: doors in tile walls (#223, S9, S10)', () => {
+  const width = 8;
+  const height = 10;
+  const T = 32;
 
-    expect(wallFootprintRects({ width, height, walls, openings })).toEqual(wallFootprintRects({ width, height, walls }));
-    expect(wallColliderRects({ width, height, walls, openings })).toEqual([{ x: 32, y: 32, w: 4 * 32, h: 3 * 32 }]);
+  /** A horizontal run on row 2, columns 1..6, and a vertical one in column 6, rows 3..8. */
+  function grid() {
+    const walls = new Array<string | null>(width * height).fill(null);
+    for (let tx = 1; tx <= 6; tx += 1) walls[2 * width + tx] = 'wall-brick';
+    for (let ty = 3; ty <= 8; ty += 1) walls[ty * width + 6] = 'wall-brick';
+    return { width, height, walls };
+  }
+  const horizontal = { axis: 'horizontal' as const, tx: 2, ty: 2, span: 2 };
+  const vertical = { axis: 'vertical' as const, tx: 6, ty: 4, span: 2 };
+  const framesAt = (frames: ReturnType<typeof wallTileFrames>, tx: number) =>
+    frames.filter((tile) => tile.tx === tx).map(({ ty, frame, depthY }) => [ty, frame, depthY]);
+
+  it('lets people through a horizontal door from the wall base up to its top: the whole column of every tile it spans (S10)', () => {
+    expect(wallOpeningPassTiles(horizontal, { width, height })).toEqual([1 * width + 2, 2 * width + 2, 3 * width + 2, 1 * width + 3, 2 * width + 3, 3 * width + 3]);
+    const rects = wallFootprintRects({ ...grid(), openings: [horizontal] });
+    // Columns 2 and 3 of the run block nothing; columns 1, 4 and 5 still block their three tiles.
+    expect(rects.filter((rect) => rect.x === 2 * T || rect.x === 3 * T)).toEqual([]);
+    expect(rects).toContainEqual({ x: 1 * T, y: 1 * T, w: T, h: 3 * T });
+    expect(rects).toContainEqual({ x: 4 * T, y: 1 * T, w: T, h: 3 * T });
+    expect(wallColliderRects({ ...grid(), openings: [horizontal] }).filter((rect) => rect.y === T && rect.h === 3 * T)).toEqual([
+      { x: 1 * T, y: T, w: T, h: 3 * T },
+      { x: 4 * T, y: T, w: 2 * T, h: 3 * T },
+    ]);
+  });
+
+  it('draws only the top tile of a horizontal door column, the dark band over the material, and closes the walls beside it (S10)', () => {
+    const frames = wallTileFrames({ ...grid(), openings: [horizontal] });
+    expect(wallOpeningHiddenTiles(horizontal, { width, height })).toEqual([2 * width + 2, 3 * width + 2, 2 * width + 3, 3 * width + 3]);
+    expect(framesAt(frames, 2)).toEqual([[1, 'crown', 4 * T]]);
+    expect(framesAt(frames, 3)).toEqual([[1, 'crown', 4 * T]]);
+    // The wall left of the door ends its face against it; the crowns above the door stay one run.
+    expect(framesAt(frames, 1)).toEqual([
+      [1, 'crown', 4 * T],
+      [2, 'faceEnd', 4 * T],
+      [3, 'baseEnd', 4 * T],
+    ]);
+  });
+
+  it('draws the wall beside a narrower horizontal door, cropped to its inset, and blocks by tile as before', () => {
+    const narrow = { ...horizontal, inset: 10 };
+    const frames = wallTileFrames({ ...grid(), openings: [narrow] });
+    const cropped = frames.filter((tile) => tile.crop !== undefined).map(({ tx, ty, frame, crop }) => [tx, ty, frame, crop]);
+    // The left column keeps its first 10px, the right one its last 10px, of the two tiles the door hides; neither ends the run.
+    expect(cropped).toEqual([
+      [2, 2, 'face', { x: 0, w: 10 }],
+      [2, 3, 'base', { x: 0, w: 10 }],
+      [3, 2, 'face', { x: 22, w: 10 }],
+      [3, 3, 'base', { x: 22, w: 10 }],
+    ]);
+    // The wall left of the door runs on into the kept strip: no end joint against it.
+    expect(framesAt(frames, 1)).toEqual([
+      [1, 'crown', 4 * T],
+      [2, 'face', 4 * T],
+      [3, 'base', 4 * T],
+    ]);
+    // Collisions stay by tile: the client blocks the strips with the door's own stops.
+    expect(wallFootprintRects({ ...grid(), openings: [narrow] })).toEqual(wallFootprintRects({ ...grid(), openings: [horizontal] }));
+  });
+
+  it('lets people through a vertical door on its own tiles of the column only (S9)', () => {
+    expect(wallOpeningPassTiles(vertical, { width, height })).toEqual([4 * width + 6, 5 * width + 6]);
+    const column = wallFootprintRects({ ...grid(), openings: [vertical] }).filter((rect) => rect.x === 6 * T);
+    expect(column).toEqual([
+      { x: 6 * T, y: 1 * T, w: T, h: 3 * T },
+      { x: 6 * T, y: 6 * T, w: T, h: 4 * T },
+    ]);
+  });
+
+  it('removes the dark top of a vertical run where a door stands, and sorts what is above it by the door (S9)', () => {
+    const frames = wallTileFrames({ ...grid(), openings: [vertical] });
+    expect(framesAt(frames, 6)).toEqual([
+      [1, 'cap', 4 * T],
+      [2, 'cap', 4 * T],
+      [3, 'cap', 4 * T],
+      [6, 'cap', 10 * T],
+      [7, 'crownEnd', 10 * T],
+      [8, 'faceEnd', 10 * T],
+      [9, 'baseEnd', 10 * T],
+    ]);
+  });
+
+  it('still draws and blocks walls with no door the same as before', () => {
+    const plain = grid();
+    expect(wallTileFrames({ ...plain, openings: [] })).toEqual(wallTileFrames(plain));
+    expect(wallFootprintRects({ ...plain, openings: [] })).toEqual(wallFootprintRects(plain));
+    expect(wallFootprintRects(plain).filter((rect) => rect.x === 6 * T)).toEqual([{ x: 6 * T, y: T, w: T, h: 9 * T }]);
   });
 });

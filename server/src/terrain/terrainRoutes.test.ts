@@ -294,19 +294,19 @@ describe('handleSetTerrainWalls', () => {
     expect([...(await store.loadWalls())]).toEqual([]);
   });
 
-  it('refuses with 409 to erase a post a door stands on (#223), and erases it once the door is gone', async () => {
+  it('refuses with 409 to erase a wall a door stands in or between (#223), and erases it once the door is gone', async () => {
     const { deps, terrain } = await harness();
-    // Only the two posts at the ends of the door's 2 tile span are needed (#233): no wall between them.
-    const posts = [FREE, FREE + 2].map((index) => ({ index, piece: 'wall-brick' as const }));
-    await terrain.setWalls(posts, null, async () => ({ placements: [], players: [] }));
+    // A run of four walls: the door spans the middle two, between the walls at each end (tile walls).
+    const walls = [FREE - 1, FREE, FREE + 1, FREE + 2].map((index) => ({ index, piece: 'wall-brick' as const }));
+    await terrain.setWalls(walls, null, async () => ({ placements: [], players: [] }));
     await terrain.setDecor([{ index: FREE, item: { piece: 'door-wood', rotation: 0 } }], null);
 
-    for (const end of [FREE, FREE + 2]) {
-      expect(await handleSetTerrainWalls(BEARER_ADMIN, { edits: [{ index: end, piece: null }] }, deps)).toEqual({
+    for (const { index } of walls) {
+      expect(await handleSetTerrainWalls(BEARER_ADMIN, { edits: [{ index, piece: null }] }, deps)).toEqual({
         status: 409,
         body: { error: 'terrain-under-placement' },
       });
-      expect(terrain.walls()[end]).toBe('wall-brick');
+      expect(terrain.walls()[index]).toBe('wall-brick');
     }
 
     await terrain.setDecor([{ index: FREE, item: null }], null);

@@ -101,9 +101,10 @@ describe('parseArtPackManifest', () => {
 describe('parseArtPackManifest: doors (#223, #233)', () => {
   const doors = (): ArtPackManifest['pieces'] => pack().pieces.filter((piece) => piece.kind === 'door');
 
-  it('reads the pack doors: a single door two tiles wide and a double door three, each with its variant and anchor', () => {
-    expect(doors().map((piece) => piece.id)).toEqual(['door-wood', 'door-wood-double']);
-    const [single, double] = doors();
+  it('reads the pack doors: a single door two tiles wide, a double door three and a window two, each with its variant and anchor', () => {
+    expect(doors().map((piece) => piece.id)).toEqual(['door-wood', 'door-wood-double', 'door-glass-window']);
+    const [single, double, window] = doors();
+    expect(window).toMatchObject({ kind: 'door', name: 'Ventana', variant: 'window', anchor: { x: 64, y: 64 }, footprint: { w: 2, h: 1 } });
     expect(single).toMatchObject({ kind: 'door', name: 'Puerta simple', variant: 'single', anchor: { x: 64, y: 64 }, footprint: { w: 2, h: 1 } });
     expect(double).toMatchObject({ kind: 'door', name: 'Puerta doble', variant: 'double', anchor: { x: 64, y: 64 }, footprint: { w: 3, h: 1 } });
   });
@@ -209,9 +210,9 @@ describe('load requests', () => {
 
     expect(kinds).toEqual(new Set(['floor', 'desk', 'chair', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door', 'sofa', 'character']));
     // Nine floors, six desks, nine chairs and four walls, the terrain tileset,
-    // three trees, two plants, a bridge, a hedge, four tables (art step 8, the oval one since #208, the round one), two doors (#223, #233)
-    // and four sofas.
-    expect(requests).toHaveLength(47);
+    // three trees, two plants, a bridge, a hedge, four tables (art step 8, the oval one since #208, the round one), two doors (#223, #233),
+    // a window (tile walls) and four sofas.
+    expect(requests).toHaveLength(48);
     expect(requests.filter((request) => request.key.startsWith('art:character-')).map((request) => request.key))
       .toEqual([artSheetKey(pack().defaults.character, 'walk'), artSheetKey(pack().defaults.character, 'seated')]);
     expect(requests).toContainEqual({

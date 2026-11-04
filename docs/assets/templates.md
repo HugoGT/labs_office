@@ -43,7 +43,7 @@ The labels follow the contract's order. Draw each frame in the cell that has its
 - **Floor**: frame `row * 3 + col` is a 32x32 tile of one 96x96 motif. The whole sheet must tile seamlessly and be fully opaque.
 - **Plant**: one frame.
 - **Room table**: two columns, `HORIZONTAL` and `VERTICAL`. The dashed line is the largest table (7x5 tiles, or 5x7 standing vertical); a smaller table keeps the same anchor and states its own footprint in tiles when it is contributed. The top stays above the anchor row.
-- **Door**: one column per rotation (`0` opens down, `90` right, `180` up, `270` left) and four rows per hinge (`START`, then `END`), from `STEP 0` closed to `STEP 3` open. The anchor is the middle of the span on the wall line; draw a single door in the middle of the frame. Only single doors can be contributed.
+- **Door**: one column per rotation (`0` opens down, `90` right, `180` up, `270` left) and four rows per hinge (`START`, then `END`), from `STEP 0` closed to `STEP 3` open. The anchor is the middle of the span; draw a single door in the middle of the frame. Columns `90` and `270` (vertical wall runs) are seen from above; columns `0` and `180` (horizontal wall runs) are seen from the front, filling the bottom two tiles of the wall. Only single doors can be contributed.
 
 ## Rules the template cannot show
 

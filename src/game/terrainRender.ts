@@ -15,7 +15,7 @@ import {
   type TerrainMaterial,
   wallFrameIndex,
 } from './artContract';
-import { LAYOUT_MATERIALS, terrainMaterialAt, wallTileFrames, type LayoutMaterial, type LayoutProp, type OfficeLayout, type TerrainSnapshot, type WallGrid } from './officeLayout';
+import { LAYOUT_MATERIALS, terrainMaterialAt, wallTileFrames, type LayoutMaterial, type LayoutProp, type OfficeLayout, type TerrainSnapshot, type WallGrid, type WallTileCrop } from './officeLayout';
 
 /**
  * The color of the void: the camera background around and under the world,
@@ -96,16 +96,19 @@ export interface WallSprite {
    * is one block an avatar is either behind (north of it) or in front of.
    */
   readonly depthY: number;
+  /** The only columns of the frame drawn, for the wall beside a narrower door (`WallTileFrame.crop`). */
+  readonly crop?: WallTileCrop;
 }
 
 /** The sprite of every wall tile (`wallTileFrames`), its frame picked by tile column (`wallFrameIndex`). */
 export function wallSprites(grid: WallGrid): WallSprite[] {
-  return wallTileFrames(grid).map(({ tx, ty, piece, frame, depthY }) => ({
+  return wallTileFrames(grid).map(({ tx, ty, piece, frame, depthY, crop }) => ({
     piece,
     frame: wallFrameIndex(frame, tx),
     x: tx * ART_TILE,
     y: ty * ART_TILE,
     depthY,
+    ...(crop === undefined ? {} : { crop }),
   }));
 }
 

@@ -19,6 +19,7 @@ const CHAIR: DecorPick = { id: 'chair-gamer', info: { kind: 'chair', footprint: 
 const DESK: DecorPick = { id: 'desk-wood', info: { kind: 'desk', footprint: { w: 3, h: 1 } } };
 const PLANT: DecorPick = { id: 'plant-bonsai', info: { kind: 'plant', footprint: { w: 1, h: 1 } } };
 const TABLE: DecorPick = { id: 'table-meeting', info: { kind: 'table', footprint: { w: 7, h: 5 } } };
+const WINDOW: DecorPick = { id: 'door-glass-window', info: { kind: 'door', footprint: { w: 2, h: 1 } } };
 const OVAL: DecorPick = { id: 'table-oval', info: { kind: 'table', footprint: { w: 2, h: 1 } } };
 const PAINTED: DecorPick = { id: 'desk-painted', info: { kind: 'desk', footprint: { w: 3, h: 1 }, colorable: true } };
 const FABRIC: DecorPick = { id: 'chair-fabric', info: { kind: 'chair', footprint: { w: 1, h: 1 }, colorable: true } };
@@ -139,6 +140,17 @@ describe('useDecorEditor', () => {
 
     act(() => result.current.pick(DESK));
     expect(result.current.brush).toMatchObject({ piece: 'desk-wood', rotation: 270 });
+  });
+
+  it('never turns a window: it is picked horizontal whatever the palette turn, and the map does not turn it (S8, L23)', () => {
+    const { bridge, result } = setup();
+    act(() => result.current.enter());
+    act(() => result.current.pick(CHAIR));
+    act(() => bridge.emit('decorrotate', { step: 1 }));
+    act(() => result.current.pick(WINDOW));
+    expect(result.current.brush).toMatchObject({ piece: 'door-glass-window', rotation: 0 });
+    act(() => bridge.emit('decorrotate', { step: 1 }));
+    expect(result.current.brush).toMatchObject({ rotation: 0 });
   });
 
   it('starts a desk table showing its drawer side, like its thumbnail, and a chair as it always did, until the person turns something', () => {
@@ -864,6 +876,31 @@ describe('useDecorEditor: the wall eraser over decor', () => {
     ]);
   });
 
+  it('sends the removal of a door a window replaces with the click that places it, and the other way round (S6)', async () => {
+    const { decor, calls } = deferredPort();
+    const { bridge, result } = setup({ decor });
+    act(() => bridge.emit('decor', { items: [{ index: at(60, 60), piece: 'door-wood', rotation: 0 }, { index: at(70, 60), piece: 'door-glass-window', rotation: 0 }] }));
+    act(() => result.current.enter());
+
+    act(() => result.current.pick({ id: 'door-glass-window', info: { kind: 'door', footprint: { w: 2, h: 1 } } }));
+    act(() => bridge.emit('decorpick', { index: at(61, 60) }));
+    act(() => result.current.pick({ id: 'door-wood', info: { kind: 'door', footprint: { w: 2, h: 1 } } }));
+    act(() => bridge.emit('decorpick', { index: at(69, 60) }));
+
+    expect(calls.map((call) => call.edits)).toEqual([
+      [
+        { index: at(61, 60), item: { piece: 'door-glass-window', rotation: 0 } },
+        { index: at(60, 60), item: null },
+      ],
+    ]);
+    // The second click waits for the first one, then goes with its own replacement.
+    await act(async () => calls[0]!.resolve());
+    expect(calls.map((call) => call.edits)[1]).toEqual([
+      { index: at(69, 60), item: { piece: 'door-wood', rotation: 0 } },
+      { index: at(70, 60), item: null },
+    ]);
+  });
+
   it('leaves the post to the walls over a tile with no decor, and still takes a door by its post', () => {
     const { decor, calls } = deferredPort();
     const { bridge, result } = setup({ decor });
@@ -1009,7 +1046,7 @@ describe('useDecorEditor: the top layer (#121)', () => {
 
 describe('DECOR_UNDER_PLACEMENT_MESSAGE (#223, #233)', () => {
   it('says where a door goes: between two walls, one at each end, and how wide it is', () => {
-    expect(DECOR_UNDER_PLACEMENT_MESSAGE).toContain('La puerta va entre dos paredes, una en cada extremo: 2 casillas de ancho, 4 la puerta doble.');
+    expect(DECOR_UNDER_PLACEMENT_MESSAGE).toContain('La puerta o la ventana va en una pared, entre dos paredes: 2 casillas de ancho, 3 la puerta doble, y la ventana solo en paredes horizontales.');
     expect(DECOR_UNDER_PLACEMENT_MESSAGE).not.toMatch(/cerrar una sala/);
   });
 });

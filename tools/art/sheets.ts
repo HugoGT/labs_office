@@ -12,7 +12,6 @@ import {
   DOOR,
   DOOR_HINGES,
   DOOR_STEPS,
-  DOOR_VARIANTS,
   HEDGE,
   PACK_FACINGS,
   SOFA,
@@ -52,7 +51,7 @@ import { CHAIR_MATERIALS, chairSprite, type ChairMaterial } from './domain/chair
 import { SOFA_MATERIALS, SOFA_SEATS, sofaSprite, type SofaMaterial, type SofaSeats } from './domain/sofas.ts';
 import { BASE_CHARACTERS, type CharacterSpec } from '../../src/art/characters.ts';
 import { PixelBuffer } from '../../src/art/pixelBuffer.ts';
-import { DOOR_MATERIALS, doorSprite, type DoorMaterial } from './domain/doors.ts';
+import { DOOR_PIECES, doorSprite, type DoorMaterial } from './domain/doors.ts';
 import { bridgeSprite, hedgeSprite, PLANT_KINDS, plantSprite, TREE_KINDS, treeSprite, type PlantKind, type TreeKind } from './domain/props.ts';
 import { renderCharacterSheets } from '../../src/art/characterSheets.ts';
 import { ROOM_TABLES, roomTableSprite, TABLE_MATERIALS, tableSprite, type RoomTable, type TableMaterial } from './domain/tables.ts';
@@ -273,6 +272,6 @@ export function buildPackSheets(): PackSheets {
     bridge: bridgeSheet(),
     hedge: hedgeSheet(),
     tables: ROOM_TABLES.map((kind) => ({ kind, image: tableSheet(kind) })),
-    doors: DOOR_MATERIALS.flatMap((material) => DOOR_VARIANTS.map((variant) => ({ material, variant, image: doorSheet(material, variant) }))),
+    doors: DOOR_PIECES.map(({ material, variant }) => ({ material, variant, image: doorSheet(material, variant) })),
   };
 }

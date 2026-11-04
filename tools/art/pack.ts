@@ -44,7 +44,6 @@ import {
 } from '../../src/game/artContract.ts';
 import { CHAIR_DEFAULT_COLORS, type ChairMaterial } from './domain/chairs.ts';
 import { SOFA_DEFAULT_COLORS, type SofaMaterial } from './domain/sofas.ts';
-import type { DoorMaterial } from './domain/doors.ts';
 import type { PixelBuffer } from '../../src/art/pixelBuffer.ts';
 import { DEFAULT_TREE_COLOR, type PlantKind, type TreeKind } from './domain/props.ts';
 import { DESK_DEFAULT_COLORS, ROOM_TABLE_FOOTPRINTS, type RoomTable, type TableMaterial } from './domain/tables.ts';
@@ -110,10 +109,8 @@ const TABLES: Readonly<Record<RoomTable, { readonly name: string; readonly mater
   oval: { name: 'Mesa ovalada', material: 'oak' },
   round: { name: 'Mesa redonda', material: 'oak' },
 };
-/** The single and the double door are two items (#233), each with its own name and wall footprint. */
-const DOOR_NAMES: Readonly<Record<DoorMaterial, Readonly<Record<DoorVariant, string>>>> = {
-  wood: { single: 'Puerta simple', double: 'Puerta doble' },
-};
+/** The single and the double door are two items (#233), each with its own name and wall footprint; the window a third (tile walls). */
+const DOOR_NAMES: Readonly<Record<DoorVariant, string>> = { single: 'Puerta simple', double: 'Puerta doble', window: 'Ventana' };
 /** The whole 3x3 deck is walkable in both orientations; the rails are thin enough to step along. */
 const FULL_DECK = { x: 0, y: 0, w: BRIDGE.footprint.w, h: BRIDGE.footprint.h } as const;
 
@@ -320,13 +317,13 @@ export function renderPackFiles(): Map<string, Uint8Array> {
         files: [png(`table/${kind}.png`, 'sheet', 'table', image)],
       }),
     ),
-    // Doors (#223, #233) stand on a wall's line: 2 tiles of wall wide (single) or 4 (double), anchored on the middle of the span.
+    // Doors and windows (#223, #233, tile walls) stand in a wall run: 2 wall tiles wide (single, window) or 3 (double), anchored on the middle of the span.
     ...sheets.doors.map(({ material, variant, image }): ArtPiece => {
-      const suffix = variant === 'double' ? '-double' : '';
+      const suffix = variant === 'single' ? '' : `-${variant}`;
       return {
         id: `door-${material}${suffix}`,
         kind: 'door',
-        name: DOOR_NAMES[material][variant],
+        name: DOOR_NAMES[variant],
         ...common,
         material,
         variant,

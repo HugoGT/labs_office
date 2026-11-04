@@ -293,10 +293,14 @@ export function placeWalls(
   for (const sprite of wallSprites(grid)) {
     const sheet = packSheet(art, sprite.piece, isAny);
     const depth = worldAssetDepth(sprite.depthY);
+    // The wall beside a narrower door shows only its columns there (`WallSprite.crop`).
+    const { x, w } = sprite.crop ?? { x: 0, w: WALL.frame.width };
     drawn.push(
       (sheet !== null
-        ? putArtSprite(scene, sheet.key, sprite, depth)
-        : placeholder(scene, sprite.x, sprite.y, WALL.frame.width, WALL.frame.height, PLACEHOLDER_COLOR, depth)
+        ? sprite.crop === undefined
+          ? putArtSprite(scene, sheet.key, sprite, depth)
+          : putArtSprite(scene, sheet.key, sprite, depth).setCrop(x, 0, w, WALL.frame.height)
+        : placeholder(scene, sprite.x + x, sprite.y, w, WALL.frame.height, PLACEHOLDER_COLOR, depth)
       ).setName(WALL_OBJECT_NAME),
     );
   }

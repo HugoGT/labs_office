@@ -41,7 +41,7 @@ import {
   type DecorItem,
   type DecorPieceInfo,
 } from '../../../src/game/officeDecor.ts';
-import { doorOnWall, wallTilesAfter } from '../../../src/game/officeDoors.ts';
+import { doorOnWall, doorOwnWallTiles, wallTilesAfter } from '../../../src/game/officeDoors.ts';
 import type { MapSeat } from '../../../src/game/seating.ts';
 import { TERRAIN_FLOOR_BASE, isTerrainFloorPieceId } from '../../../src/game/terrainFloors.ts';
 
@@ -235,12 +235,12 @@ export function parseWallBatch(body: unknown, tileCount: number): WallEdit[] {
 }
 
 /**
- * Why a wall post may not stand on one of the `placed` vertices, or `null` if
- * it may. Walls never strand anything a room holds: a post is refused when
- * its footprint (`wallPostTiles`: the four tiles around its vertex) touches a
- * static tile (seats, furniture, the spawn area) or a desk, never because of
- * a room or a player (players are relocated). A post that ends a door's edge
- * (`doorPosts`, #223) may be repainted, the door stays on it, but not
+ * Why a wall may not stand on one of the `placed` tiles, or `null` if it
+ * may. Walls never strand anything a room holds: a wall is refused when its
+ * footprint (`wallPostTiles`: its tile and the ones above and below) touches
+ * a static tile (seats, furniture, the spawn area) or a desk, never because
+ * of a room or a player (players are relocated). A wall a door or window
+ * needs (`doorPosts`, #223) may be repainted, the door stays on it, but not
  * `removed`: the door would be left off its wall.
  */
 export function findWallConflict(
@@ -319,11 +319,12 @@ export function parseDecorBatch(body: unknown, tileCount: number): DecorEdit[] {
  * over decor is allowed too. Stored items that already overlap (kept at
  * load) never veto an edit elsewhere.
  *
- * A door (#223, #233) must span the line between two standing wall posts,
- * one at each end (`doorOnWall`, the rule the editor's ghost applies too);
- * the tiles a wall touches do not count for it, since its own posts touch them. The wall
- * tiles are those of `after` (`wallTilesAfter`): a door removed or replaced
- * in the batch closes its wall for what takes its place.
+ * A door or window (#223, #233, tile walls) must stand in a wall run
+ * between two walls (`doorOnWall`, the rule the editor's ghost applies too:
+ * a window never in a vertical run); its own wall does not count among the
+ * wall tiles it must keep off (`doorOwnWallTiles`). The wall tiles are those
+ * of `after` (`wallTilesAfter`): a door removed or replaced in the batch
+ * closes its wall for what takes its place.
  *
  * A top item (#121) has its own rule and the floor rules never see it: its
  * whole footprint on the map and on the desk tables and room tables of
@@ -360,10 +361,11 @@ export function findDecorConflict(
     }
     const door = info?.kind === 'door';
     if (door && !doorOnWall(snapshot, item)) return 'placement';
+    const own = door ? doorOwnWallTiles(item, snapshot.width) : new Set<number>();
     const rect = decorFootprint(item, info, snapshot.width);
     if (!insideMap(rect, snapshot.width, snapshot.height)) return 'placement';
     for (const tile of rectTiles(rect, snapshot.width)) {
-      if (!snapshot.walkable[tile] || (!door && wallTiles[tile] === true) || staticTiles.has(tile) || taken.has(tile)) return 'placement';
+      if (!snapshot.walkable[tile] || (!own.has(tile) && wallTiles[tile] === true) || staticTiles.has(tile) || taken.has(tile)) return 'placement';
       taken.add(tile);
     }
   }

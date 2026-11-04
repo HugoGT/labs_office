@@ -37,7 +37,7 @@
  */
 
 import officeMap from './maps/office.json' with { type: 'json' };
-import { WALL, type GridEdge, type WallFrame } from './artContract.ts';
+import { WALL, type DoorAxis, type WallFrame } from './artContract.ts';
 import { AVATAR_BODY_CENTER_OFFSET, physicalBodyRect } from './avatarGeometry.ts';
 import { MAP_BLOCK_TILES } from './mapData.ts';
 import { boxOverlapsRects, coveredTiles, isPositionBlocked, type CollisionRect } from './pieceCollisions.ts';
@@ -355,10 +355,11 @@ export interface TerrainSnapshot {
   /** The live wall post of each grid vertex (row major, the top-left corner of the tile), `null` where there is none. */
   readonly walls: readonly (string | null)[];
   /**
-   * The wall edges doors open (#223, `doorOpenings` of officeDoors.ts): no
-   * body there and the posts' joints clipped along it. Empty without doors.
+   * The doors standing in the walls (#223, tile walls, `doorOpenings` of
+   * officeDoors.ts): the wall blocks nothing where they let people through
+   * (`wallOpeningPassTiles`). Empty without doors.
    */
-  readonly openings: readonly GridEdge[];
+  readonly openings: readonly WallOpening[];
   /**
    * The placement order of the posts (#223): tiles, oldest first, only for
    * the posts painted since the layout; every other post comes before them
@@ -382,8 +383,7 @@ export interface TerrainSnapshot {
  *   2. Deck props (bridges): their footprint is walkable, water included.
  *   3. Solids: hedges block, a deck under them too.
  *
- * Walls (the layout's, or the live ones an admin painted) stand on grid lines,
- * half on each side, so they never block whole tiles: they block by their
+ * Walls (the layout's, or the live ones an admin painted) block by their
  * footprint rectangles (`wallRects`), checked on top of the tiles. The
  * `openings` the doors make (#223) leave a passage in them; the room, the
  * client grid, Arcade and the double-click path all read this same snapshot.
@@ -397,7 +397,7 @@ export function terrainSnapshot(
   layout: OfficeLayout,
   blocks: readonly LayoutMaterial[] = layout.blocks,
   walls: readonly (string | null)[] = layout.walls,
-  openings: readonly GridEdge[] = [],
+  openings: readonly WallOpening[] = [],
   wallOrder: readonly number[] = [],
 ): TerrainSnapshot {
   const { width, height } = layout;
@@ -644,13 +644,65 @@ export function withWalls(walls: readonly (string | null)[], edits: readonly Wal
 }
 
 /**
- * A wall grid: one post (a wall piece) or `null` per grid vertex, row major,
- * the edges doors open (#223), none when absent, and the placement order of
- * the posts (`wallOrder`, tiles oldest first) that decides which wall is laid
- * over which where two materials meet. Collisions never read the order.
+ * A door standing in a tile wall (#223, tile walls): `axis` is the run it
+ * stands in, (tx, ty) the wall tile of its first column (horizontal) or row
+ * (vertical), and it spans `span` wall tiles from there. officeDoors.ts
+ * makes them from the decor layer (`doorOpenings`); this module only cuts
+ * the walls by them.
+ */
+export interface WallOpening {
+  readonly axis: DoorAxis;
+  readonly tx: number;
+  readonly ty: number;
+  readonly span: number;
+  /**
+   * Pixels of wall a horizontal door leaves drawn at each end of its span
+   * (`doorFrontInset`): its first and last tiles are drawn cropped to them.
+   * Collisions stay by tile; the client blocks them with `doorHingeStops`.
+   */
+  readonly inset?: number;
+}
+
+/** The tiles (row major) of each column (horizontal) or row (vertical) of an opening's span, by `rows(tx, ty)`. */
+function openingTiles({ axis, tx, ty, span }: WallOpening, width: number, height: number, rows: (y: number) => readonly number[]): number[] {
+  const tiles: number[] = [];
+  for (let step = 0; step < span; step += 1) {
+    const [x, y] = axis === 'horizontal' ? [tx + step, ty] : [tx, ty + step];
+    if (x < 0 || x >= width) continue;
+    for (const row of rows(y)) if (row >= 0 && row < height) tiles.push(row * width + x);
+  }
+  return tiles;
+}
+
+/**
+ * The tiles a door lets people through (tile walls): in a horizontal run,
+ * every tile of its columns, from the wall's base up to its top (S10); in a
+ * vertical run, its own tiles of the column (S9).
+ */
+export function wallOpeningPassTiles(opening: WallOpening, { width, height }: Pick<OfficeLayout, 'width' | 'height'>): number[] {
+  const reach = Math.floor(WALL.heightTiles / 2);
+  return openingTiles(opening, width, height, (y) => (opening.axis === 'horizontal' ? Array.from({ length: WALL.heightTiles }, (_, i) => y - reach + i) : [y]));
+}
+
+/**
+ * The wall tiles a door takes the place of, which are not drawn (tile walls):
+ * in a horizontal run the bottom two tiles of its columns, the top one
+ * staying as the dark band over the wall's material (S10); in a vertical
+ * run its own tiles of the column, the dark top of the run included (S9).
+ */
+export function wallOpeningHiddenTiles(opening: WallOpening, { width, height }: Pick<OfficeLayout, 'width' | 'height'>): number[] {
+  return openingTiles(opening, width, height, (y) => (opening.axis === 'horizontal' ? [y, y + 1] : [y]));
+}
+
+/**
+ * A wall grid: one wall piece or `null` per tile (the tile a wall is placed
+ * on), row major, the doors standing in the walls (#223), none when absent,
+ * and the placement order of the walls (`wallOrder`, tiles oldest first)
+ * that decides which wall is laid over which where two materials meet.
+ * Collisions never read the order.
  */
 export type WallGrid = Pick<OfficeLayout, 'width' | 'height' | 'walls'> & {
-  readonly openings?: readonly GridEdge[];
+  readonly openings?: readonly WallOpening[];
   readonly wallOrder?: readonly number[];
 };
 
@@ -690,51 +742,6 @@ export function withWallOrder(order: readonly number[], walls: readonly (string 
   if (touched.size === 0) return [...order];
   const placed = [...touched].flatMap(([index, piece]) => (piece === null ? [] : [index]));
   return [...order.filter((index) => !touched.has(index)), ...placed];
-}
-
-function edgeKey(col: number, row: number, axis: GridEdge['axis']): string {
-  return `${axis === 'horizontal' ? 'h' : 'v'}:${col}:${row}`;
-}
-
-/**
- * Whether the edge from vertex (tx, ty) east (`horizontal`) or south
- * (`vertical`) is a door's opening: listed in the grid's openings and a wall
- * under it (`wallsJoin`). An opening with no wall there opens nothing.
- */
-export function openEdge(grid: WallGrid, open: ReadonlySet<string>, tx: number, ty: number, axis: GridEdge['axis']): boolean {
-  if (!open.has(edgeKey(tx, ty, axis))) return false;
-  return axis === 'horizontal' ? wallsJoin(grid, tx, ty, tx + 1, ty) : wallsJoin(grid, tx, ty, tx, ty + 1);
-}
-
-export function openingSet(grid: WallGrid): ReadonlySet<string> {
-  return new Set((grid.openings ?? []).map(({ col, row, axis }) => edgeKey(col, row, axis)));
-}
-
-/**
- * Whether the post at vertex (tx, ty) is no wall any more (#223): every wall
- * that meets it goes through an open door edge, and either at least two do
- * (the shared post between the two leaves of a double door, the corner of two
- * doors) or the post stands inside one door's span, an open edge on each side
- * of it in line, whether or not the wall past it is still there. It neither
- * draws nor blocks. A post any other wall meets keeps its joint, and so does
- * the end of a door, which has the wall (or nothing) beyond.
- */
-export function doorOnlyPost(grid: WallGrid, open: ReadonlySet<string>, tx: number, ty: number): boolean {
-  if (open.size === 0) return false;
-  let doors = 0;
-  const sides = [
-    [tx, ty - 1, tx, ty - 1, 'vertical'],
-    [tx + 1, ty, tx, ty, 'horizontal'],
-    [tx, ty + 1, tx, ty, 'vertical'],
-    [tx - 1, ty, tx - 1, ty, 'horizontal'],
-  ] as const;
-  for (const [nx, ny, col, row, axis] of sides) {
-    if (!wallsJoin(grid, tx, ty, nx, ny)) continue;
-    if (!openEdge(grid, open, col, row, axis)) return false;
-    doors += 1;
-  }
-  const [north, east, south, west] = sides.map(([, , col, row, axis]) => open.has(edgeKey(col, row, axis)));
-  return doors >= 2 || (north && south) || (east && west);
 }
 
 /**
@@ -795,13 +802,49 @@ export function wallStretches({ width, height, walls }: WallGrid): WallStretch[]
   return stretches;
 }
 
-/** One tile of a wall stretch with the frame it shows; `depthY` is the bottom edge of its stretch. */
+/** The pixels of a tile drawn, left to right, when only part of it is (`WallTileFrame.crop`). */
+export interface WallTileCrop {
+  readonly x: number;
+  readonly w: number;
+}
+
+/**
+ * One tile of a wall stretch with the frame it shows; `depthY` is the bottom
+ * edge of its stretch. `crop`, when set, is the only part of it drawn: the
+ * wall left beside a door narrower than its span (`WallOpening.inset`).
+ */
 export interface WallTileFrame {
   readonly tx: number;
   readonly ty: number;
   readonly piece: string;
   readonly frame: WallFrame;
   readonly depthY: number;
+  readonly crop?: WallTileCrop;
+}
+
+/**
+ * The tiles every opening of a grid hides (`wallOpeningHiddenTiles`), those it
+ * lets people through (`wallOpeningPassTiles`), and among the hidden ones the
+ * part still drawn of those beside a narrower door (`WallOpening.inset`).
+ */
+function openingTileSets(grid: WallGrid): { readonly hidden: ReadonlySet<number>; readonly pass: ReadonlySet<number>; readonly kept: ReadonlyMap<number, WallTileCrop> } {
+  const openings = grid.openings ?? [];
+  const kept = new Map<number, WallTileCrop>();
+  for (const opening of openings) {
+    const inset = Math.min(opening.inset ?? 0, LAYOUT_TILE);
+    if (opening.axis !== 'horizontal' || inset <= 0) continue;
+    const last = opening.tx + opening.span - 1;
+    for (const tile of wallOpeningHiddenTiles(opening, grid)) {
+      const tx = tile % grid.width;
+      if (tx === opening.tx) kept.set(tile, { x: 0, w: inset });
+      else if (tx === last) kept.set(tile, { x: LAYOUT_TILE - inset, w: inset });
+    }
+  }
+  return {
+    hidden: new Set(openings.flatMap((opening) => wallOpeningHiddenTiles(opening, grid))),
+    pass: new Set(openings.flatMap((opening) => wallOpeningPassTiles(opening, grid))),
+    kept,
+  };
 }
 
 /**
@@ -809,43 +852,80 @@ export interface WallTileFrame {
  * bottom `WALL.heightTiles` tiles show the face of the lowest wall (its
  * crown, face and base), and any tile above them, where walls stack into a
  * vertical run, is the dark top band (`cap`). A face tile with no tile of
- * the same piece to its right ends a horizontal run and takes the `End`
- * frame, which closes the right edge.
+ * the same piece drawn to its right ends a horizontal run and takes the
+ * `End` frame, which closes the right edge.
+ *
+ * A door (`grid.openings`) takes the place of the tiles it hides
+ * (`wallOpeningHiddenTiles`): they are not drawn, the wall beside a door in
+ * a horizontal run ends against it, and the tiles of a vertical run above a
+ * door sort by the door's top instead of the run's bottom, so whoever walks
+ * through it is drawn over them.
  */
 export function wallTileFrames(grid: WallGrid): WallTileFrame[] {
   const stretches = wallStretches(grid);
+  const { hidden, kept } = openingTileSets(grid);
   const pieceAt = new Map<number, string>();
-  for (const { tx, top, bottom, piece } of stretches) for (let ty = top; ty <= bottom; ty += 1) pieceAt.set(ty * grid.width + tx, piece);
+  for (const { tx, top, bottom, piece } of stretches) {
+    for (let ty = top; ty <= bottom; ty += 1) {
+      const index = ty * grid.width + tx;
+      if (!hidden.has(index) || kept.has(index)) pieceAt.set(index, piece);
+    }
+  }
   const column: readonly WallFrame[] = ['crown', 'face', 'base'];
   const tiles: WallTileFrame[] = [];
   for (const { tx, top, bottom, piece } of stretches) {
-    const depthY = (bottom + 1) * WALL.frame.height;
-    for (let ty = top; ty <= bottom; ty += 1) {
+    let depthY = (bottom + 1) * WALL.frame.height;
+    // Bottom up, so a tile above a door knows it: the door's top is its depth, unless nothing is drawn below the door.
+    let drawnBelow = false;
+    const drawn: WallTileFrame[] = [];
+    for (let ty = bottom; ty >= top; ty -= 1) {
+      const index = ty * grid.width + tx;
+      const crop = kept.get(index);
+      if (hidden.has(index)) {
+        // The wall beside a narrower door is drawn, but sorts like the door's own tiles.
+        if (crop !== undefined && bottom - ty < column.length) {
+          const frame = column[column.length - 1 - (bottom - ty)]!;
+          const joined = tx + 1 < grid.width && pieceAt.get(index + 1) === piece;
+          drawn.push({ tx, ty, piece, frame: joined ? frame : (`${frame}End` as WallFrame), depthY, crop });
+        }
+        if (drawnBelow) depthY = ty * WALL.frame.height;
+        continue;
+      }
+      drawnBelow = true;
       const fromBottom = bottom - ty;
       if (fromBottom >= column.length) {
-        tiles.push({ tx, ty, piece, frame: 'cap', depthY });
+        drawn.push({ tx, ty, piece, frame: 'cap', depthY });
         continue;
       }
       const frame = column[column.length - 1 - fromBottom]!;
-      const joined = tx + 1 < grid.width && pieceAt.get(ty * grid.width + tx + 1) === piece;
-      tiles.push({ tx, ty, piece, frame: joined ? frame : (`${frame}End` as WallFrame), depthY });
+      const joined = tx + 1 < grid.width && pieceAt.get(index + 1) === piece;
+      drawn.push({ tx, ty, piece, frame: joined ? frame : (`${frame}End` as WallFrame), depthY });
     }
+    tiles.push(...drawn.reverse());
   }
   return tiles;
 }
 
 /**
  * The world rectangles a wall grid blocks: every tile a wall covers, as one
- * rectangle per vertical stretch (`wallStretches`). Door openings do not cut
- * tile walls yet: doors move to tiles in their own change.
+ * rectangle per vertical stretch of them, less the tiles a door lets people
+ * through (`wallOpeningPassTiles`), which split a stretch.
  */
 export function wallFootprintRects(grid: WallGrid): CollisionRect[] {
-  return wallStretches(grid).map(({ tx, top, bottom }) => ({
-    x: tx * LAYOUT_TILE,
-    y: top * LAYOUT_TILE,
-    w: LAYOUT_TILE,
-    h: (bottom - top + 1) * LAYOUT_TILE,
-  }));
+  const { pass } = openingTileSets(grid);
+  const rects: CollisionRect[] = [];
+  for (const { tx, top, bottom } of wallStretches(grid)) {
+    let start: number | null = null;
+    for (let ty = top; ty <= bottom + 1; ty += 1) {
+      const blocks = ty <= bottom && !pass.has(ty * grid.width + tx);
+      if (blocks && start === null) start = ty;
+      if (!blocks && start !== null) {
+        rects.push({ x: tx * LAYOUT_TILE, y: start * LAYOUT_TILE, w: LAYOUT_TILE, h: (ty - start) * LAYOUT_TILE });
+        start = null;
+      }
+    }
+  }
+  return rects;
 }
 
 /**

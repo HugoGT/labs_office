@@ -24,6 +24,10 @@ import {
   TERRAIN_TILESET,
   TREE,
   bridgeFrameIndex,
+  doorFrameIndex,
+  doorHingeOf,
+  doorPlacement,
+  doorVariantOf,
   facingColumn,
   floorFrameAt,
   hedgeFrameIndex,
@@ -43,6 +47,8 @@ import { PixelBuffer } from '../../src/art/pixelBuffer.ts';
 import type { Terrain } from './domain/tiles.ts';
 import { type WallMaterial } from './domain/wallMap.ts';
 import { wallTileFrames } from '../../src/game/officeLayout.ts';
+import { doorAxis, doorOpenings } from '../../src/game/officeDoors.ts';
+import type { DecorItem } from '../../src/game/officeDecor.ts';
 import { BACKDROP, crop, upscale } from './imageOps.ts';
 import { treeSprite } from './domain/props.ts';
 import { ROOM_TABLE_FOOTPRINTS, type RoomTable } from './domain/tables.ts';
@@ -190,6 +196,73 @@ function wallsPreview(sheets: PackSheets): PixelBuffer {
       const sx = (index % WALL.columns) * ART_TILE;
       const sy = Math.floor(index / WALL.columns) * ART_TILE;
       room.blit(crop(image, sx, sy, ART_TILE, ART_TILE), tx * ART_TILE, ty * ART_TILE);
+    }
+    out.blit(room, GAP + index * (width + GAP), GAP);
+  });
+  return out;
+}
+
+const OPENING_COLS = 12;
+const OPENING_ROWS = 12;
+
+/** A room for doors and windows: a top and a bottom horizontal run and two vertical side runs, all of one material. */
+function openingRoomWalls(material: WallMaterial): (string | null)[] {
+  const walls = new Array<string | null>(OPENING_COLS * OPENING_ROWS).fill(null);
+  const put = (tx: number, ty: number): void => {
+    walls[ty * OPENING_COLS + tx] = `wall-${material}`;
+  };
+  for (let tx = 0; tx < OPENING_COLS; tx += 1) {
+    put(tx, 1);
+    put(tx, OPENING_ROWS - 2);
+  }
+  for (let ty = 2; ty < OPENING_ROWS - 2; ty += 1) {
+    put(0, ty);
+    put(OPENING_COLS - 1, ty);
+  }
+  return walls;
+}
+
+/**
+ * The doors and windows of the opening room: a door and two windows side by side in each
+ * horizontal run (the bottom pair right beside the double door), a door in each vertical one.
+ */
+const OPENING_ITEMS: readonly DecorItem[] = [
+  { index: 1 * OPENING_COLS + 2, piece: 'door-wood', rotation: 0 },
+  { index: 1 * OPENING_COLS + 6, piece: 'door-glass-window', rotation: 0 },
+  { index: 1 * OPENING_COLS + 8, piece: 'door-glass-window', rotation: 0 },
+  { index: (OPENING_ROWS - 2) * OPENING_COLS + 2, piece: 'door-glass-window', rotation: 0 },
+  { index: (OPENING_ROWS - 2) * OPENING_COLS + 4, piece: 'door-glass-window', rotation: 0 },
+  { index: (OPENING_ROWS - 2) * OPENING_COLS + 6, piece: 'door-wood-double', rotation: 180 },
+  { index: 4 * OPENING_COLS + 0, piece: 'door-wood', rotation: 90 },
+  { index: 3 * OPENING_COLS + OPENING_COLS - 1, piece: 'door-wood-double', rotation: 270 },
+];
+
+/**
+ * Doors and windows in the walls of every material (tile walls), drawn through the office's own
+ * rules: the walls by `wallTileFrames` with the doors' openings, each door or window by its
+ * placement and closed frame.
+ */
+function wallOpeningsPreview(sheets: PackSheets): PixelBuffer {
+  const width = OPENING_COLS * ART_TILE;
+  const height = OPENING_ROWS * ART_TILE;
+  const out = backdrop(GAP + sheets.walls.length * (width + GAP), GAP + height + GAP);
+  sheets.walls.forEach(({ material, image }, index) => {
+    const floor = sheets.floors.find((entry) => entry.terrain === WALL_FLOORS[material])!.image;
+    const room = tiledFloor(floor, OPENING_COLS, OPENING_ROWS);
+    const grid = { width: OPENING_COLS, height: OPENING_ROWS, walls: openingRoomWalls(material) };
+    const openings = doorOpenings(OPENING_ITEMS, grid);
+    for (const { tx, ty, frame, crop: part } of wallTileFrames({ ...grid, openings })) {
+      const at = wallFrameIndex(frame, tx);
+      const { x, w } = part ?? { x: 0, w: ART_TILE };
+      room.blit(crop(image, (at % WALL.columns) * ART_TILE + x, Math.floor(at / WALL.columns) * ART_TILE, w, ART_TILE), tx * ART_TILE + x, ty * ART_TILE);
+    }
+    for (const item of OPENING_ITEMS) {
+      const sheet = sheets.doors.find((entry) => entry.variant === doorVariantOf(item.piece))!.image;
+      const frame = doorFrameIndex(item.rotation, doorHingeOf(item.piece, item.rotation), 0);
+      const tx = item.index % OPENING_COLS;
+      const ty = Math.floor(item.index / OPENING_COLS);
+      const placed = doorPlacement(doorAxis(item), tx, ty, DOOR.variants[doorVariantOf(item.piece)].span);
+      room.blit(frameOf(sheet, DOOR, frame % DOOR.columns, Math.floor(frame / DOOR.columns)), placed.x, placed.y);
     }
     out.blit(room, GAP + index * (width + GAP), GAP);
   });
@@ -519,5 +592,6 @@ export function renderPreviews(sheets: PackSheets): Map<string, PixelBuffer> {
     ['terrain-pairs.png', upscale(terrainPairsPreview(sheets), PREVIEW_SCALE)],
     ['terrain.png', upscale(terrainScene(sheets), PREVIEW_SCALE)],
     ['walls.png', upscale(wallsPreview(sheets), PREVIEW_SCALE)],
+    ['wall-openings.png', upscale(wallOpeningsPreview(sheets), PREVIEW_SCALE)],
   ]);
 }

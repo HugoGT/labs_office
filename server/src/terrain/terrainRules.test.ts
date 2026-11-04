@@ -414,60 +414,56 @@ describe('findDecorConflict', () => {
     expect(conflict([], [])).toBeNull();
   });
 
-  describe('doors (#223, #233, S3)', () => {
+  describe('doors and windows in tile walls (#223, #233, S6-S10)', () => {
     const door = (index: number, rotation: 0 | 90 | 180 | 270 = 0, piece = 'door-wood'): DecorItem => ({ index, piece, rotation });
     const doorInfo = (piece: string): DecorPieceInfo | null => {
       if (!piece.startsWith('door-')) return infoOf(piece);
       return { kind: 'door', footprint: { w: piece === 'door-wood-double' ? 3 : 2, h: 1 } };
     };
-    const posts = (...at2: [number, number][]) => at2.map(([x, y]) => ({ index: at(x, y), piece: 'wall-brick' as 'wall-brick' | 'wall-plaster' | 'wall-glass' }));
-    const snapshotOf = (edits: ReturnType<typeof posts>) => terrainSnapshot(BASE_LAYOUT, BASE_LAYOUT.blocks, withWalls(BASE_LAYOUT.walls, edits));
+    type WallPiece = 'wall-brick' | 'wall-plaster' | 'wall-glass';
+    const walls = (...at2: [number, number, WallPiece?][]) => at2.map(([x, y, piece]) => ({ index: at(x, y), piece: piece ?? ('wall-brick' as WallPiece) }));
+    const snapshotOf = (edits: ReturnType<typeof walls>) => terrainSnapshot(BASE_LAYOUT, BASE_LAYOUT.blocks, withWalls(BASE_LAYOUT.walls, edits));
     const check = (after: DecorItem[], placed: number[], snapshot: ReturnType<typeof snapshotOf>) => findDecorConflict(after, new Set(placed), doorInfo, snapshot, STATIC);
-    /** A post at each end of a 2 tile span (67, 22)..(69, 22) and of a 4 tile one (67, 22)..(71, 22): no wall between them. */
-    const single = snapshotOf(posts([67, 22], [69, 22]));
-    const double = snapshotOf(posts([67, 22], [70, 22]));
+    /** A horizontal run on row 22, columns 66..71 (glass from 69 on), and a vertical one in column 74, rows 18..26. */
+    const run = snapshotOf([
+      ...walls([66, 22], [67, 22], [68, 22]),
+      ...walls([69, 22, 'wall-glass'], [70, 22, 'wall-glass'], [71, 22, 'wall-glass']),
+      ...[18, 19, 20, 21, 22, 23, 24, 25, 26].map((ty) => ({ index: at(74, ty), piece: 'wall-plaster' as WallPiece })),
+    ]);
 
-    it('takes a door between two posts with no wall between them, whatever the side it opens to', () => {
-      expect(check([door(free)], [free], single)).toBeNull();
-      expect(check([door(free, 180)], [free], single)).toBeNull();
-      // A vertical span (67, 22)..(67, 24) takes the same two posts at its ends.
-      const vertical = snapshotOf(posts([67, 22], [67, 24]));
-      expect(check([door(free, 90)], [free], vertical)).toBeNull();
-      expect(check([door(free, 270)], [free], vertical)).toBeNull();
+    it('takes a door or a window between two walls of a horizontal run, whatever the side it opens to and the materials (S7)', () => {
+      expect(check([door(free)], [free], run)).toBeNull();
+      expect(check([door(free, 180)], [free], run)).toBeNull();
+      expect(check([door(at(68, 22))], [at(68, 22)], run)).toBeNull();
+      expect(check([door(free, 0, 'door-wood-double')], [free], run)).toBeNull();
+      expect(check([door(free, 0, 'door-glass-window')], [free], run)).toBeNull();
     });
 
-    it('takes a double door between two posts three tiles apart, and a single one does not fit there', () => {
-      expect(check([door(free, 0, 'door-wood-double')], [free], double)).toBeNull();
-      expect(check([door(free, 90, 'door-wood-double')], [free], snapshotOf(posts([67, 22], [67, 25])))).toBeNull();
-      expect(check([door(free)], [free], double)).toBe('placement');
-      expect(check([door(free, 0, 'door-wood-double')], [free], single)).toBe('placement');
+    it('refuses a door or window with no wall past an end or under it, off its run, or with no wall at all (S7)', () => {
+      for (const piece of ['door-wood', 'door-glass-window']) {
+        expect(check([door(at(66, 22), 0, piece)], [at(66, 22)], run)).toBe('placement');
+        expect(check([door(at(70, 22), 0, piece)], [at(70, 22)], run)).toBe('placement');
+        expect(check([door(at(67, 21), 0, piece)], [at(67, 21)], run)).toBe('placement');
+        expect(check([door(free, 0, piece)], [free], BASE_TERRAIN)).toBe('placement');
+      }
+      expect(check([door(at(69, 22), 0, 'door-wood-double')], [at(69, 22)], run)).toBe('placement');
     });
 
-    it('takes a door between posts of two materials and posts at a corner or an L', () => {
-      const mixed = snapshotOf([{ index: at(67, 22), piece: 'wall-plaster' }, { index: at(69, 22), piece: 'wall-glass' }]);
-      expect(check([door(free)], [free], mixed)).toBeNull();
-      // Each end post is the corner of a wall that turns away from the door: an L either side.
-      const corners = snapshotOf(posts([67, 22], [67, 23], [67, 24], [69, 22], [69, 23], [69, 24], [70, 24]));
-      expect(check([door(free)], [free], corners)).toBeNull();
-    });
-
-    it('refuses a door with a post missing at either end, with no wall at all, or leaving the map', () => {
-      expect(check([door(free)], [free], snapshotOf(posts([67, 22])))).toBe('placement');
-      expect(check([door(free)], [free], snapshotOf(posts([69, 22])))).toBe('placement');
-      expect(check([door(free)], [free], BASE_TERRAIN)).toBe('placement');
-      // Posts around it but not at its ends: one tile off.
-      expect(check([door(free)], [free], snapshotOf(posts([66, 22], [70, 22])))).toBe('placement');
-      expect(check([door(at(0, 0), 90)], [at(0, 0)], snapshotOf(posts([0, 0])))).toBe('placement');
+    it('refuses a window in a vertical run and takes a door there, in its dark top (S8, S9)', () => {
+      expect(check([door(at(74, 20), 90, 'door-glass-window')], [at(74, 20)], run)).toBe('placement');
+      expect(check([door(at(74, 20), 270, 'door-glass-window')], [at(74, 20)], run)).toBe('placement');
+      expect(check([door(at(74, 20), 90)], [at(74, 20)], run)).toBeNull();
+      expect(check([door(at(74, 24), 90)], [at(74, 24)], run)).toBe('placement');
     });
 
     it('keeps other items off the tiles of a door, and refuses a door over another item', () => {
-      // Any other piece still keeps off the tiles the wall touches.
-      expect(check([{ index: free, piece: 'chair-wood', rotation: 0 }], [free], single)).toBe('placement');
-      // Another item on one of the door footprint tiles refuses it, on either side or along its span.
-      expect(check([door(free), { index: at(67, 21), piece: 'chair-wood', rotation: 0 }], [free], single)).toBe('placement');
-      expect(check([door(free), { index: at(68, 22), piece: 'chair-wood', rotation: 0 }], [free], single)).toBe('placement');
-      // Beyond its span it is free.
-      expect(check([door(free), { index: at(70, 21), piece: 'chair-wood', rotation: 0 }], [free], single)).toBeNull();
+      expect(check([{ index: free, piece: 'chair-wood', rotation: 0 }], [free], run)).toBe('placement');
+      // Another item in the doorway, on the wall's tile above or below, refuses it.
+      expect(check([door(free), { index: at(67, 23), piece: 'chair-wood', rotation: 0 }], [free], run)).toBe('placement');
+      // A door in a vertical run keeps its sides clear for its leaf.
+      expect(check([door(at(74, 20), 90), { index: at(75, 21), piece: 'chair-wood', rotation: 0 }], [at(74, 20)], run)).toBe('placement');
+      // Beyond the wall it is free.
+      expect(check([door(free), { index: at(67, 24), piece: 'chair-wood', rotation: 0 }], [free], run)).toBeNull();
     });
   });
 

@@ -31,8 +31,8 @@ const GROUPS: readonly { kinds: readonly DecorCatalogKind[]; label: string }[] =
   { kinds: ['table', 'sofa'], label: 'Sala' },
   // Only the office scope offers them (`fitsDeskArea` leaves trees out).
   { kinds: ['tree'], label: 'Árboles' },
-  // #223: only the office scope offers them (the desk scope's `fitsDeskArea` leaves doors out).
-  { kinds: ['door'], label: 'Puertas' },
+  // #223: only the office scope offers them (the desk scope's `fitsDeskArea` leaves doors out). A window is a piece of the door kind.
+  { kinds: ['door'], label: 'Puertas y ventanas' },
 ];
 
 /** The kinds whose pieces that take a color come first, so the ones people paint are at hand. */

@@ -922,12 +922,12 @@ describe('auto-walk around walls and desks (#219, #221)', () => {
       const told: unknown[] = [];
       arena.bridge.on('spacelocked', (payload) => told.push(payload));
       arena.bridge.emitCommand('spacesconfig', { spaces: [SALA], version: 'v1' });
-      // The room's door on its bottom line (y = 10 * TILE), over tiles 21..22, and the post at the east end of its span.
+      // The room's door in a wall along row 10, over tiles 21..22, and something blocking at the east end of its span.
       connector.handlers()!.onDecor?.([{ index: 10 * BASE_LAYOUT.width + 21, piece: 'door-wood', rotation: 0 }]);
       arena.movement.collisionRects = [{ x: 23 * TILE - 8, y: 10 * TILE - 8, w: 16, h: 16 }];
       arena.movement.buildPieceColliders();
       connector.handlers()!.onLockedSpaces?.(new Map([['sala', 'otra-sesion']]));
-      // Lined up with the door against its east end, right under the post.
+      // Lined up with the door against its east end, right under what blocks there.
       arena.body.reset(23 * TILE - 4, 10 * TILE + 20);
       arena.frame();
 

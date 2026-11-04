@@ -38,8 +38,9 @@ import { isEditableElementFocused } from './inputFocusGuard';
 import { TILE } from './mapData';
 import { INITIAL_WHEEL_STATE, ROTATE_WHEEL_RULES, accumulateWheel, type WheelState } from './mapZoom';
 import type { OfficeBridge } from './officeBridge';
+import { decorPieceTurns } from './officeDoors';
 import { PressHold } from './pressHold';
-import { decorFootprint, decorItemKey, decorKey, decorKeyIndex, decorLayerOf, isRotatable, type DecorItem, type DecorPieceInfo, type DecorTileRect } from './officeDecor';
+import { decorFootprint, decorItemKey, decorKey, decorKeyIndex, decorLayerOf, type DecorItem, type DecorPieceInfo, type DecorTileRect } from './officeDecor';
 import { SELECTION_BUTTON_PX, SELECTION_DELETE_COLOR, SelectionButtons } from './selectionButtons';
 import { ContextOutlines } from './spaceOutline';
 
@@ -212,11 +213,12 @@ export class DecorEditLayer {
 
   /**
    * Whether the wheel turns the brush instead of zooming: a chair, a desk
-   * table or a room table is picked. A plant has nothing to turn.
+   * table or a room table is picked. A plant has nothing to turn, nor a
+   * window (`decorPieceTurns`).
    */
   holdsWheel(): boolean {
     const brush = this.command?.brush;
-    return brush != null && isRotatable(brush.info.kind);
+    return brush != null && decorPieceTurns(brush.piece, brush.info.kind);
   }
 
   /** Judges and draws the ghost again, and the selection: the layer or the terrain under it changed. */

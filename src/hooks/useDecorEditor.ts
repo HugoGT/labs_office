@@ -18,7 +18,6 @@ import {
   decorRotationFor,
   defaultDecorRotation,
   fitsInsideDesk,
-  isRotatable,
   nextDecorRotation,
   withDecor,
   type DecorEdit,
@@ -28,7 +27,7 @@ import {
   type DecorTileRect,
 } from '../game/officeDecor';
 import type { OfficeDecorPort } from '../game/officeDecorPort';
-import { doorPosts, isDoorPiece } from '../game/officeDoors';
+import { decorPieceTurns, doorPosts, isDoorPiece, isWindowPiece, withReplacedDoors } from '../game/officeDoors';
 import { usePersistedColors } from './usePersistedColors';
 
 /**
@@ -65,9 +64,9 @@ import { usePersistedColors } from './usePersistedColors';
 /** Refused with these, this person may not edit at all any more: no further writes. */
 const BLOCKING_ERRORS = ['forbidden', 'unauthorized', 'terrain-not-configured', 'no-desk'];
 
-/** `terrain-under-placement`: the item needs free walkable ground; a door, a wall post at each end of its span (#223, #233). */
+/** `terrain-under-placement`: the item needs free walkable ground; a door or window, a wall run between two walls (#223, #233, tile walls). */
 export const DECOR_UNDER_PLACEMENT_MESSAGE =
-  'Ese mueble necesita suelo libre: no puede ir sobre agua, vacío, una pared, otro mueble ni la entrada. La puerta va entre dos paredes, una en cada extremo: 2 casillas de ancho, 4 la puerta doble. Elige otra casilla.';
+  'Ese mueble necesita suelo libre: no puede ir sobre agua, vacío, una pared, otro mueble ni la entrada. La puerta o la ventana va en una pared, entre dos paredes: 2 casillas de ancho, 3 la puerta doble, y la ventana solo en paredes horizontales. Elige otra casilla.';
 /** A click the desk-scoped editor refuses before asking: the server would answer `outside-desk`. */
 export const DECOR_AREA_MESSAGE = 'Solo puedes decorar dentro de tu escritorio: elige una casilla dentro de su recuadro.';
 /** A click the editor refuses before asking, and `desk-chair-limit` from the server: a desk takes three chairs at most. */
@@ -192,8 +191,9 @@ function placementOf(item: Pick<DecorBrush, 'piece' | 'rotation' | 'color'>): No
 }
 
 function brushFor(option: DecorPick, rotation: DecorRotation, color: string | undefined): DecorBrush {
-  // A room table takes the symmetric half of the turn (0 or 90), a plant none.
-  const brush: DecorBrush = { kind: 'piece', piece: option.id, info: option.info, rotation: decorRotationFor(option.info.kind, rotation) };
+  // A room table takes the symmetric half of the turn (0 or 90), a plant none, a window none: it only stands horizontal (L23).
+  const turn = isWindowPiece(option.id) ? 0 : decorRotationFor(option.info.kind, rotation);
+  const brush: DecorBrush = { kind: 'piece', piece: option.id, info: option.info, rotation: turn };
   return option.info.colorable === true && color !== undefined ? { ...brush, color } : brush;
 }
 
@@ -304,7 +304,8 @@ export function useDecorEditor({
       }
       click.push(...removals);
     }
-    queue(...withFallenTopItems(after, click, infoOf, MAP_W));
+    // A door or window placed over another replaces it (S6): it leaves in the same click, so the preview shows it gone.
+    queue(...withFallenTopItems(after, withReplacedDoors(after, click, MAP_W), infoOf, MAP_W));
     return true;
   }
 
@@ -428,7 +429,7 @@ export function useDecorEditor({
 
   function turn(step: 1 | -1): void {
     // Only a picked piece that turns: the map asks only then (`holdsWheel`).
-    if (brush === null || !isRotatable(brush.info.kind)) return;
+    if (brush === null || !decorPieceTurns(brush.piece, brush.info.kind)) return;
     // A chair or desk table turns a quarter, a room table between horizontal and vertical.
     const next = nextDecorRotation(brush.rotation, step, brush.info.kind);
     // A moved item turns alone; the palette keeps its own turn for the next pick.
