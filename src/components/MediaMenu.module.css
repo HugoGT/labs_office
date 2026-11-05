@@ -104,6 +104,8 @@
 }
 
 .label {
+  /* The click and the hit are the item's, never the text's. */
+  pointer-events: none;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
