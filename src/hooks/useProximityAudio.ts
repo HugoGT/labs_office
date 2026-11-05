@@ -217,6 +217,8 @@ export function useProximityAudio(
   const [devicePreferences, setDevicePreferences] = useState<DevicePreferences>(() => devicesStore.load());
   /** Fresh picks for a room connecting later, like `cameraFilterRef`. */
   const devicePreferencesRef = useRef(devicePreferences);
+  /** Latest pick per kind: a late failure of an older one never undoes it. */
+  const deviceRequestsRef = useRef<Record<DeviceKind, number>>({ audioinput: 0, audiooutput: 0, videoinput: 0 });
   const [devices, setDevices] = useState<DeviceLists>(NO_DEVICES);
   /** By ref, like `onMeetingNotice`: a new callback each render must not rebuild the room. */
   const onDeviceNoticeRef = useRef(onDeviceNotice);
@@ -873,12 +875,29 @@ export function useProximityAudio(
   const selectDevice = useCallback(
     (kind: DeviceKind, deviceId: string) => {
       if (kind === 'audiooutput' && !audioOutputSelectable) return;
-      const next = { ...devicePreferencesRef.current, [kind]: deviceId };
-      devicePreferencesRef.current = next;
-      setDevicePreferences(next);
-      devicesStore.save(kind, deviceId);
+      const previous = devicePreferencesRef.current[kind];
+      const setPreference = (value: string | null) => {
+        const next = { ...devicePreferencesRef.current, [kind]: value };
+        devicePreferencesRef.current = next;
+        setDevicePreferences(next);
+      };
+      setPreference(deviceId);
+      const connection = connectionRef.current;
       // Between rooms the next one applies it on connect.
-      void connectionRef.current?.switchDevice(kind, deviceId);
+      if (!connection) {
+        devicesStore.save(kind, deviceId);
+        return;
+      }
+      const request = (deviceRequestsRef.current[kind] += 1);
+      void connection.switchDevice(kind, deviceId).then((switched) => {
+        if (switched) {
+          devicesStore.save(kind, deviceId);
+          return;
+        }
+        // The call went on with the old device (#288): showing or carrying
+        // the failed one to the next room would be a lie. A newer pick wins.
+        if (deviceRequestsRef.current[kind] === request) setPreference(previous);
+      });
     },
     [audioOutputSelectable, devicesStore],
   );

@@ -2304,6 +2304,64 @@ describe('useProximityAudio: microphone, speaker and camera picked per browser (
     expect(connection.switchDevice).toHaveBeenCalledWith('audioinput', 'headset');
   });
 
+  it('a pick made in a live room is kept across a door and a room rebuild (#288)', async () => {
+    vi.useFakeTimers();
+    try {
+      const { result, options, join } = renderWithDevices({ connections: [fakeConnection(), fakeConnection()] });
+      await join(null);
+
+      await act(async () => result.current.selectDevice('audioinput', 'headset'));
+      await act(async () => result.current.selectDevice('videoinput', 'cam1'));
+      await join('sala');
+      await act(async () => options[1].onDisconnected?.('rebuild'));
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(rebuildDelay(0, 1));
+      });
+
+      expect(options).toHaveLength(3);
+      for (const opts of options.slice(1)) {
+        expect(opts.preferredDevices).toMatchObject({ audioinput: 'headset', videoinput: 'cam1' });
+      }
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a pick the live room could not switch to is undone: shown, remembered and carried as before (#288)', async () => {
+    const connection = fakeConnection({ switchDevice: vi.fn(async () => false) });
+    const { result, store, options, join } = renderWithDevices({
+      store: memoryDeviceStore({ audioinput: 'headset', audiooutput: null, videoinput: null }),
+      connections: [connection],
+    });
+    await join(null);
+    await act(async () => options[0].onDevicesChanged?.(DEVICES));
+
+    await act(async () => result.current.selectDevice('audioinput', 'default'));
+    await join('sala');
+
+    expect(connection.switchDevice).toHaveBeenCalledWith('audioinput', 'default');
+    expect(result.current.selectedDevices.audioinput).toBe('headset');
+    expect(store.save).not.toHaveBeenCalled();
+    expect(options[1].preferredDevices?.audioinput).toBe('headset');
+  });
+
+  it('an older pick that fails late does not undo a newer one', async () => {
+    const first = deferred<boolean>();
+    const connection = fakeConnection({
+      switchDevice: vi.fn().mockReturnValueOnce(first.promise).mockResolvedValueOnce(true),
+    });
+    const { result, store, options, join } = renderWithDevices({ connections: [connection] });
+    await join(null);
+    await act(async () => options[0].onDevicesChanged?.(DEVICES));
+
+    await act(async () => result.current.selectDevice('audioinput', 'default'));
+    await act(async () => result.current.selectDevice('audioinput', 'headset'));
+    await act(async () => first.resolve(false));
+
+    expect(result.current.selectedDevices.audioinput).toBe('headset');
+    expect(store.save).toHaveBeenCalledExactlyOnceWith('audioinput', 'headset');
+  });
+
   it('a pick between rooms waits for the next room', async () => {
     const { result, options, join } = renderWithDevices();
 
