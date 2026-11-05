@@ -377,7 +377,10 @@ export function createOfficeRoom(): Room {
   return new Room({
     adaptiveStream: true,
     dynacast: true,
-    publishDefaults: { audioPreset: AudioPresets.speech },
+    // Muted must mean not captured: a capture kept open (the SDK's default)
+    // keeps the system's "microphone in use" indicator on. Unmuting captures
+    // again in the same publication, so nobody resubscribes.
+    publishDefaults: { audioPreset: AudioPresets.speech, stopMicTrackOnMute: true },
     audioCaptureDefaults: OFFICE_AUDIO_CAPTURE,
   });
 }
