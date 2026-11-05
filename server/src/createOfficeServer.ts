@@ -22,7 +22,8 @@ import { BASE_CHAIR_PIECE } from '../../src/game/pieceCollisions.ts';
 import { BASE_MAP_SEATS, type MapSeat } from '../../src/game/seating.ts';
 import type { DecorTileRect } from '../../src/game/officeDecor.ts';
 import { TILE, type SpaceArea } from '../../src/game/mapData.ts';
-import { livekitRoomFor } from '../../src/game/officeProtocol.ts';
+import { livekitRoomFor, type MediaEventMessage } from '../../src/game/officeProtocol.ts';
+import { createOfficeMetrics, playersByRoom } from './observability/officeMetrics.ts';
 import {
   handleAdminSession,
   handleCreateInvitation,
@@ -270,6 +271,8 @@ export interface OfficeServer {
    * para las rutas de administracion y para los tests, igual que `sessions`.
    */
   directory?: UserDirectory;
+  /** The Prometheus text for the metrics endpoint (#275, `observability/metricsServer.ts`). */
+  metricsText(): string;
   /** Puerto realmente asignado. Con `listen(0)` lo elige el sistema. */
   port(): number;
   listen(port: number): Promise<number>;
@@ -1469,6 +1472,8 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   app.post('/recordings/stop', recordingRoute(handleStopRecording));
   app.post('/recordings/url', recordingRoute(handleRecordingUrl));
 
+  const metrics = createOfficeMetrics();
+
   const httpServer = createServer(app);
   const gameServer = new Server({
     transport: new WebSocketTransport({
@@ -1507,6 +1512,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
       spacesChangeListeners.add(listener);
       return () => { spacesChangeListeners.delete(listener); };
     },
+    recordMediaEvent: (event: MediaEventMessage) => metrics.recordMediaEvent(event),
     stopRecording: (entry: Parameters<typeof finishRecording>[0]) => {
       const deps = recordingDeps();
       return finishRecording(entry, deps.egress, deps).then(() => undefined);
@@ -1525,6 +1531,16 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     terrain,
     collisions,
     directory,
+    metricsText() {
+      const positions = sessions.ids().flatMap((id) => {
+        const position = sessions.positionOf(id);
+        return position === undefined ? [] : [position];
+      });
+      return metrics.render({
+        playersByRoom: playersByRoom(positions, spaceAreas),
+        activeRecordings: recordings.list().length,
+      });
+    },
     port() {
       const address = httpServer.address() as AddressInfo | null;
       if (!address) throw new Error('server is not listening yet');

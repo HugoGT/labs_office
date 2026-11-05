@@ -15,6 +15,7 @@
  */
 
 import {
+  ConnectionQuality,
   DisconnectReason,
   Room,
   RoomEvent,
@@ -31,6 +32,7 @@ import {
 import type { AttachableTrack } from './attachableTrack';
 import { loadBackgroundBlur as loadRealBackgroundBlur } from './backgroundBlur';
 import { blurRadiusOf, isBlurFilter, type BlurFilter, type CameraFilter } from './cameraFilter';
+import { MEDIA_DISCONNECT_REASONS, type MediaDisconnectReason, type MediaEventMessage } from './officeProtocol';
 import { reconcileSubscriptions } from './proximityAudio';
 import { createRemoteAudioSink } from './remoteAudioSink';
 import {
@@ -165,6 +167,16 @@ export interface ConnectLivekitRoomOptions {
    * without it the person only hears silence with nothing explaining it.
    */
   onReconnectingChanged?: (reconnecting: boolean) => void;
+  /**
+   * What happened to this connection, for the server's metrics (#275):
+   * connected and reconnected with how long it took, disconnected with the
+   * reason's name. Never our own `disconnect()`, and nothing about who.
+   */
+  onMediaEvent?: (event: MediaEventMessage) => void;
+  /** Quality LiveKit measures for the own connection (#275), on every change. */
+  onConnectionQualityChanged?: (quality: ConnectionQualityLevel) => void;
+  /** Clock for those durations; injectable for tests. */
+  now?: () => number;
   /** Injectable for tests; by default the lazy `@livekit/track-processors`. */
   loadBackgroundBlur?: () => Promise<BackgroundBlur>;
   /**
@@ -174,6 +186,23 @@ export interface ConnectLivekitRoomOptions {
    * itself are its result instead, never this callback.
    */
   onCameraFilterFailed?: () => void;
+}
+
+/** livekit-client's `ConnectionQuality` values, as plain strings for the UI. */
+export type ConnectionQualityLevel = 'excellent' | 'good' | 'poor' | 'lost' | 'unknown';
+
+const QUALITY_LEVELS: Record<ConnectionQuality, ConnectionQualityLevel> = {
+  [ConnectionQuality.Excellent]: 'excellent',
+  [ConnectionQuality.Good]: 'good',
+  [ConnectionQuality.Poor]: 'poor',
+  [ConnectionQuality.Lost]: 'lost',
+  [ConnectionQuality.Unknown]: 'unknown',
+};
+
+/** The reason's enum name, the label the server counts it by (`mediaEventOf`). */
+function disconnectReasonName(reason: DisconnectReason | undefined): MediaDisconnectReason {
+  const name = reason === undefined ? undefined : DisconnectReason[reason];
+  return MEDIA_DISCONNECT_REASONS.find((known) => known === name) ?? 'UNKNOWN_REASON';
 }
 
 /** What a disconnect calls for (#283); `ignore` never reaches `onDisconnected`. */
@@ -252,6 +281,9 @@ export async function connectLivekitRoom({
   onRoomMediaChanged,
   onDisconnected,
   onReconnectingChanged,
+  onMediaEvent,
+  onConnectionQualityChanged,
+  now = () => performance.now(),
   loadBackgroundBlur = loadRealBackgroundBlur,
   onCameraFilterFailed,
 }: ConnectLivekitRoomOptions): Promise<LivekitRoomConnection> {
@@ -564,18 +596,36 @@ export async function connectLivekitRoom({
     onActiveSpeakersChanged?.(speakers.map((speaker) => speaker.identity));
   });
 
+  room.on(RoomEvent.ConnectionQualityChanged, (quality: ConnectionQuality, participant: Participant) => {
+    if (participant !== room.localParticipant) return;
+    onConnectionQualityChanged?.(QUALITY_LEVELS[quality] ?? 'unknown');
+  });
+
+  const connectStartedAt = now();
   await room.connect(url, token, { autoSubscribe: false });
+  onMediaEvent?.({ event: 'connected', durationMs: now() - connectStartedAt });
   // Only fired once LiveKit's own resume/reconnect attempts are exhausted
   // (#84): a mere blip is `Reconnecting`/`Reconnected` and needs nothing
   // here. Listened to after `connect()`, whose own failure the caller gets
   // as a rejection instead.
   room.on(RoomEvent.Disconnected, (reason?: DisconnectReason) => {
     if (closing) return;
+    onMediaEvent?.({ event: 'disconnected', reason: disconnectReasonName(reason) });
     const reaction = disconnectReaction(reason);
     if (reaction !== 'ignore') onDisconnected?.(reaction);
   });
-  room.on(RoomEvent.Reconnecting, () => onReconnectingChanged?.(true));
-  room.on(RoomEvent.Reconnected, () => onReconnectingChanged?.(false));
+  let reconnectingSince: number | null = null;
+  room.on(RoomEvent.Reconnecting, () => {
+    reconnectingSince = now();
+    onReconnectingChanged?.(true);
+  });
+  room.on(RoomEvent.Reconnected, () => {
+    if (reconnectingSince !== null) {
+      onMediaEvent?.({ event: 'reconnected', durationMs: now() - reconnectingSince });
+      reconnectingSince = null;
+    }
+    onReconnectingChanged?.(false);
+  });
 
   // El estado inicial no llega por evento: sin esto, un navegador que ya nace
   // bloqueado no se reporta hasta el primer cambio, que puede no ocurrir nunca.

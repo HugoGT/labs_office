@@ -31,6 +31,7 @@ import {
   characterIdOf,
   type AccessDeniedReason,
   type Facing,
+  type MediaEventMessage,
   type PresenceStatus,
   type RecordingReadyPayload,
 } from './officeProtocol';
@@ -333,6 +334,8 @@ export interface OfficeConnection {
   sendLock(): void;
   /** Asks to unlock the space the player stands in; only whoever locked it may. */
   sendUnlock(): void;
+  /** Reports the own LiveKit connection for the server's metrics (#275); the room only counts it. */
+  sendMediaEvent(event: MediaEventMessage): void;
   leave(): Promise<void>;
 }
 
@@ -704,6 +707,9 @@ export async function connectOfficeRoom({
     },
     sendUnlock() {
       room.send('unlock', {});
+    },
+    sendMediaEvent(event) {
+      room.send('media', event);
     },
     async leave() {
       // El orden importa: marcar primero es lo que hace que el `onLeave` que

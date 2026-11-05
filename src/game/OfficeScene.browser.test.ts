@@ -1285,6 +1285,7 @@ describe('OfficeScene: comando setStatus via el puente (#1)', () => {
       sendStand: () => {},
       sendLock: () => {},
       sendUnlock: () => {},
+      sendMediaEvent: () => {},
       leave: async () => {},
     };
 

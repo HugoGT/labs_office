@@ -331,6 +331,45 @@ if [[ "${LIVEKIT_CONFIG_BEFORE}" != "${LIVEKIT_CONFIG_AFTER}" ]]; then
   docker compose --project-directory "${WORKDIR}" restart livekit
 fi
 
+# --- Observability (#275) -------------------------------------------------
+
+# The Ops Agent sends VM and per-process metrics and scrapes the Prometheus
+# endpoints of LiveKit, Egress and the server (infra/gcp/ops-agent.yaml), for
+# the dashboard and the alerts in terraform/monitoring.tf. Installed here and
+# not in startup-script.sh: changing that script replaces the VM (README,
+# "Startup script changes"), and this runs on every deploy and every boot.
+#
+# Never fatal: a deploy that cannot install or configure the agent leaves the
+# office running and only the metrics missing. Under `||`, `set -e` does not
+# apply inside the function, hence every step returns explicitly.
+ops_agent() {
+  local config=/etc/google-cloud-ops-agent/config.yaml
+  local installer before after
+
+  if ! dpkg -s google-cloud-ops-agent >/dev/null 2>&1; then
+    log "installing the Ops Agent"
+    installer="$(mktemp)" || return 1
+    curl -fsSL https://dl.google.com/cloudagents/add-google-cloud-ops-agent-repo.sh -o "${installer}" || return 1
+    bash "${installer}" --also-install || return 1
+    rm -f "${installer}"
+  fi
+
+  before="$(sha256sum "${config}" 2>/dev/null || true)"
+  metadata office-ops-agent-config >"${config}.new" || return 1
+  grep -q 'prometheus' "${config}.new" || return 1
+  chmod 0644 "${config}.new" || return 1
+  mv "${config}.new" "${config}" || return 1
+  after="$(sha256sum "${config}")" || return 1
+
+  # The agent reads its config only at startup, like LiveKit.
+  if [[ "${before}" != "${after}" ]]; then
+    log "Ops Agent config changed: restarting it"
+    systemctl restart google-cloud-ops-agent || return 1
+  fi
+}
+
+ops_agent || log "aviso: the Ops Agent could not be installed or configured; the office runs without metrics"
+
 # Las imagenes viejas se acumulan una por despliegue y el disco son 20 GB.
 docker image prune -af --filter "until=168h" >/dev/null || true
 

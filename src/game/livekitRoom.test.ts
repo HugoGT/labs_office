@@ -1,7 +1,8 @@
-import { DisconnectReason, Room, RoomEvent } from 'livekit-client';
+import { ConnectionQuality, DisconnectReason, Room, RoomEvent } from 'livekit-client';
 import { describe, expect, it, vi } from 'vitest';
 import type { AttachableTrack } from './attachableTrack';
 import { connectLivekitRoom, createOfficeRoom, disconnectReaction } from './livekitRoom';
+import { MEDIA_DISCONNECT_REASONS } from './officeProtocol';
 
 /**
  * Sala falsa: reproduce solo la superficie de `Room` que este modulo usa. El
@@ -806,6 +807,120 @@ describe('connectLivekitRoom: a short outage is reported while LiveKit retries i
     room.emit(RoomEvent.Reconnected);
 
     expect(onReconnectingChanged.mock.calls).toEqual([[true], [false]]);
+  });
+});
+
+describe('connectLivekitRoom: media reports for the metrics (#275)', () => {
+  /** A clock the test moves by hand: durations are differences of it. */
+  function clock() {
+    let now = 1000;
+    return { now: () => now, advance: (ms: number) => { now += ms; } };
+  }
+
+  it('reports the connection with how long it took', async () => {
+    const room = fakeRoom();
+    const time = clock();
+    room.connect = vi.fn(async () => {
+      time.advance(800);
+      return undefined;
+    });
+    const onMediaEvent = vi.fn();
+
+    await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onMediaEvent,
+      now: time.now,
+    });
+
+    expect(onMediaEvent.mock.calls).toEqual([[{ event: 'connected', durationMs: 800 }]]);
+  });
+
+  it('reports a reconnection with how long LiveKit took to get it back', async () => {
+    const room = fakeRoom();
+    const time = clock();
+    const onMediaEvent = vi.fn();
+    await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onMediaEvent,
+      now: time.now,
+    });
+    onMediaEvent.mockClear();
+
+    room.emit(RoomEvent.Reconnecting);
+    time.advance(2500);
+    room.emit(RoomEvent.Reconnected);
+
+    expect(onMediaEvent.mock.calls).toEqual([[{ event: 'reconnected', durationMs: 2500 }]]);
+  });
+
+  it('reports a disconnection with the name of its reason, even one that stops for good', async () => {
+    const room = fakeRoom();
+    const onMediaEvent = vi.fn();
+    await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onMediaEvent,
+    });
+    onMediaEvent.mockClear();
+
+    room.emit(RoomEvent.Disconnected, DisconnectReason.SIGNAL_CLOSE);
+    room.emit(RoomEvent.Disconnected, DisconnectReason.DUPLICATE_IDENTITY);
+    room.emit(RoomEvent.Disconnected);
+
+    expect(onMediaEvent.mock.calls).toEqual([
+      [{ event: 'disconnected', reason: 'SIGNAL_CLOSE' }],
+      [{ event: 'disconnected', reason: 'DUPLICATE_IDENTITY' }],
+      [{ event: 'disconnected', reason: 'UNKNOWN_REASON' }],
+    ]);
+  });
+
+  it('reports nothing for our own disconnect', async () => {
+    const room = fakeRoom();
+    room.disconnect = vi.fn(async () => {
+      room.emit(RoomEvent.Disconnected, DisconnectReason.CLIENT_INITIATED);
+      return undefined;
+    });
+    const onMediaEvent = vi.fn();
+    const connection = await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onMediaEvent,
+    });
+    onMediaEvent.mockClear();
+
+    await connection.disconnect();
+
+    expect(onMediaEvent).not.toHaveBeenCalled();
+  });
+
+  it('knows every reason livekit-client can give, so none is reported as unknown by mistake', () => {
+    const names = Object.keys(DisconnectReason).filter((key) => Number.isNaN(Number(key)));
+    expect([...MEDIA_DISCONNECT_REASONS].sort()).toEqual(names.sort());
+  });
+});
+
+describe('connectLivekitRoom: own connection quality (#275)', () => {
+  it('reports the quality LiveKit measures for the local participant only', async () => {
+    const room = fakeRoom();
+    const onConnectionQualityChanged = vi.fn();
+    await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onConnectionQualityChanged,
+    });
+
+    room.emit(RoomEvent.ConnectionQualityChanged, ConnectionQuality.Poor, room.localParticipant);
+    room.emit(RoomEvent.ConnectionQualityChanged, ConnectionQuality.Lost, { identity: 'otro' });
+    room.emit(RoomEvent.ConnectionQualityChanged, ConnectionQuality.Excellent, room.localParticipant);
+
+    expect(onConnectionQualityChanged.mock.calls).toEqual([['poor'], ['excellent']]);
   });
 });
 

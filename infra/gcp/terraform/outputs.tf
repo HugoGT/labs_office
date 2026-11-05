@@ -92,3 +92,8 @@ output "db_private_ip" {
   description = "Private IP of the directory database. Only reachable from inside the VPC; office-deploy reads it from instance metadata."
   value       = google_sql_database_instance.directory.private_ip_address
 }
+
+output "monitoring_dashboard_url" {
+  description = "Cloud Monitoring dashboard of the office (issue #275)."
+  value       = "https://console.cloud.google.com/monitoring/dashboards/builder/${element(split("/", google_monitoring_dashboard.office.id), 3)}?project=${var.project_id}"
+}

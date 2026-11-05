@@ -49,3 +49,7 @@ acme_email = "cambiar@ejemplo.com"
 # db_psa_cidr = "10.100.0.0/20"
 # Bump after adding a new version of the db-password secret, then redeploy.
 # db_password_version = 1
+
+# Monitoring alerts (issue #275): sustained high CPU, LiveKit down, disk almost
+# full during a recording. Empty: incidents only show in the console.
+# alert_email = "ops@example.com"

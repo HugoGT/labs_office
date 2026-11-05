@@ -158,4 +158,5 @@ Only a `test` environment exists; `infra/gcp/README.md` is the runbook.
 - Login fails closed: only the bootstrap superadmin is auto-created; every other account must be added from `/dashboard` (else 401 `not-provisioned`).
 - Password-reset emails depend on Identity Platform console settings no code manages (`infra/gcp/README.md`, "Password-reset email").
 - Local `infra/livekit/livekit.yaml` has TURN disabled and UDP 50000-50019 only; the deployed config is `infra/gcp/livekit.yaml.tpl`.
+- Metrics ports (LiveKit 6789, Egress 9090, server `METRICS_PORT` 9464) are never opened in the firewall and are published only on `127.0.0.1`; `server/src/observability/metricsExposure.test.ts` guards it. Never serve metrics from the app port.
 - PRs only add rules or gotchas to AGENTS.md. Never feature descriptions.

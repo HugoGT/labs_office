@@ -12,6 +12,7 @@ import { browserCameraFilterStore, type CameraFilterStore } from '../game/camera
 import type { LivekitConfig } from '../game/livekitEndpoint';
 import {
   connectLivekitRoom,
+  type ConnectionQualityLevel,
   type ConnectLivekitRoomOptions,
   type LivekitRoomConnection,
 } from '../game/livekitRoom';
@@ -90,6 +91,8 @@ export interface UseProximityAudioResult {
    * Without it the person only hears silence with nothing explaining it.
    */
   audioReconnecting: boolean;
+  /** Quality LiveKit measures for the own connection (#275); `'unknown'` without a room. */
+  connectionQuality: ConnectionQualityLevel;
   /** `true` en "No molestar": ni se publica ni se escucha audio de la oficina. */
   dnd: boolean;
   toggleMic: () => void;
@@ -171,6 +174,7 @@ export function useProximityAudio(
   const [audioAvailable, setAudioAvailable] = useState(false);
   const [audioBlocked, setAudioBlocked] = useState(false);
   const [audioReconnecting, setAudioReconnecting] = useState(false);
+  const [connectionQuality, setConnectionQuality] = useState<ConnectionQualityLevel>('unknown');
   /** By ref: a new function each render must not rebuild the room. */
   const randomRef = useRef(random);
   useEffect(() => {
@@ -296,6 +300,7 @@ export function useProximityAudio(
       setAudioAvailable(false);
       setAudioBlocked(false);
       setAudioReconnecting(false);
+      setConnectionQuality('unknown');
       // Ninguna pista, hablante o camara sobrevive a la sala que las reporto:
       // sin esto, salir de una sala dejaria el ultimo estado colgado en React.
       // Estando ya vacias se devuelve la MISMA coleccion, no una nueva: este
@@ -404,6 +409,13 @@ export function useProximityAudio(
         onReconnectingChanged: (reconnecting) => {
           if (!isCurrent()) return;
           setAudioReconnecting(reconnecting);
+        },
+        // Every report goes out, a replaced room's too: its disconnect is
+        // still one that happened (#275). Counted by the room, never who.
+        onMediaEvent: (event) => bridge.emitCommand('mediaEvent', event),
+        onConnectionQualityChanged: (quality) => {
+          if (!isCurrent()) return;
+          setConnectionQuality(quality);
         },
         onCameraFilterFailed: () => {
           if (!isCurrent()) return;
@@ -751,6 +763,7 @@ export function useProximityAudio(
     audioAvailable,
     audioBlocked,
     audioReconnecting,
+    connectionQuality,
     dnd,
     toggleMic,
     toggleCam,

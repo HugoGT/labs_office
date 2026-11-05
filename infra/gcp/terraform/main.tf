@@ -306,6 +306,15 @@ resource "google_project_iam_member" "vm_log_writer" {
   member  = "serviceAccount:${google_service_account.vm.email}"
 }
 
+# Project level too, for the same reason as logWriter: Cloud Monitoring has no
+# finer resource to bind it to. The Ops Agent writes the VM, process and
+# Prometheus metrics with it (#275); metricWriter can write, never read.
+resource "google_project_iam_member" "vm_metric_writer" {
+  project = var.project_id
+  role    = "roles/monitoring.metricWriter"
+  member  = "serviceAccount:${google_service_account.vm.email}"
+}
+
 # Tambien a nivel de proyecto, y por el mismo motivo que logWriter: Identity
 # Platform no tiene un recurso mas fino al que atar el rol, porque las cuentas
 # cuelgan del proyecto entero. Solo se concede cuando el servidor va a
@@ -599,6 +608,8 @@ resource "google_compute_instance" "office" {
     office-caddyfile      = file("${path.module}/../Caddyfile")
     office-livekit-config = file("${path.module}/../livekit.yaml.tpl")
     office-deploy-script  = file("${path.module}/../scripts/office-deploy.sh")
+    # Ops Agent config (#275). office-deploy installs the agent and writes it.
+    office-ops-agent-config = file("${path.module}/../ops-agent.yaml")
 
     office-project-id = var.project_id
     office-registry   = local.registry_path

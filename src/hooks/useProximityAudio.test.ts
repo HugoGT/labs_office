@@ -1998,3 +1998,57 @@ describe('useProximityAudio: camera filter (background blur on this machine)', (
     expect(connection.setCameraFilter).toHaveBeenLastCalledWith('blur-strong');
   });
 });
+
+describe('useProximityAudio: media reports and connection quality (#275)', () => {
+  function connectSeries(...connections: LivekitRoomConnection[]) {
+    const options: ConnectLivekitRoomOptions[] = [];
+    const connect = vi.fn(async (opts: ConnectLivekitRoomOptions) => {
+      options.push(opts);
+      const next = connections[options.length - 1];
+      if (!next) throw new Error('no connection left');
+      return next;
+    });
+    return { connect, options };
+  }
+
+  it('forwards what the room reports about its connection to the server, through the bridge', async () => {
+    const bridge = createOfficeBridge();
+    const sent: unknown[] = [];
+    bridge.onCommand('mediaEvent', (event) => sent.push(event));
+    const { connect, options } = connectSeries(fakeConnection());
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+
+    renderHook(() => useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }));
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
+    });
+
+    await act(async () => options[0].onMediaEvent?.({ event: 'connected', durationMs: 640 }));
+    await act(async () => options[0].onMediaEvent?.({ event: 'disconnected', reason: 'SIGNAL_CLOSE' }));
+
+    expect(sent).toEqual([
+      { event: 'connected', durationMs: 640 },
+      { event: 'disconnected', reason: 'SIGNAL_CLOSE' },
+    ]);
+  });
+
+  it('follows the quality of the own connection, and forgets it with the room', async () => {
+    const bridge = createOfficeBridge();
+    const { connect, options } = connectSeries(fakeConnection());
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+
+    const { result } = renderHook(() =>
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
+    );
+    expect(result.current.connectionQuality).toBe('unknown');
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
+    });
+
+    await act(async () => options[0].onConnectionQualityChanged?.('poor'));
+    expect(result.current.connectionQuality).toBe('poor');
+
+    await act(async () => options[0].onDisconnected?.('stop'));
+    expect(result.current.connectionQuality).toBe('unknown');
+  });
+});

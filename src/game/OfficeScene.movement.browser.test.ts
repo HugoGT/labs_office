@@ -953,6 +953,15 @@ describe('auto-walk around walls and desks (#219, #221)', () => {
       expect(arena.player.x).toBeLessThan(SALA.x);
     });
 
+    it('forwards the media reports React makes to the room (#275)', async () => {
+      const connector = fakeConnector('mi-sesion');
+      const arena = await movementArena(connector);
+
+      arena.bridge.emitCommand('mediaEvent', { event: 'disconnected', reason: 'SIGNAL_CLOSE' });
+
+      expect(connector.mediaEvents()).toEqual([{ event: 'disconnected', reason: 'SIGNAL_CLOSE' }]);
+    });
+
     it('tells whether the own space is locked and by whom, and asks the room to lock and unlock it', async () => {
       const connector = fakeConnector('mi-sesion');
       const arena = await movementArena(connector);
