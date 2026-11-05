@@ -30,6 +30,9 @@ import {
   hedgeSprites,
   propFrame,
   terrainTileData,
+  wallShadowAlpha,
+  wallShadowPixels,
+  wallShadowTiles,
   wallSprites,
 } from './terrainRender';
 import exportedManifest from '../../public/assets/pack/manifest.json?raw';
@@ -300,5 +303,58 @@ describe('wallSprites colors', () => {
     const sprites = wallSprites({ ...layout, colors });
     expect(sprites.filter(({ x }) => x === 2 * TILE).map(({ color }) => color)).toEqual(['#123456', '#123456', '#123456']);
     expect(sprites.filter(({ x }) => x === 3 * TILE).every((sprite) => !('color' in sprite))).toBe(true);
+  });
+});
+
+describe('wall shadows', () => {
+  /** The shadow alpha of pixel (x, y) of tile (tx, ty), 0 where no shadow tile is. */
+  const shadowAt = (shadows: ReturnType<typeof wallShadowTiles>, tx: number, ty: number, x: number, y: number) => {
+    const tile = shadows.find((shadow) => shadow.tx === tx && shadow.ty === ty);
+    return tile === undefined ? 0 : wallShadowPixels(tile.casters)[y * TILE + x]!;
+  };
+
+  it('fades from 30% at the wall to 15% at 0.4 tiles, and stops there', () => {
+    expect(wallShadowAlpha(0)).toBeCloseTo(0.3);
+    expect(wallShadowAlpha(0.2 * TILE)).toBeCloseTo(0.225);
+    expect(wallShadowAlpha(0.4 * TILE)).toBeCloseTo(0.15);
+    expect(wallShadowAlpha(0.4 * TILE + 0.1)).toBe(0);
+  });
+
+  it('shades the floor beside both ends of a run and under its base, never above it', () => {
+    // Walls placed on row 4, columns 4 and 5: they cover rows 3 to 5.
+    const shadows = wallShadowTiles(blankLayout({ walls: tiles(18, { '4,4': 'wall-stone', '5,4': 'wall-stone' }) }));
+    expect(shadows.map(({ tx, ty }) => `${tx},${ty}`).sort()).toEqual(
+      ['3,3', '3,4', '3,5', '6,3', '6,4', '6,5', '4,6', '5,6', '3,6', '6,6'].sort(),
+    );
+    // Left of the run: darkest against the wall, gone past 0.4 tiles.
+    expect(shadowAt(shadows, 3, 4, TILE - 1, 10)).toBeCloseTo(wallShadowAlpha(0.5));
+    expect(shadowAt(shadows, 3, 4, TILE - 13, 10)).toBeCloseTo(wallShadowAlpha(12.5));
+    expect(shadowAt(shadows, 3, 4, TILE - 14, 10)).toBe(0);
+    // Right of it and under it, the same fade.
+    expect(shadowAt(shadows, 6, 3, 0, 0)).toBeCloseTo(wallShadowAlpha(0.5));
+    expect(shadowAt(shadows, 4, 6, 20, 0)).toBeCloseTo(wallShadowAlpha(0.5));
+    expect(shadowAt(shadows, 4, 6, 20, 12)).toBeCloseTo(wallShadowAlpha(12.5));
+    expect(shadowAt(shadows, 4, 6, 20, 13)).toBe(0);
+    // The corners round off by distance to the wall's corner.
+    expect(shadowAt(shadows, 6, 6, 0, 0)).toBeCloseTo(wallShadowAlpha(Math.hypot(0.5, 0.5)));
+    expect(shadowAt(shadows, 6, 6, 9, 9)).toBe(0);
+  });
+
+  it('never darkens a room corner twice: the nearest wall alone sets each pixel', () => {
+    // A horizontal run on row 2 and a vertical one down column 6 from it: an inner corner at (5, 4).
+    const walls = tiles(18, { '2,2': 'wall-brick', '3,2': 'wall-brick', '4,2': 'wall-brick', '5,2': 'wall-brick', '6,2': 'wall-brick', '6,4': 'wall-brick', '6,6': 'wall-brick' });
+    for (const { casters } of wallShadowTiles(blankLayout({ walls }))) {
+      expect(Math.max(...wallShadowPixels(casters))).toBeLessThanOrEqual(0.3);
+    }
+  });
+
+  it('leaves the tiles a door stands in to the door', () => {
+    const width = 18;
+    const walls = tiles(width, Object.fromEntries([2, 3, 4, 5, 6].map((tx) => [`${tx},4`, 'wall-brick'])));
+    const opening = { axis: 'horizontal' as const, tx: 3, ty: 4, span: 2 };
+    const shadows = wallShadowTiles({ ...blankLayout({ walls }), openings: [opening] });
+    for (const tile of [4 * width + 3, 5 * width + 3, 4 * width + 4, 5 * width + 4]) {
+      expect(shadows.some(({ tx, ty }) => ty * width + tx === tile)).toBe(false);
+    }
   });
 });

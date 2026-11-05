@@ -17,6 +17,8 @@ import {
   SOFA_OBJECT_NAME,
   placeWalls,
   placeZoneLabels,
+  WALL_OBJECT_NAME,
+  WALL_SHADOW_OBJECT_NAME,
   renderTerrain,
   renderTerrainFloors,
   type TerrainTilemap,
@@ -29,7 +31,7 @@ import { LEGACY_LAYOUT as BASE_LAYOUT, LEGACY_TERRAIN as BASE_TERRAIN, LEGACY_SE
 /** The legacy fixture keeps the 126x90 world it was drawn in. */
 const MAP_W = BASE_TERRAIN.width;
 const MAP_H = BASE_TERRAIN.height;
-import { decalTileData, fallbackTerrainData, hedgeSprites, terrainTileData, wallSprites } from './terrainRender';
+import { decalTileData, fallbackTerrainData, hedgeSprites, terrainTileData, wallShadowAlpha, wallShadowTiles, wallSprites } from './terrainRender';
 import { createOfficeTextures } from './textures';
 
 /**
@@ -323,10 +325,36 @@ describe('placeWalls', () => {
       return { count: drawn.length, keys, left: images(scene).length };
     });
 
-    expect(result.count).toBe(wallSprites(grid).length);
+    expect(result.count).toBe(wallSprites(grid).length + wallShadowTiles(grid).length);
     expect(result.keys.filter((key) => key === artSheetKey('wall-brick', 'sheet')).length).toBe(wallSprites(grid).filter((sprite) => sprite.piece === 'wall-brick').length);
     expect(result.keys).toContain(artSheetKey('wall-plaster', 'sheet'));
     expect(result.left).toBe(0);
+  });
+
+  it('lays the shadow of the walls on the floor under them: 30% black against the wall, no shadow above it', async () => {
+    const width = 6;
+    const height = 6;
+    const walls = new Array<string | null>(width * height).fill(null);
+    walls[2 * width + 2] = 'wall-stone';
+    const grid = { width, height, walls };
+    const result = await withArtScene((scene, art) => {
+      placeWalls(scene, grid, art);
+      const shadows = scene.children.list.filter((child) => child.name === WALL_SHADOW_OBJECT_NAME) as Phaser.GameObjects.Image[];
+      const wall = scene.children.list.find((child) => child.name === WALL_OBJECT_NAME) as Phaser.GameObjects.Image;
+      const below = shadows.find((image) => image.x === 2 * TILE && image.y === 4 * TILE)!;
+      const pixel = (x: number, y: number) => scene.textures.getPixel(x, y, below.texture.key)?.alpha;
+      return {
+        at: shadows.map((image) => `${image.x / TILE},${image.y / TILE}`).sort(),
+        under: shadows.every((image) => image.depth < wall.depth),
+        alphas: [pixel(16, 0), pixel(16, 12), pixel(16, 13)],
+      };
+    });
+
+    expect(result.at).toEqual(['1,1', '1,2', '1,3', '1,4', '2,4', '3,1', '3,2', '3,3', '3,4']);
+    expect(result.under).toBe(true);
+    expect(result.alphas[0]).toBe(Math.round(wallShadowAlpha(0.5) * 255));
+    expect(result.alphas[1]).toBe(Math.round(wallShadowAlpha(12.5) * 255));
+    expect(result.alphas[2]).toBe(0);
   });
 
   it('draws a plaster wall in the color of its post from a recolored copy of its sheet, keeping its dark band', async () => {
@@ -375,7 +403,10 @@ describe('placeLayout', () => {
       placeWalls(scene, BASE_LAYOUT, art);
       placeLayout(scene, BASE_LAYOUT, art);
       const manifest = art.manifest!;
-      const drawn = images(scene).map((img) => ({ key: img.texture.key, x: img.x, y: img.y, frame: Number(img.frame.name) }));
+      // The walls' shadows are painted in code, not cut from the pack.
+      const drawn = images(scene)
+        .filter((img) => img.name !== WALL_SHADOW_OBJECT_NAME)
+        .map((img) => ({ key: img.texture.key, x: img.x, y: img.y, frame: Number(img.frame.name) }));
       return { drawn, manifest };
     });
     const { drawn, manifest } = result;
