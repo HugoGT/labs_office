@@ -353,15 +353,18 @@ export async function startHarness({ realLivekit = false, fakeMedia = false } = 
     delete serverEnv.LIVEKIT_API_SECRET;
   }
 
-  const serverProcess = spawn('node', [path.join(projectRoot, 'e2e', 'server.ts'), String(SERVER_PORT)], {
-    cwd: projectRoot,
-    env: serverEnv,
-    detached: true,
-    shell: false,
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
+  function spawnServer() {
+    const child = spawn('node', [path.join(projectRoot, 'e2e', 'server.ts'), String(SERVER_PORT)], {
+      cwd: projectRoot,
+      env: serverEnv,
+      detached: true,
+      shell: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return { child, capture: captureOutput(child, 'Colyseus server') };
+  }
 
-  const serverCapture = captureOutput(serverProcess, 'Colyseus server');
+  let { child: serverProcess, capture: serverCapture } = spawnServer();
 
   const children = [serverProcess];
   function killAll() {
@@ -422,6 +425,21 @@ export async function startHarness({ realLivekit = false, fakeMedia = false } = 
           removed++;
         }
         if (removed === 0) throw new Error(`dropFromLivekit: ${identity} is in no LiveKit room`);
+      },
+      /**
+       * Stops the server the way a deploy does (#276): SIGTERM, so Colyseus
+       * shuts down gracefully and closes every session with its close code,
+       * then starts a fresh process on the same port. Clients are not told
+       * anything else; they have to come back on their own.
+       */
+      async restartServer() {
+        const old = serverProcess;
+        const exited = new Promise((resolve) => old.once('exit', resolve));
+        killProcessGroup(old);
+        await exited;
+        ({ child: serverProcess, capture: serverCapture } = spawnServer());
+        children.push(serverProcess);
+        await pollUntilOk(HEALTH_URL, 'Restarted Colyseus server /health', serverCapture);
       },
       async teardown() {
         process.off('exit', killAll);
