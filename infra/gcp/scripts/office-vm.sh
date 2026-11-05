@@ -31,10 +31,14 @@ usage: $(basename "$0") <command>
                                   against the nightly stop for --for (default ${DEFAULT_HOLD}),
                                   then wait for /health to answer 200
   stop [-y]                       stop the VM (asks first unless -y)
-  heavy list                      upcoming heavy days (America/Lima)
+  heavy list                      heavy weekdays and upcoming heavy dates (America/Lima)
   heavy add YYYY-MM-DD            run that day on e2-standard-8 (set the night before)
-  heavy rm YYYY-MM-DD             back to e2-standard-4 that day
+  heavy rm YYYY-MM-DD             back to e2-standard-4 that day (one-off dates only)
   deploy                          start the VM if needed, run deploy-test.yml and follow it
+
+The VM runs on e2-standard-8 every Friday (the weekly meeting; HEAVY_WEEKDAYS
+in tools/vm/vmSchedule.ts) and on the one-off heavy dates, e2-standard-4 on
+other office days.
 
 The hold only protects the VM from the nightly job: the schedule still stops
 it at 20:00 on weekdays. The nightly job also sets the size of the next office

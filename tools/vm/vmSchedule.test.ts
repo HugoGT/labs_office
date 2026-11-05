@@ -6,7 +6,9 @@
 import { describe, expect, it } from 'vitest';
 import {
   HEAVY_MACHINE_TYPE,
+  HEAVY_WEEKDAYS,
   NORMAL_MACHINE_TYPE,
+  OFFICE_WEEKDAYS,
   OFFICE_START_CRON,
   OFFICE_STOP_CRON,
   OFFICE_TIMEZONE,
@@ -14,6 +16,7 @@ import {
   decideNightly,
   isIsoDate,
   isOfficeHours,
+  machineTypeFor,
   machineTypeName,
   nextOfficeDay,
   parseDuration,
@@ -217,6 +220,26 @@ describe('machineTypeName', () => {
   });
 });
 
+describe('machineTypeFor', () => {
+  it('runs the weekly meeting day heavy with no date to edit (#278)', () => {
+    expect(HEAVY_WEEKDAYS).toEqual([5]);
+    expect(HEAVY_WEEKDAYS.every((day) => OFFICE_WEEKDAYS.includes(day))).toBe(true);
+    expect(machineTypeFor('2026-11-06', [])).toBe(HEAVY_MACHINE_TYPE); // Friday
+    expect(machineTypeFor('2026-11-13', [])).toBe(HEAVY_MACHINE_TYPE); // Friday
+    expect(machineTypeFor('2026-11-05', [])).toBe(NORMAL_MACHINE_TYPE); // Thursday
+  });
+
+  it('adds the one-off heavy dates on top of the heavy weekdays', () => {
+    expect(machineTypeFor('2026-11-05', ['2026-11-05'])).toBe(HEAVY_MACHINE_TYPE);
+    expect(machineTypeFor('2026-11-09', ['2026-11-05'])).toBe(NORMAL_MACHINE_TYPE);
+  });
+
+  it('takes the heavy weekdays as an argument', () => {
+    expect(machineTypeFor('2026-11-05', [], [4])).toBe(HEAVY_MACHINE_TYPE);
+    expect(machineTypeFor('2026-11-06', [], [])).toBe(NORMAL_MACHINE_TYPE);
+  });
+});
+
 describe('decideNightly', () => {
   const base = {
     now: at('2026-10-14T01:30:00Z'), // Tuesday 20:30 in Lima
@@ -281,5 +304,17 @@ describe('decideNightly', () => {
     expect(
       decideNightly({ ...base, now: at('2026-10-17T01:30:00Z'), status: 'TERMINATED', heavyDays: ['2026-10-19'] }),
     ).toMatchObject({ nextOfficeDay: '2026-10-19', resize: true, targetMachineType: HEAVY_MACHINE_TYPE });
+  });
+
+  it('sizes a stopped VM up on Thursday night for the Friday meeting, with no heavy date', () => {
+    expect(
+      decideNightly({ ...base, now: at('2026-11-06T01:30:00Z'), status: 'TERMINATED' }),
+    ).toMatchObject({ nextOfficeDay: '2026-11-06', resize: true, targetMachineType: HEAVY_MACHINE_TYPE });
+  });
+
+  it('sizes it back down on Friday night for Monday', () => {
+    expect(
+      decideNightly({ ...base, now: at('2026-11-07T01:30:00Z'), status: 'TERMINATED', machineType: HEAVY_MACHINE_TYPE }),
+    ).toMatchObject({ nextOfficeDay: '2026-11-09', resize: true, targetMachineType: NORMAL_MACHINE_TYPE });
   });
 });

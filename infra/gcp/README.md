@@ -364,19 +364,38 @@ hour). A hold does **not** stop the schedule: at 20:00 on a weekday the VM
 stops anyway; start it again after that. A value that does not parse counts as
 no hold, so a typo never keeps the VM running.
 
-**Heavy days.** `office-heavy-days` (comma-separated `YYYY-MM-DD`, Lima dates)
-lists the days that run on `e2-standard-8` (two concurrent recordings instead
-of one, see *Capacity* under *Recordings*); every other office day runs on
-`e2-standard-4`. The machine type only changes while the VM is stopped, so the
-nightly job sets it the night before. Mark a day before the 02:30 run of that
-night, or start it by hand with `--size`.
+**Heavy days.** The weekly meeting is on Friday, so every Friday runs on
+`e2-standard-8` with no date to mark (issue #278). The recurring days are
+`HEAVY_WEEKDAYS` in `tools/vm/vmSchedule.ts`; changing them is a PR, and
+`tools/vm/scheduleDrift.test.ts` fails until this runbook and `office-vm.sh
+--help` name the same days. On top of them, `office-heavy-days`
+(comma-separated `YYYY-MM-DD`, Lima dates) lists one-off heavy dates. The heavy
+machine doubles the cores for the SFU and allows two concurrent recordings
+instead of one (see *Capacity* under *Recordings*); every other office day runs
+on `e2-standard-4`. The machine type only changes while the VM is stopped, so
+the nightly job sets it the night before (Thursday night for a Friday). Mark a
+one-off date before the 02:30 run of that night, or start it by hand with
+`--size`. `heavy rm` only removes one-off dates: to skip a Friday, start that
+morning with `--size e2-standard-4` while the VM is still stopped.
+
+**Why `e2-standard-8` and not a compute-optimized series.** The October test
+(#287) measured about 2.5 vCPU of LiveKit with 5 cameras, and 8 cameras with a
+1080p screen share are estimated at 4.5 to 7 vCPU before recording.
+`e2-standard-8` was already the heavy type and is the one recommended after
+that test; LiveKit recommends compute-optimized instances, so a move to
+`c3`/`c4`/`n2` only happens if `e2-standard-8` fails the thresholds of #274.
+Any such move is `HEAVY_MACHINE_TYPE` plus `office-vm.sh --size` validation,
+never Terraform: `machine_type` is ignored by the instance, so the plan stays
+`update in-place`. Before switching series check that it takes `pd-balanced`
+boot disks (`c4` and `n4` only take Hyperdisk, so they would need a new disk,
+i.e. a replacement) and that the zone offers it.
 
 ```sh
 infra/gcp/scripts/office-vm.sh status                 # status, size, hold, heavy days, /health
 infra/gcp/scripts/office-vm.sh start --for 3h         # after hours: start and hold for 3 hours
 infra/gcp/scripts/office-vm.sh start --size e2-standard-8   # stopped VM only: resize, then start
 infra/gcp/scripts/office-vm.sh stop                   # asks first; -y skips the question
-infra/gcp/scripts/office-vm.sh heavy add 2026-10-20   # heavy list / heavy rm YYYY-MM-DD
+infra/gcp/scripts/office-vm.sh heavy add 2026-10-20   # one-off date; heavy list / heavy rm YYYY-MM-DD
 infra/gcp/scripts/office-vm.sh deploy                 # start if needed, run deploy-test.yml, follow it
 ```
 
@@ -432,6 +451,11 @@ discount), about 266 office hours a month out of 730:
 |---|---|---|
 | `e2-standard-4` (about $0.134/h) | about $98 | about $36 |
 | one heavy day on `e2-standard-8` (about $0.268/h) | | about +$1.6 |
+| every Friday on `e2-standard-8` (about 4.3 a month, issue #278) | | about +$7, so about $43 in total |
+
+These are list prices, not the bill. Confirm the real figure in the billing
+report (filter by the `app` label, group by SKU: the E2 core and RAM SKUs) at
+the end of the first full month with heavy Fridays, and write it here.
 
 The boot disk and the static IP are billed while the VM is stopped (a reserved
 IP not attached to a running VM is billed at the higher idle rate), and Cloud
@@ -442,11 +466,69 @@ SQL is separate. Check the billing report, filtered by the `app` label.
 - **No "office closed" page.** Outside office hours `https://app.../` does not
   answer at all (connection refused or timeout), and so do LiveKit and TURN.
   Start the VM with `office-vm.sh start` if you need it.
-- **Zone capacity.** A stopped VM gives its resources back. Starting it, by the
-  schedule or by hand, can fail with `ZONE_RESOURCE_POOL_EXHAUSTED` when
-  `us-central1-a` has no capacity for the machine type, `e2-standard-8` being
-  the likelier to hit it. Instance schedules guarantee no capacity; retry
-  later, or start it with the smaller size.
+- **Guaranteed capacity.** Instance schedules guarantee no capacity, and a
+  reservation would bill the cores all week. See the next section instead.
+
+### No capacity in the zone
+
+A stopped VM gives its resources back. Starting it, by the schedule or by
+hand, can fail with `ZONE_RESOURCE_POOL_EXHAUSTED` when `us-central1-a` has no
+capacity for the machine type, `e2-standard-8` (every Friday) being the
+likelier to hit it. The plan:
+
+1. **Alert.** The `vm_start_failed` policy (`terraform/monitoring.tf`) emails
+   `alert_email` when a start of this instance fails in the Admin Activity
+   audit log. `livekit_down` cannot catch it: it only fires while the VM runs.
+2. **Retry the same size**, a few minutes apart: the pool frees up during the
+   morning. `infra/gcp/scripts/office-vm.sh start` (it waits for `/health`).
+3. **Fall back to the normal size** if the meeting is close: `office-vm.sh
+   start --size e2-standard-4` (the VM is stopped, so the resize is allowed).
+   The meeting runs with the headroom of a normal day (see *Capacity* under
+   *Recordings*). The nightly job puts `e2-standard-8` back for the next
+   heavy day.
+4. **Start earlier** when a Friday start failed the week before: run
+   `office-vm.sh start` at 06:30 that Friday, after the nightly job has already
+   sized it, so a failure leaves an hour to retry before the office opens.
+
+Moving the VM to another zone is a Terraform change that replaces it; not part
+of this plan.
+
+## CPU per container (issue #278)
+
+Everything runs on one VM, so any container can take the CPU the SFU needs and
+make every call sound robotic. `docker-compose.yml` prevents it two ways:
+
+| Service | Limit | Why |
+|---|---|---|
+| `livekit` | none, `cpu_shares: 16384` | The SFU. Its weight is above the default 1024 of the five others together, so under contention the kernel serves it first; idle cores stay usable by all |
+| `caddy` | `cpus: "1"` | TLS for the app and for TURN over 443 |
+| `colyseus` | `cpus: "1.5"` | One Node thread for the rooms, plus GC and libuv |
+| `web` | `cpus: "0.5"` | Static files |
+| `redis` | `cpus: "0.5"` | Message bus between LiveKit and Egress |
+| `egress` | none, default weight | Its admission (`cpu_cost`, see *Recordings*) counts the CPUs of its cgroup quota, so a cap under 3.75 would refuse every recording on `e2-standard-4`. The LiveKit weight is what keeps it from starving the SFU: Chrome slows down first |
+
+The caps add up to 3.5, below the 4 vCPU of a normal day.
+`tools/vm/cpuIsolation.test.ts` keeps that true and keeps the LiveKit weight
+above the rest. The compose reaches the VM as instance metadata, so the change
+ships with `terraform apply` (a metadata update, `update in-place`) followed by
+a deploy.
+
+**Checking it under load** (with the #274 load test, by hand). While the bots
+talk, saturate one container at a time on the VM over IAP and watch the
+dashboard (*SFU Mbps*, *CPU por contenedor*, *desconexiones*) and the audio of
+a real client:
+
+```sh
+cd /opt/office
+# Two busy loops of 5 minutes each: they hit the 1.5 cap and end by themselves.
+docker compose exec -d colyseus node -e 'const end = Date.now() + 300000; while (Date.now() < end) {}'
+docker compose exec -d colyseus node -e 'const end = Date.now() + 300000; while (Date.now() < end) {}'
+docker stats --no-stream                                 # colyseus at about 150 %
+```
+
+For Egress, start one recording per allowed slot from the office. The audio
+must not degrade in either case; if it does, the next step is a smaller cap or
+weight on the culprit, not a bigger machine.
 
 ## Secretos: de dónde salen y dónde no están
 
@@ -1123,7 +1205,7 @@ Everything is GCP-native: no Prometheus or Grafana of our own.
 | Connection quality | Shown to each user in the bottom bar, from LiveKit's `ConnectionQualityChanged` |
 | Scraping | `ops-agent.yaml`, metadata `office-ops-agent-config`, installed and configured by `office-deploy` on every deploy and boot. Never fatal: without it only the metrics are missing |
 | Dashboard | `google_monitoring_dashboard.office`: players per room, tracks, SFU Mbps, VM CPU, CPU per container, disk, recordings, disconnections by reason, connect time |
-| Alerts | `terraform/monitoring.tf`: CPU above 85 % for 10 min; LiveKit uptime check failing 5 min while the VM runs (AND with the VM uptime, so the nightly stop is silent); disk above 85 % while a recording runs |
+| Alerts | `terraform/monitoring.tf`: CPU above 85 % for 10 min; LiveKit uptime check failing 5 min while the VM runs (AND with the VM uptime, so the nightly stop is silent); disk above 85 % while a recording runs; a failed start of the VM in the audit log (#278, see *No capacity in the zone*) |
 | Who is notified | `alert_email` in `terraform.tfvars`. Empty: incidents only show in the console |
 
 ### Rolling it out (by hand, once)

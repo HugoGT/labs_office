@@ -91,8 +91,19 @@ describe('alerts (#275)', () => {
     expect(disk).toMatch(/and on\(\)\s*max\(office_recordings_active\) > 0/);
   });
 
+  it('fires when the VM fails to start, as on a Friday with no capacity in the zone (#278)', () => {
+    const start = policy('vm_start_failed');
+    expect(start).toContain('condition_matched_log');
+    expect(start).toContain('${local.office_instance_filter}');
+    expect(start).toContain('log_id(\\"cloudaudit.googleapis.com/activity\\")');
+    expect(start).toContain('severity >= ERROR');
+    expect(start).toContain('protoPayload.methodName : \\"instances.start\\"');
+    // A log-based policy is refused without a notification rate limit.
+    expect(start).toMatch(/notification_rate_limit \{\s*period\s*=\s*"\d+s"/);
+  });
+
   it('notifies the configured email from every policy', () => {
-    for (const name of ['cpu_high', 'livekit_down', 'disk_full_while_recording']) {
+    for (const name of ['cpu_high', 'livekit_down', 'disk_full_while_recording', 'vm_start_failed']) {
       expect(policy(name)).toContain('notification_channels = local.alert_channels');
     }
   });

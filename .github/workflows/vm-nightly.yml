@@ -8,8 +8,8 @@ name: VM nightly (test)
 #      woke it) keeps running until its office-hold-until metadata expires.
 #      Here it is stopped once the hold is over.
 #   2. The machine type can only change while the VM is stopped, so the size
-#      of the next office day (e2-standard-8 on a heavy day, e2-standard-4
-#      otherwise) is set here, at night.
+#      of the next office day (e2-standard-8 every Friday and on a one-off
+#      heavy date, e2-standard-4 otherwise) is set here, at night.
 #
 # All decisions live in tools/vm/vmSchedule.ts; this file only wires
 # credentials and runs it.
