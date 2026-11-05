@@ -403,6 +403,16 @@ export async function startHarness({ realLivekit = false, fakeMedia = false } = 
       : CHROMIUM_LAUNCH_ARGS;
     const browser = await chromium.launch({ args: launchArgs });
 
+    async function livekitRoomsOf(identity) {
+      if (!roomService) throw new Error('LiveKit room control needs startHarness({ realLivekit: true })');
+      const rooms = [];
+      for (const room of await roomService.listRooms()) {
+        const participants = await roomService.listParticipants(room.name);
+        if (participants.some((participant) => participant.identity === identity)) rooms.push(room.name);
+      }
+      return rooms;
+    }
+
     return {
       previewUrl,
       browser,
@@ -410,22 +420,30 @@ export async function startHarness({ realLivekit = false, fakeMedia = false } = 
         return browser.newContext(fakeMedia ? { permissions: ['microphone', 'camera'] } : {});
       },
       /**
-       * Removes `identity` from every LiveKit room it is in, server side
-       * (#84): the client gets a `Disconnected` it did not ask for, the same
-       * event as LiveKit giving up on reconnecting, without waiting the ~50s
-       * of retries a real network cut costs. Needs `realLivekit: true`.
+       * Deletes, server side, every LiveKit room `identity` is in (#84): its
+       * clients get a `Disconnected` they did not ask for, the same event as
+       * LiveKit giving up on reconnecting, without waiting the ~50s of
+       * retries a real network cut costs. A room deleted is an outage to the
+       * client, which rebuilds it; removing the participant instead is a kick
+       * it must not undo (#283). Needs `realLivekit: true`.
        */
       async dropFromLivekit(identity) {
-        if (!roomService) throw new Error('dropFromLivekit needs startHarness({ realLivekit: true })');
-        let removed = 0;
-        for (const room of await roomService.listRooms()) {
-          const participants = await roomService.listParticipants(room.name);
-          if (!participants.some((participant) => participant.identity === identity)) continue;
-          await roomService.removeParticipant(room.name, identity);
-          removed++;
-        }
-        if (removed === 0) throw new Error(`dropFromLivekit: ${identity} is in no LiveKit room`);
+        const rooms = await livekitRoomsOf(identity);
+        if (rooms.length === 0) throw new Error(`dropFromLivekit: ${identity} is in no LiveKit room`);
+        for (const room of rooms) await roomService.deleteRoom(room);
       },
+      /**
+       * Removes `identity` from every LiveKit room it is in, the way a server
+       * kick does (#282): `Disconnected` with `PARTICIPANT_REMOVED`. Needs
+       * `realLivekit: true`.
+       */
+      async removeFromLivekit(identity) {
+        const rooms = await livekitRoomsOf(identity);
+        if (rooms.length === 0) throw new Error(`removeFromLivekit: ${identity} is in no LiveKit room`);
+        for (const room of rooms) await roomService.removeParticipant(room, identity);
+      },
+      /** Names of the LiveKit rooms `identity` is in right now. Needs `realLivekit: true`. */
+      livekitRoomsOf,
       /**
        * Stops the server the way a deploy does (#276): SIGTERM, so Colyseus
        * shuts down gracefully and closes every session with its close code,
