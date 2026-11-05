@@ -77,6 +77,27 @@ describe('metrics ports never reach the internet (#275)', () => {
   });
 });
 
+// Redis has no password: it is the bus between LiveKit and Egress, and #279
+// keeps Egress on the SFU VM precisely so it never has to leave the loopback.
+// Moving Egress to its own VM would break these on purpose.
+describe('Redis never reaches the internet (#279)', () => {
+  const REDIS_PORT = 6379;
+
+  it('no firewall rule open to 0.0.0.0/0 allows it', () => {
+    for (const rule of internetFirewallPorts(gcp('terraform/main.tf'))) {
+      expect(rule.ports.some((allowed) => covers(allowed, REDIS_PORT)), `${rule.name} allows ${REDIS_PORT}`).toBe(false);
+    }
+  });
+
+  it('is published on the VM loopback only, and LiveKit and Egress reach it there or by service name', () => {
+    const compose = gcp('docker-compose.yml');
+    const mappings = [...compose.matchAll(new RegExp(`- "([^"]*:${REDIS_PORT})"`, 'g'))].map(([, mapping]) => mapping);
+    expect(mappings).toEqual([`127.0.0.1:${REDIS_PORT}:${REDIS_PORT}`]);
+    expect(gcp('livekit.yaml.tpl')).toMatch(new RegExp(`\\nredis:\\n\\s+address: 127\\.0\\.0\\.1:${REDIS_PORT}\\n`));
+    expect(compose).toMatch(new RegExp(`\\n\\s+redis:\\n\\s+address: redis:${REDIS_PORT}\\n`));
+  });
+});
+
 describe('the Ops Agent scrapes what the stack exposes (#275)', () => {
   const agent = gcp('ops-agent.yaml');
 

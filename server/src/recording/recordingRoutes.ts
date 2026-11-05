@@ -31,6 +31,15 @@ import type { RecordingGeometry } from './recordingSpaceSnapshot.ts';
 /** How long a presigned URL lives (#58). */
 export const RECORDING_URL_TTL_SECONDS = 600;
 
+/**
+ * Longest recording (#279). Egress writes the whole MP4 to the VM boot disk
+ * (20 GB) and uploads it only after the stop, at about 1.3 GB per hour of
+ * 720p, so a recording nobody stops is what could fill the disk and take the
+ * whole office down. Three hours covers the Friday meeting with margin; past
+ * it the server stops the recording as if someone had pressed stop.
+ */
+export const MAX_RECORDING_MS = 3 * 60 * 60 * 1000;
+
 export interface RecordingDeps {
   sessions: LiveSessionRegistry;
   recordings: RecordingRegistry;
@@ -44,8 +53,10 @@ export interface RecordingDeps {
   /** Current committed geometry, observed by the server's space/desk adapters. */
   geometry?: RecordingGeometry;
   now?: () => number;
-  /** Upload polling after a stop (#58); injectable so tests do not wait a minute. */
+  /** Upload polling after a stop (#58); injectable so tests do not wait minutes. */
   readiness?: { intervalMs: number; timeoutMs: number };
+  /** `MAX_RECORDING_MS` unless a test shortens it. */
+  maxDurationMs?: number;
 }
 
 export interface RecordingResult {
@@ -57,7 +68,12 @@ const FORBIDDEN_SPACE: RecordingResult = { status: 403, body: { error: 'forbidde
 const NOT_CONFIGURED: RecordingResult = { status: 503, body: { error: 'recording-not-configured' } };
 const EGRESS_FAILED: RecordingResult = { status: 502, body: { error: 'egress-failed' } };
 const EXPIRED: RecordingResult = { status: 410, body: { error: 'recording-expired' } };
-const DEFAULT_READINESS = { intervalMs: 2_000, timeoutMs: 60_000 };
+/**
+ * The upload starts at the stop and takes longer the longer the recording: a
+ * maximum-length file (#279) is about 4 GB, so the wait covers a slow upload
+ * of that size instead of the minute that was enough for short tests.
+ */
+export const DEFAULT_READINESS = { intervalMs: 2_000, timeoutMs: 15 * 60_000 };
 
 type Authorized =
   | { ok: true; sessionId: string; spaceId: string; egress: EgressPort; spaces: SpacesDirectory }
@@ -186,7 +202,20 @@ export async function handleStartRecording(body: unknown, deps: RecordingDeps): 
     }
     tracking.collectFinal(known);
     const entry: ActiveRecording = { spaceId, egressId, startedBy: sessionId, startedAt, key, participants: tracking.participants };
-    entry.stopTracking = tracking.stop;
+    // Only the entry this start published: a later recording of the same
+    // space has its own limit. Unref'd so it never keeps the process alive.
+    const limit = setTimeout(() => {
+      if (deps.recordings.get(spaceId) !== entry) return;
+      console.warn('[recording] stopping a recording that reached the maximum duration');
+      finishRecording(entry, egress, deps).catch(() => {
+        console.error('[recording] failed to stop a recording at the maximum duration');
+      });
+    }, deps.maxDurationMs ?? MAX_RECORDING_MS);
+    limit.unref?.();
+    entry.stopTracking = () => {
+      clearTimeout(limit);
+      tracking.stop();
+    };
     deps.recordings.set(entry);
     published = true;
     return { status: 200, body: { spaceId, startedBy: sessionId, startedAt } };
