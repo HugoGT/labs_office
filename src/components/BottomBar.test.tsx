@@ -311,6 +311,36 @@ describe('BottomBar: audio reconnecting (#283)', () => {
   });
 });
 
+describe('BottomBar: connection quality (#275)', () => {
+  it.each([
+    ['excellent', 'Conexión excelente'],
+    ['good', 'Conexión buena'],
+    ['poor', 'Conexión débil'],
+    ['lost', 'Conexión perdida'],
+  ] as const)('shows %s as "%s" in the Estado group', (quality, label) => {
+    renderBar({ connectionQuality: quality });
+
+    const indicator = within(screen.getByRole('group', { name: 'Estado' })).getByText(new RegExp(label));
+    expect(indicator.getAttribute('title')).toMatch(/calidad/i);
+  });
+
+  it('says nothing while the quality is not measured yet', () => {
+    renderBar({ connectionQuality: 'unknown' });
+
+    expect(screen.queryByText(/Conexión/)).not.toBeInTheDocument();
+  });
+
+  it('says nothing without a live audio connection, nor while it is coming back', () => {
+    renderBar({ audioAvailable: false, connectionQuality: 'good' });
+    expect(screen.queryByText(/Conexión buena/)).not.toBeInTheDocument();
+  });
+
+  it('leaves the word to the reconnecting indicator during an outage', () => {
+    renderBar({ audioReconnecting: true, connectionQuality: 'lost' });
+    expect(screen.queryByText(/Conexión perdida/)).not.toBeInTheDocument();
+  });
+});
+
 describe('BottomBar: presencia de avatares reales', () => {
   it('conectado no muestra recuento: quien esta en linea vive en la barra lateral', () => {
     renderBar({ presence: { online: true, peers: 3, state: 'connected', canRetry: true } });

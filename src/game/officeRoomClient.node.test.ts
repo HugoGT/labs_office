@@ -890,6 +890,14 @@ describe('connectOfficeRoom: seats (art migration, step 6)', () => {
     await waitFor(() => watched.at(-1)?.size === 0);
   });
 
+  it('sendMediaEvent reports the own LiveKit connection to the room, which only counts it (#275)', async () => {
+    const reporter = await connect('Ana', recorder().handlers);
+
+    reporter.sendMediaEvent({ event: 'disconnected', reason: 'CONNECTION_TIMEOUT' });
+
+    await waitFor(() => server.metricsText().includes('office_media_disconnections_total{reason="CONNECTION_TIMEOUT"} 1\n'));
+  });
+
   it('a snapshot of someone standing has no seat', async () => {
     const watcher = recorder();
     await connect('Ana', watcher.handlers);

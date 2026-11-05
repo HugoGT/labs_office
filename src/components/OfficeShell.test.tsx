@@ -129,6 +129,7 @@ function proximityAudio(
     audioAvailable: false,
     audioBlocked: false,
     audioReconnecting: false,
+    connectionQuality: 'unknown',
     dnd: false,
     toggleMic: vi.fn(),
     toggleCam: vi.fn(),
@@ -588,6 +589,14 @@ describe('OfficeShell', () => {
     render(<OfficeShell />);
 
     expect(screen.getByText('🟡 Reconectando audio…')).toBeInTheDocument();
+  });
+
+  it('the bar shows the quality of the own audio connection (#275)', () => {
+    useProximityAudioMock.mockReturnValue(proximityAudio({ audioAvailable: true, connectionQuality: 'poor' }));
+
+    render(<OfficeShell />);
+
+    expect(screen.getByText(/Conexión débil/)).toBeInTheDocument();
   });
 
   it('clicar mic/camara invoca toggleMic/toggleCam del hook, no un setState local', async () => {

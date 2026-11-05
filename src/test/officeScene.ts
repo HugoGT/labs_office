@@ -10,7 +10,7 @@ import {
 } from './legacyOffice';
 import { buildTerrainGrid } from '../game/terrainGrid';
 import { createOfficeBridge } from '../game/officeBridge';
-import type { PresenceStatus } from '../game/officeProtocol';
+import type { MediaEventMessage, PresenceStatus } from '../game/officeProtocol';
 import type { ConnectOfficeRoomOptions, OfficeConnection, OfficeRoomHandlers } from '../game/officeRoomClient';
 import { OFFICE_SCENE_KEY, OfficeScene, type OfficeSceneOptions } from '../game/OfficeScene';
 import type { AutoWalkState } from '../game/autoWalk';
@@ -221,6 +221,7 @@ export function fakeConnector(sessionId = 'yo', initialState = true) {
   let stands = 0;
   let locks = 0;
   let unlocks = 0;
+  const mediaEvents: MediaEventMessage[] = [];
   let captured: OfficeRoomHandlers | undefined;
   let joinedWith: PresenceStatus | undefined;
   let joinedName: string | undefined;
@@ -248,6 +249,7 @@ export function fakeConnector(sessionId = 'yo', initialState = true) {
     sendUnlock: () => {
       unlocks++;
     },
+    sendMediaEvent: (event) => mediaEvents.push(event),
     leave: async () => {
       left = true;
     },
@@ -263,6 +265,7 @@ export function fakeConnector(sessionId = 'yo', initialState = true) {
     stands: () => stands,
     locks: () => locks,
     unlocks: () => unlocks,
+    mediaEvents: () => mediaEvents,
     handlers: () => captured,
     joinedWith: () => joinedWith,
     joinedName: () => joinedName,

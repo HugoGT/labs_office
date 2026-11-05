@@ -1,4 +1,5 @@
 import type { CameraFilter } from '../game/cameraFilter';
+import type { ConnectionQualityLevel } from '../game/livekitRoom';
 import type { OfficeEventMap } from '../game/officeBridge';
 import { DO_NOT_DISTURB, PRESENCE_STATUSES, type PresenceStatus } from '../game/officeProtocol';
 import { STATUS_EMOJI, STATUS_LABEL, statusCssColor } from '../game/presence';
@@ -22,6 +23,11 @@ export interface BottomBarProps {
    * because most of the time it is not, and only then is there anything to say.
    */
   audioReconnecting?: boolean;
+  /**
+   * Quality LiveKit measures for the own connection (#275). Optional like
+   * `audioReconnecting`: `'unknown'` or absent says nothing.
+   */
+  connectionQuality?: ConnectionQualityLevel;
   recording: boolean;
   room: string | null;
   /**
@@ -78,6 +84,16 @@ const AUDIO_RECONNECTING_LABEL = 'Reconectando audio…';
 
 const AUDIO_RECONNECTING_TITLE = 'Se perdió la conexión de audio: recuperándola sin recargar la página';
 
+/** Measured levels only: `unknown` shows nothing (#275). */
+const CONNECTION_QUALITY_LABEL: Record<Exclude<ConnectionQualityLevel, 'unknown'>, string> = {
+  excellent: '🟢 Conexión excelente',
+  good: '🟢 Conexión buena',
+  poor: '🟠 Conexión débil',
+  lost: '🔴 Conexión perdida',
+};
+
+const CONNECTION_QUALITY_TITLE = 'Calidad de tu conexión de audio y vídeo, según LiveKit';
+
 /** El otro motivo de `disabled`, y el unico que el usuario puede deshacer solo. */
 const DND_TITLE = 'No molestar: no publicas micrófono ni cámara';
 
@@ -127,6 +143,7 @@ export function BottomBar({
   camOn,
   audioAvailable,
   audioReconnecting = false,
+  connectionQuality = 'unknown',
   recording,
   room,
   presence,
@@ -331,6 +348,12 @@ export function BottomBar({
         {audioReconnecting && (
           <div className={styles.presence} title={AUDIO_RECONNECTING_TITLE}>
             🟡 {AUDIO_RECONNECTING_LABEL}
+          </div>
+        )}
+        {/* Only for a live room: during an outage the line above says it. */}
+        {audioAvailable && !audioReconnecting && connectionQuality !== 'unknown' && (
+          <div className={styles.presence} title={CONNECTION_QUALITY_TITLE}>
+            {CONNECTION_QUALITY_LABEL[connectionQuality]}
           </div>
         )}
         {/* Solo cuando la sesion se perdio Y hay servidor configurado al que

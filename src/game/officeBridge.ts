@@ -16,7 +16,7 @@ import type { LayoutEditCommand } from './layoutEditor';
 import type { LayoutMaterial, TerrainColors } from './officeLayout';
 import type { TerrainFloors } from './terrainFloors';
 import type { SpaceArea } from './mapData';
-import type { AccessDeniedReason, PresenceStatus, RecordingReadyPayload } from './officeProtocol';
+import type { AccessDeniedReason, MediaEventMessage, PresenceStatus, RecordingReadyPayload } from './officeProtocol';
 import type { RosterPeer } from './roster';
 import type { TerrainEditCommand } from './terrainEditor';
 import type { DecorEditCommand } from './decorEditor';
@@ -304,6 +304,11 @@ export interface OfficeCommandMap {
   lockRoom: undefined;
   /** Unlock the space the local player stands in; the room only lets whoever locked it. */
   unlockRoom: undefined;
+  /**
+   * What happened to the own LiveKit connection (#275), forwarded to the room
+   * for the server's metrics. An action: never replayed to a late subscriber.
+   */
+  mediaEvent: MediaEventMessage;
   /**
    * Los 3 comandos de llamada (issue #2, D3) viajan solo por `emitCommand`,
    * como `setStatus`: ningun metodo de conveniencia (`bridge.callPeer()` no

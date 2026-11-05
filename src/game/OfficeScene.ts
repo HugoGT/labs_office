@@ -409,6 +409,7 @@ export class OfficeScene extends Phaser.Scene {
   private unsubscribeWalkToOwnDesk?: () => void;
   private unsubscribeLockRoom?: () => void;
   private unsubscribeUnlockRoom?: () => void;
+  private unsubscribeMediaEvent?: () => void;
   private unsubscribeSpacesConfig?: () => void;
   private unsubscribeDesks?: () => void;
   private unsubscribeReconnect?: () => void;
@@ -795,6 +796,7 @@ export class OfficeScene extends Phaser.Scene {
     this.unsubscribeWalkToOwnDesk = this.bridge.onCommand('walkToOwnDesk', () => this.walkToOwnDesk());
     this.unsubscribeLockRoom = this.bridge.onCommand('lockRoom', () => this.connection?.sendLock());
     this.unsubscribeUnlockRoom = this.bridge.onCommand('unlockRoom', () => this.connection?.sendUnlock());
+    this.unsubscribeMediaEvent = this.bridge.onCommand('mediaEvent', (event) => this.connection?.sendMediaEvent(event));
 
     // #7, slice 3. Llega una sola vez por sesion, poco despues de arrancar.
     this.unsubscribeSpacesConfig = this.bridge.onCommand('spacesconfig', ({ spaces, version }) => {
@@ -956,6 +958,7 @@ export class OfficeScene extends Phaser.Scene {
       this.unsubscribeWalkToOwnDesk?.();
       this.unsubscribeLockRoom?.();
       this.unsubscribeUnlockRoom?.();
+      this.unsubscribeMediaEvent?.();
       this.unsubscribeSpacesConfig?.();
       this.unsubscribeDesks?.();
       this.unsubscribeReconnect?.();
