@@ -120,3 +120,9 @@ export function mediaFailureOf(error: unknown): MediaFailure {
   const name = typeof error === 'object' && error !== null && 'name' in error ? error.name : undefined;
   return (typeof name === 'string' && FAILURE_BY_NAME[name]) || 'other';
 }
+
+/** What the person is told about a device (#284): why it failed, or that it was unplugged. */
+export interface DeviceNotice {
+  kind: DeviceKind;
+  problem: MediaFailure | 'lost';
+}

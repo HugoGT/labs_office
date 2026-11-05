@@ -14,6 +14,7 @@ import { BUILT_IN_SPACES_VERSION } from '../game/mapData';
 import { fetchSpacesConfig } from '../game/spacesConfig';
 import { zoomView, type ZoomAction } from '../game/mapZoom';
 import { DEFAULT_NAME } from '../game/officeProtocol';
+import { NO_DEVICES } from '../game/mediaDevices';
 import { RecordingError, getRecordingUrl, startRecording, stopRecording } from '../game/recordingClient';
 import { ModerationError, muteMicrophones } from '../game/moderationClient';
 import { useOfficeAdminRole } from '../hooks/useOfficeAdminRole';
@@ -156,6 +157,10 @@ function proximityAudio(
     meetingRoom: false,
     canModerate: false,
     roomPeerIds: new Set(),
+    devices: NO_DEVICES,
+    selectedDevices: { audioinput: null, audiooutput: null, videoinput: null },
+    selectDevice: vi.fn(),
+    audioOutputSelectable: false,
     ...overrides,
   };
 }
