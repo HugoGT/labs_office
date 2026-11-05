@@ -164,11 +164,32 @@ describe('pgTerrain', () => {
 
     expect(pool.queries).toHaveLength(1);
     const sql = squash(pool.queries[0]!.text);
-    expect(sql).toContain('from jsonb_to_recordset($1::jsonb) as entry(index integer, piece text)');
+    expect(sql).toContain('from jsonb_to_recordset($1::jsonb) as entry(index integer, piece text, color text)');
     expect(sql).toContain('delete from terrain_walls where tile_index in (select index from entries where piece is null)');
-    expect(sql).toContain('insert into terrain_walls (tile_index, piece_id, updated_by)');
-    expect(sql).toContain('on conflict (tile_index) do update set piece_id = excluded.piece_id, updated_by = excluded.updated_by, updated_at = now()');
+    expect(sql).toContain('insert into terrain_walls (tile_index, piece_id, color, updated_by)');
+    expect(sql).toContain('on conflict (tile_index) do update set piece_id = excluded.piece_id, color = excluded.color, updated_by = excluded.updated_by, updated_at = now()');
     expect(pool.queries[0]!.values).toEqual([JSON.stringify(edits), 'user-1']);
+  });
+
+  it('saves the color of a plaster wall with it: an edit without one stores NULL', async () => {
+    const pool = fakePool();
+    const edits = [{ index: 3, piece: 'wall-plaster' as const, color: '#123456' }, { index: 4, piece: 'wall-plaster' as const }];
+
+    await createPgTerrain(pool).saveWalls(edits, 'user-1');
+
+    expect(squash(pool.queries[0]!.text)).toContain('select index, piece, color, $2::uuid from entries where piece is not null');
+    expect(pool.queries[0]!.values).toEqual([JSON.stringify(edits), 'user-1']);
+  });
+
+  it('loads every stored wall color by tile, skipping a row it cannot read', async () => {
+    const pool = fakePool([
+      { tile_index: 3, color: '#123456' },
+      { tile_index: 'x', color: '#123456' },
+      { tile_index: 7, color: 'red' },
+    ]);
+
+    expect([...(await createPgTerrain(pool).loadWallColors())]).toEqual([[3, '#123456']]);
+    expect(squash(pool.queries[0]!.text)).toBe('select tile_index, color from terrain_walls where color is not null');
   });
 
   it('saves a block batch and removes its walls in one atomic statement', async () => {
@@ -280,8 +301,8 @@ describe('pgTerrain', () => {
     expect(pool.queries).toHaveLength(1);
     const sql = squash(pool.queries[0]!.text);
     expect(sql).toContain('delete from terrain_walls where tile_index in (select index from wall_entries where piece is null)');
-    expect(sql).toContain('insert into terrain_walls (tile_index, piece_id, updated_by) select index, piece, $3::uuid from wall_entries where piece is not null');
-    expect(sql).toContain('on conflict (tile_index) do update set piece_id = excluded.piece_id, updated_by = excluded.updated_by, updated_at = now()');
+    expect(sql).toContain('insert into terrain_walls (tile_index, piece_id, color, updated_by) select index, piece, color, $3::uuid from wall_entries where piece is not null');
+    expect(sql).toContain('on conflict (tile_index) do update set piece_id = excluded.piece_id, color = excluded.color, updated_by = excluded.updated_by, updated_at = now()');
     expect(sql).toContain('delete from office_decor where (tile_index, layer) in (select index, layer from decor_entries where piece is null)');
     expect(sql).toContain('insert into office_decor (tile_index, layer, piece_id, rotation, color, updated_by) select index, layer, piece, rotation, color, $3::uuid from decor_entries where piece is not null');
     expect(sql).toContain('on conflict (tile_index, layer) do update set piece_id = excluded.piece_id');

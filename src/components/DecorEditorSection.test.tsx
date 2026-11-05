@@ -209,7 +209,7 @@ describe('DecorEditorSection: Decoración (the whole office)', () => {
 
       const walls = await screen.findByRole('group', { name: 'Paredes' });
       expect(walls.previousElementSibling).toHaveTextContent(/^Paredes$/);
-      expect(within(walls).getAllByRole('button').filter((button) => button.hasAttribute('aria-pressed')).map((button) => button.getAttribute('aria-label'))).toEqual(['Ladrillo', 'Piedra', 'Yeso', 'Puerta simple', 'Puerta doble', 'Ventana']);
+      expect(within(walls).getAllByRole('button').filter((button) => button.hasAttribute('aria-pressed')).map((button) => button.getAttribute('aria-label'))).toEqual(['Yeso', 'Piedra', 'Ladrillo', 'Puerta simple', 'Puerta doble', 'Ventana']);
       expect(screen.queryByRole('group', { name: 'Puertas y ventanas' })).not.toBeInTheDocument();
       expect(document.body.textContent).not.toMatch(/líneas entre casillas|muebles ni la entrada/);
 

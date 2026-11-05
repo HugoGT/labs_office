@@ -177,7 +177,7 @@ export class ArtPackLoader implements ArtTextures {
     const recolor = recolorFor(piece, color);
     if (recolor === null) return key;
     const recolored = recoloredSheetKey(pieceId, role, recolor.to);
-    if (this.scene.textures.exists(recolored) || this.paintRecolored(key, recolored, recolor.from, recolor.to)) return recolored;
+    if (this.scene.textures.exists(recolored) || this.paintRecolored(key, recolored, recolor.from, recolor.to, recolor.keep)) return recolored;
     // A browser that cannot read pixels back still shows the piece, in its exported color.
     return key;
   }
@@ -187,7 +187,7 @@ export class ArtPackLoader implements ArtTextures {
     if (this.failed.has(pieceId) || !this.scene.textures.exists(key)) return null;
     const target = `${recoloredSheetKey(pieceId, role, recolor.to.toLowerCase())}#${region.x},${region.y},${region.width}x${region.height}`;
     if (this.scene.textures.exists(target)) return target;
-    const canvas = paintRecoloredCanvas(this.scene.textures.get(key).getSourceImage() as PaintableImage, recolor.from, recolor.to, region);
+    const canvas = paintRecoloredCanvas(this.scene.textures.get(key).getSourceImage() as PaintableImage, recolor.from, recolor.to, region, recolor.keep);
     return canvas !== null && this.scene.textures.addCanvas(target, canvas) !== null ? target : null;
   }
 
@@ -335,10 +335,10 @@ export class ArtPackLoader implements ArtTextures {
    * frame grid. Runs once per material and color: the result is kept in the
    * texture manager under `targetKey`.
    */
-  private paintRecolored(sourceKey: string, targetKey: string, from: string, to: string): boolean {
+  private paintRecolored(sourceKey: string, targetKey: string, from: string, to: string, keep?: readonly string[]): boolean {
     const source = this.scene.textures.get(sourceKey);
     const image = source.getSourceImage() as PaintableImage;
-    const canvas = paintRecoloredCanvas(image, from, to);
+    const canvas = paintRecoloredCanvas(image, from, to, undefined, keep);
     if (canvas === null) return false;
     const texture = this.scene.textures.addCanvas(targetKey, canvas);
     if (texture === null) return false;

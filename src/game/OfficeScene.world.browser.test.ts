@@ -664,14 +664,14 @@ describe('OfficeScene: edited terrain', () => {
     handlers.onWalls!(walled, [lawnTile, lawnTile + 1]);
     const first = drawn();
     expect(first.map(([, , key]) => key)).toEqual([...Array(3).fill(artSheetKey('wall-brick', 'sheet')), ...Array(3).fill(artSheetKey('wall-plaster', 'sheet'))]);
-    // Each material ends its own run: both columns take the End frames.
+    // Each material is its own run, alone: both columns close both edges.
     expect(first.map(([, , , frame]) => frame)).toEqual([
-      wallFrameIndex('crownEnd', 67),
-      wallFrameIndex('faceEnd', 67),
-      wallFrameIndex('baseEnd', 67),
-      wallFrameIndex('crownEnd', 68),
-      wallFrameIndex('faceEnd', 68),
-      wallFrameIndex('baseEnd', 68),
+      wallFrameIndex('crownBoth', 67),
+      wallFrameIndex('faceBoth', 67),
+      wallFrameIndex('baseBoth', 67),
+      wallFrameIndex('crownBoth', 68),
+      wallFrameIndex('faceBoth', 68),
+      wallFrameIndex('baseBoth', 68),
     ]);
     // Every tile sorts by the bottom of its wall, never a fraction past it.
     expect(new Set(first.map(([, , , , depth]) => depth))).toEqual(new Set([worldAssetDepth(24 * TILE)]));

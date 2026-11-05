@@ -466,7 +466,7 @@ export const FLOOR: FloorSpec = {
 export const WALL: WallSpec = {
   kind: 'wall',
   frame: { width: ART_TILE, height: ART_TILE },
-  columns: 7,
+  columns: 13,
   rows: 3,
   heightTiles: 3,
   topHeight: 19,
@@ -486,10 +486,25 @@ export const WALL_TOP_COLOR = '#1b1a2b';
  * vertical run), `crown` the tile where the top band meets the face, then
  * the `face` and the `base` (bottom tile, with the outline on the floor).
  * The `End` frames are the same tiles for the last wall of a horizontal run,
- * which closes its right edge (brick mortar); walls in the middle of a run
- * leave it open so two of them never show a double joint.
+ * whose right edge they close with a column in the top band's color; the
+ * `Start` frames close the left edge of the first wall, and the `Both` frames
+ * both edges of a wall alone. Walls in the middle of a run leave them open.
  */
-export const WALL_FRAMES = { cap: 0, crown: 1, face: 2, base: 3, crownEnd: 4, faceEnd: 5, baseEnd: 6 } as const;
+export const WALL_FRAMES = {
+  cap: 0,
+  crown: 1,
+  face: 2,
+  base: 3,
+  crownEnd: 4,
+  faceEnd: 5,
+  baseEnd: 6,
+  crownStart: 7,
+  faceStart: 8,
+  baseStart: 9,
+  crownBoth: 10,
+  faceBoth: 11,
+  baseBoth: 12,
+} as const;
 export type WallFrame = keyof typeof WALL_FRAMES;
 
 /**
@@ -1435,6 +1450,9 @@ export interface ArtWallPiece extends ArtPieceBase {
   readonly heightTiles: number;
   readonly topHeight: number;
   readonly translucent: boolean;
+  /** Plaster takes a color of its own; a pack exported before wall colors has neither field. */
+  readonly colorable?: boolean;
+  readonly defaultColor?: string | null;
 }
 
 /** One terrain material of the tileset: where its band starts and the floor piece it is cut from. */

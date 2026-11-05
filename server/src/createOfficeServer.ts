@@ -1524,6 +1524,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     terrain: () => terrain.snapshot(),
     subscribeTerrainChanges: terrain.subscribe,
     terrainColors: () => terrain.blockColors(),
+    wallColors: () => terrain.wallColors(),
     terrainFloors: () => terrain.blockFloors(),
     decor: () => terrain.decor(),
     desks: () => deskAreas,

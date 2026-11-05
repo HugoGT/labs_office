@@ -10,7 +10,7 @@
 
 import type { MaterialOption } from './artMaterials';
 import { recolorFor } from './artPack';
-import { paintRecoloredCanvas, type PaintableImage } from './artRecolorCanvas';
+import { paintRecoloredCanvas, type PaintableImage, type PaintRegion } from './artRecolorCanvas';
 
 export interface ArtPreviewCache {
   /** The sheet to cut the preview from, or `null` when the image cannot load. */
@@ -19,7 +19,7 @@ export interface ArtPreviewCache {
 
 export interface ArtPreviewCacheOptions {
   loadImage: (url: string) => Promise<PaintableImage | null>;
-  paint?: (image: PaintableImage, from: string, to: string) => PaintableImage | null;
+  paint?: (image: PaintableImage, from: string, to: string, region?: PaintRegion, keep?: readonly string[]) => PaintableImage | null;
 }
 
 export function createArtPreviewCache({ loadImage, paint = paintRecoloredCanvas }: ArtPreviewCacheOptions): ArtPreviewCache {
@@ -45,7 +45,8 @@ export function createArtPreviewCache({ loadImage, paint = paintRecoloredCanvas 
         pending = image(option.sheetUrl).then((source) => {
           if (source === null) return null;
           // Same fallback as the office: a browser that cannot paint still shows the exported color.
-          return paint(source, recolor.from, recolor.to) ?? source;
+          // A wall's recolor keeps its dark band (`Recolor.keep`); the others paint as they always did.
+          return (recolor.keep === undefined ? paint(source, recolor.from, recolor.to) : paint(source, recolor.from, recolor.to, undefined, recolor.keep)) ?? source;
         });
         painted.set(key, pending);
       }

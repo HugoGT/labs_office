@@ -5,7 +5,7 @@
  */
 
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AdminError } from '../dashboard/adminPort';
 import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import { createOfficeBridge, type OfficeCommandMap } from '../game/officeBridge';
@@ -398,5 +398,61 @@ describe('useWallEditor: space outlines (#216)', () => {
 
     act(() => result.current.reset());
     expect(commands.at(-1)).toBeNull();
+  });
+});
+
+describe('useWallEditor colors', () => {
+  afterEach(() => window.localStorage.clear());
+
+  it('picks plaster in the color settled on its tile, remembers it, and paints and previews walls in it', async () => {
+    const { terrain, calls } = deferredWalls();
+    const { bridge, result, commands } = setup(terrain);
+
+    act(() => result.current.setColor('wall-plaster', '#123456'));
+    expect(result.current.brush).toEqual({ kind: 'wall', piece: 'wall-plaster', color: '#123456' });
+    expect(result.current.colors).toEqual({ 'wall-plaster': '#123456' });
+    expect(JSON.parse(window.localStorage.getItem('office:wall-colors') ?? '{}')).toEqual({ 'wall-plaster': '#123456' });
+
+    act(() => bridge.emit('wallpick', { index: TILE_A }));
+    expect(calls[0]!.edits).toEqual([{ index: TILE_A, piece: 'wall-plaster', color: '#123456' }]);
+    expect(commands.at(-1)).toMatchObject({ previewWalls: [{ index: TILE_A, piece: 'wall-plaster', color: '#123456' }] });
+    await act(async () => calls[0]!.resolve());
+
+    // Put down and picked again, plaster comes back in its remembered color.
+    act(() => result.current.unpick());
+    act(() => result.current.pick('wall-plaster'));
+    expect(result.current.brush).toEqual({ kind: 'wall', piece: 'wall-plaster', color: '#123456' });
+  });
+
+  it('repaints a plaster wall the room shows in another color, and skips one already in the brush color', async () => {
+    const { terrain, calls } = deferredWalls();
+    const { bridge, result } = setup(terrain);
+    const walls = withWalls(BASE_LAYOUT.walls, [{ index: TILE_A, piece: 'wall-plaster' }, { index: TILE_B, piece: 'wall-plaster' }]);
+    act(() => bridge.emit('terrain', { blocks: BASE_LAYOUT.blocks, walls, colors: NO_COLORS, wallColors: new Map([[TILE_A, '#aa0000'], [TILE_B, '#123456']]) }));
+
+    act(() => result.current.setColor('wall-plaster', '#123456'));
+    act(() => bridge.emit('wallpick', { index: TILE_B }));
+    act(() => bridge.emit('wallpick', { index: TILE_A }));
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.edits).toEqual([{ index: TILE_A, piece: 'wall-plaster', color: '#123456' }]);
+    await act(async () => calls[0]!.resolve());
+  });
+
+  it('never gives a color to a wall that takes none', () => {
+    const { result } = setup();
+    act(() => result.current.setColor('wall-brick', '#123456'));
+    expect(result.current.brush).toBeNull();
+    act(() => result.current.pick('wall-brick'));
+    expect(result.current.brush).toEqual({ kind: 'wall', piece: 'wall-brick' });
+  });
+
+  it('holds the rail while the picker of its tile is open', () => {
+    const { result, commands } = setup();
+    act(() => result.current.pick('wall-plaster'));
+    act(() => result.current.setPickingColor(true));
+    expect(commands.at(-1)).toMatchObject({ pickingColor: true });
+    act(() => result.current.setPickingColor(false));
+    expect(commands.at(-1)).not.toHaveProperty('pickingColor');
   });
 });

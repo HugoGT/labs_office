@@ -157,14 +157,14 @@ describe('wallSprites', () => {
     depthY: (bottom + 1) * TILE,
   });
 
-  it('stands a horizontal run on whole tiles: crown, face and base per column, the End frames only on its last one', () => {
+  it('stands a horizontal run on whole tiles: crown, face and base per column, Start on its first, End on its last', () => {
     // Three walls placed on row 4: each covers rows 3 to 5 of its column.
     const sprites = wallSprites(blankLayout({ walls: tiles(18, { '2,4': 'wall-brick', '3,4': 'wall-brick', '4,4': 'wall-brick' }) }));
 
     expect(sprites).toEqual([
-      brick(2, 3, 'crown', 5),
-      brick(2, 4, 'face', 5),
-      brick(2, 5, 'base', 5),
+      brick(2, 3, 'crownStart', 5),
+      brick(2, 4, 'faceStart', 5),
+      brick(2, 5, 'baseStart', 5),
       brick(3, 3, 'crown', 5),
       brick(3, 4, 'face', 5),
       brick(3, 5, 'base', 5),
@@ -179,7 +179,7 @@ describe('wallSprites', () => {
     const faces = wallSprites(blankLayout({ walls })).filter(({ y }) => y === 4 * TILE);
 
     expect(faces.map(({ frame }) => frame)).toEqual([
-      wallFrameIndex('face', 1),
+      wallFrameIndex('faceStart', 1),
       wallFrameIndex('face', 2),
       wallFrameIndex('face', 0),
       wallFrameIndex('face', 1),
@@ -189,15 +189,15 @@ describe('wallSprites', () => {
   });
 
   it('shows only the front of a vertical run: the top band (cap) above the face of its lowest wall', () => {
-    // Walls on rows 3, 4 and 5 of column 8 cover rows 2 to 6 as one stretch; a lone column ends every run.
+    // Walls on rows 3, 4 and 5 of column 8 cover rows 2 to 6 as one stretch; a lone column closes both edges.
     const sprites = wallSprites(blankLayout({ walls: tiles(18, { '8,3': 'wall-brick', '8,4': 'wall-brick', '8,5': 'wall-brick' }) }));
 
     expect(sprites).toEqual([
       brick(8, 2, 'cap', 6),
       brick(8, 3, 'cap', 6),
-      brick(8, 4, 'crownEnd', 6),
-      brick(8, 5, 'faceEnd', 6),
-      brick(8, 6, 'baseEnd', 6),
+      brick(8, 4, 'crownBoth', 6),
+      brick(8, 5, 'faceBoth', 6),
+      brick(8, 6, 'baseBoth', 6),
     ]);
   });
 
@@ -207,12 +207,12 @@ describe('wallSprites', () => {
     expect(new Set(sprites.map(({ depthY }) => depthY))).toEqual(new Set([6 * TILE]));
   });
 
-  it('ends a run where the material changes: each material closes its own right edge', () => {
+  it('ends a run where the material changes: each material closes its own edges', () => {
     const sprites = wallSprites(blankLayout({ walls: tiles(18, { '2,4': 'wall-brick', '3,4': 'wall-plaster', '4,4': 'wall-plaster' }) }));
 
     expect(sprites.filter(({ y }) => y === 4 * TILE).map(({ piece, frame }) => [piece, frame])).toEqual([
-      ['wall-brick', wallFrameIndex('faceEnd', 2)],
-      ['wall-plaster', wallFrameIndex('face', 3)],
+      ['wall-brick', wallFrameIndex('faceBoth', 2)],
+      ['wall-plaster', wallFrameIndex('faceStart', 3)],
       ['wall-plaster', wallFrameIndex('faceEnd', 4)],
     ]);
   });
@@ -220,7 +220,7 @@ describe('wallSprites', () => {
   it('clips a wall at the edge of the map: one placed on the top row keeps its face and base', () => {
     const sprites = wallSprites(blankLayout({ walls: tiles(18, { '5,0': 'wall-brick' }) }));
 
-    expect(sprites).toEqual([brick(5, 0, 'faceEnd', 1), brick(5, 1, 'baseEnd', 1)]);
+    expect(sprites).toEqual([brick(5, 0, 'faceBoth', 1), brick(5, 1, 'baseBoth', 1)]);
   });
 
   it('draws exactly the tiles the wall blocks, one sprite each', () => {
@@ -290,5 +290,15 @@ describe('props of the committed layout against the pack', () => {
     // Placement is the contract's: the anchor lands on the bottom middle of the footprint.
     const piece = findPiece(manifest, bridge.piece) as Parameters<typeof propPlacement>[0];
     expect(propPlacement(piece, bridge.tx, bridge.ty).depthY).toBe((bridge.ty + bridge.h) * TILE);
+  });
+});
+
+describe('wallSprites colors', () => {
+  it('draws each wall in the color of its post, none for a wall without one', () => {
+    const layout = blankLayout({ walls: tiles(18, { '2,4': 'wall-plaster', '3,4': 'wall-plaster' }) });
+    const colors = new Map([[4 * layout.width + 2, '#123456']]);
+    const sprites = wallSprites({ ...layout, colors });
+    expect(sprites.filter(({ x }) => x === 2 * TILE).map(({ color }) => color)).toEqual(['#123456', '#123456', '#123456']);
+    expect(sprites.filter(({ x }) => x === 3 * TILE).every((sprite) => !('color' in sprite))).toBe(true);
   });
 });

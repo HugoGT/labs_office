@@ -53,6 +53,7 @@ import { SOFA_MATERIALS, SOFA_SEATS, sofaSprite } from './domain/sofas.ts';
 import { BASE_CHARACTERS } from '../../src/art/characters.ts';
 import { DIRECTIONS } from '../../src/art/directions.ts';
 import { PixelBuffer } from '../../src/art/pixelBuffer.ts';
+import { hexToRgba } from '../../src/game/artColor.ts';
 import { FACINGS, SEAT_BLOCK, SEAT_HEIGHT } from '../../src/art/seating.ts';
 import { SIT_ANCHOR_X, SIT_ANCHOR_Y, SIT_DOWN_FRAME_COUNT, SIT_FRAME_HEIGHT, SIT_FRAME_WIDTH, SIT_ROWS } from '../../src/art/sitCycle.ts';
 import { buildCharacterSprites } from '../../src/art/spriteSheet.ts';
@@ -207,7 +208,7 @@ describe('wall sheet', () => {
     for (const material of WALL_MATERIALS) {
       const sheet = wallSheet(material);
       expect(validateArtImage('wall', sheet), material).toEqual([]);
-      expect([sheet.width, sheet.height]).toEqual([7 * ART_TILE, WALL_VARIANTS * ART_TILE]);
+      expect([sheet.width, sheet.height]).toEqual([13 * ART_TILE, WALL_VARIANTS * ART_TILE]);
       for (let variant = 0; variant < WALL_VARIANTS; variant += 1) {
         for (const frame of frames) {
           const index = wallFrameIndex(frame, variant);
@@ -239,16 +240,27 @@ describe('wall sheet', () => {
     }
   });
 
-  it('closes only the right edge in the End frames, and only brick draws a joint there', () => {
+  it('closes the right edge in the End frames, the left in the Start ones and both in the Both ones, with the top band color', () => {
+    const top = hexToRgba(WALL_TOP_COLOR);
+    const edgeColumn = (image: PixelBuffer, x: number) => pixels(crop(image, x, 0, 1, ART_TILE));
+    const bandImage = new PixelBuffer(1, ART_TILE);
+    for (let y = 0; y < ART_TILE; y += 1) bandImage.setPixel(0, y, top);
+    const band = pixels(bandImage);
     for (const material of WALL_MATERIALS) {
       const sheet = wallSheet(material);
       for (const frame of ['crown', 'face', 'base'] as const) {
         const open = frameAt(sheet, frame, 0);
-        const closed = frameAt(sheet, `${frame}End`, 0);
-        expect(pixels(crop(closed, 0, 0, ART_TILE - 1, ART_TILE)), `${material} ${frame}`).toEqual(pixels(crop(open, 0, 0, ART_TILE - 1, ART_TILE)));
-        if (material !== 'brick') expect(pixels(closed), `${material} ${frame}`).toEqual(pixels(open));
+        const end = frameAt(sheet, `${frame}End`, 0);
+        const start = frameAt(sheet, `${frame}Start`, 0);
+        const both = frameAt(sheet, `${frame}Both`, 0);
+        const label = `${material} ${frame}`;
+        expect(pixels(crop(end, 0, 0, ART_TILE - 1, ART_TILE)), label).toEqual(pixels(crop(open, 0, 0, ART_TILE - 1, ART_TILE)));
+        expect(edgeColumn(end, ART_TILE - 1), label).toEqual(band);
+        expect(pixels(crop(start, 1, 0, ART_TILE - 1, ART_TILE)), label).toEqual(pixels(crop(open, 1, 0, ART_TILE - 1, ART_TILE)));
+        expect(edgeColumn(start, 0), label).toEqual(band);
+        expect(pixels(crop(both, 1, 0, ART_TILE - 2, ART_TILE)), label).toEqual(pixels(crop(open, 1, 0, ART_TILE - 2, ART_TILE)));
+        expect([edgeColumn(both, 0), edgeColumn(both, ART_TILE - 1)], label).toEqual([band, band]);
       }
-      if (material === 'brick') expect(pixels(frameAt(sheet, 'faceEnd', 0))).not.toEqual(pixels(frameAt(sheet, 'face', 0)));
     }
   });
 

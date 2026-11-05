@@ -54,12 +54,15 @@ import {
   withBlock,
   withTerrainColors,
   withWallOrder,
+  withWallColors,
+  isColorableWallPiece,
   withWalls,
   type LayoutMaterial,
   type OfficeLayout,
   type TerrainColors,
   type TerrainSnapshot,
   type WallEdit,
+  type WallColors,
   type WallPieceId,
 } from '../../../src/game/officeLayout.ts';
 import { BASE_MAP_SEATS, type MapSeat } from '../../../src/game/seating.ts';
@@ -145,6 +148,8 @@ export interface TerrainRuntime {
   setBlocks(edits: readonly TerrainEdit[], actorId: string | null, protections: () => Promise<TerrainProtections>, expected?: string): Promise<readonly LayoutMaterial[]>;
   /** The live wall post of every grid vertex, row major: the layout's, overridden by the stored ones. */
   walls(): readonly (string | null)[];
+  /** The live wall colors: only colorable walls painted in a color of their own, by post. */
+  wallColors(): WallColors;
   /**
    * Places or removes wall posts atomically, or throws `TerrainProtectedError`
    * when one's footprint would touch a desk (`protections`, read only when
@@ -278,6 +283,7 @@ export function createTerrainRuntime({
   let walls: readonly (string | null)[] = layout.walls;
   /** The painted posts in placement order, oldest first (#223); the layout's own posts are not listed. */
   let wallOrder: readonly number[] = [];
+  let wallColors: WallColors = new Map();
   let decor: readonly DecorItem[] = [];
   /** The one way the runtime builds a snapshot: the doors of `items` open the walls they stand in. */
   const snapshotOf = (
@@ -372,12 +378,14 @@ export function createTerrainRuntime({
     const floating = floatingPosts(changed.flatMap(({ index, material }) => (material === 'void' ? [index] : [])), nextSnapshot);
     let nextWalls = walls;
     let nextOrder = wallOrder;
+    let nextWallColors = wallColors;
     if (floating.length === 0) {
       await store.saveBlocks(changed, actorId);
     } else {
       const removals = floating.map((index) => ({ index, piece: null }));
       nextWalls = withWalls(walls, removals);
       nextOrder = withWallOrder(wallOrder, walls, removals);
+      nextWallColors = withWallColors(wallColors, removals);
       nextSnapshot = snapshotOf(next, nextWalls, decor, nextOrder);
       await store.saveBlocksClearingWalls(changed, floating, actorId);
     }
@@ -386,6 +394,7 @@ export function createTerrainRuntime({
     floors = nextFloors;
     walls = nextWalls;
     wallOrder = nextOrder;
+    wallColors = nextWallColors;
     snapshot = nextSnapshot;
     for (const listener of listeners) listener(blocks);
     return blocks;
@@ -397,7 +406,8 @@ export function createTerrainRuntime({
   ): Promise<readonly (string | null)[]> {
     if (!store) throw new Error('no terrain store: the walls cannot be edited');
     parseWallBatch({ edits }, walls.length);
-    const changed = edits.filter(({ index, piece }) => walls[index] !== piece);
+    // A color change alone is a change too (a repaint); parsing already refused a color on a wall that takes none.
+    const changed = edits.filter(({ index, piece, color }) => walls[index] !== piece || wallColors.get(index) !== color);
     if (changed.length === 0) return walls;
     const placed = changed.flatMap(({ index, piece }) => (piece === null ? [] : [index]));
     const removed = changed.flatMap(({ index, piece }) => (piece === null ? [index] : []));
@@ -421,9 +431,11 @@ export function createTerrainRuntime({
     // A placed or repainted post becomes the latest, the order the store keeps by `updated_at`.
     const nextOrder = withWallOrder(wallOrder, walls, changed);
     const nextSnapshot = snapshotOf(blocks, next, decor, nextOrder);
+    const nextColors = withWallColors(wallColors, changed);
     await store.saveWalls(changed, actorId);
     walls = next;
     wallOrder = nextOrder;
+    wallColors = nextColors;
     snapshot = nextSnapshot;
     for (const listener of listeners) listener(blocks);
     return walls;
@@ -537,6 +549,13 @@ export function createTerrainRuntime({
     const lifted = [...walls];
     for (const post of posts) lifted[post] = null;
     posts.forEach((post, at) => { lifted[placedPosts[at]!] = walls[post]!; });
+    // A carried wall keeps its color, and only its own: one where it lands, outside the area, goes with the wall it replaces.
+    const liftedColors = new Map(wallColors);
+    for (const post of [...posts, ...placedPosts]) liftedColors.delete(post);
+    posts.forEach((post, at) => {
+      const color = wallColors.get(post);
+      if (color !== undefined) liftedColors.set(placedPosts[at]!, color);
+    });
     const moved = withDecor(
       withDecor(decor, [...items, ...replaced].map(removalOf)),
       placed.map(({ index, ...item }) => ({ index, item })),
@@ -544,9 +563,14 @@ export function createTerrainRuntime({
     // A carried top item that stood across onto a surface left behind falls instead of stopping the move,
     // like one left behind whose surface went (#121).
     const nextDecor = withDecor(moved, fallenTopItems(decor, moved, decorInfo, width).map(removalOf));
-    const wallEdits = lifted.flatMap((piece, index): WallEdit[] => (piece === walls[index] ? [] : [{ index, piece: piece as WallPieceId | null }]));
+    const wallEdits = lifted.flatMap((piece, index): WallEdit[] => {
+      const color = liftedColors.get(index);
+      if (piece === walls[index] && color === wallColors.get(index)) return [];
+      return [{ index, piece: piece as WallPieceId | null, ...(color === undefined ? {} : { color }) }];
+    });
     const nextWalls = withWalls(walls, wallEdits);
     const nextOrder = withWallOrder(wallOrder, walls, wallEdits);
+    const nextWallColors = withWallColors(wallColors, wallEdits);
     const nextSnapshot = snapshotOf(blocks, nextWalls, nextDecor, nextOrder);
     const kept = new Set(nextDecor.map(decorItemKey));
     const anchors = new Set(placed.map(decorItemKey).filter((key) => kept.has(key)));
@@ -571,6 +595,7 @@ export function createTerrainRuntime({
     }
     walls = nextWalls;
     wallOrder = nextOrder;
+    wallColors = nextWallColors;
     decor = nextDecor;
     snapshot = nextSnapshot;
     for (const listener of listeners) listener(blocks);
@@ -616,6 +641,14 @@ export function createTerrainRuntime({
       walls = withWalls(layout.walls, wallEdits);
       // The store lists the walls oldest first; the layout's own posts stay unlisted.
       wallOrder = wallEdits.map(({ index }) => index);
+      // Like the block colors: rows stored before wall colors have none, and a
+      // color on a wall that cannot take one, or one left out above, is ignored.
+      const loadedPosts = new Set(wallOrder);
+      const savedWallColors = new Map<number, string>();
+      for (const [index, color] of await store.loadWallColors()) {
+        if (loadedPosts.has(index) && isColorableWallPiece(walls[index] ?? null)) savedWallColors.set(index, color);
+      }
+      wallColors = savedWallColors;
       const tileCount = layout.width * layout.height;
       await readCatalog();
       // Unlike the walls, a stored item that breaks today's rules is kept and
@@ -629,6 +662,7 @@ export function createTerrainRuntime({
     blockColors: () => colors,
     blockFloors: () => floors,
     walls: () => walls,
+    wallColors: () => wallColors,
     decor: () => decor,
     decorInfo,
     snapshot: () => snapshot,

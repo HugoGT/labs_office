@@ -247,7 +247,20 @@ export function DecorEditorSection({
         onColorPicking={editor.setPickingColor}
         disabled={editor.blocked}
         preview={preview}
-        wallTiles={offersWalls ? <WallPalette value={walls.brush} onPick={walls.pick} walls={catalog?.wall ?? null} disabled={walls.blocked} preview={preview} /> : undefined}
+        wallTiles={
+          offersWalls ? (
+            <WallPalette
+              value={walls.brush}
+              onPick={walls.pick}
+              walls={catalog?.wall ?? null}
+              colors={walls.colors}
+              onColorChange={walls.setColor}
+              onColorPicking={walls.setPickingColor}
+              disabled={walls.blocked}
+              preview={preview}
+            />
+          ) : undefined
+        }
       />
 
       {walls.brush !== null && (

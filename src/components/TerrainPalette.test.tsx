@@ -180,7 +180,8 @@ describe('TerrainPalette: uploaded floors (S13)', () => {
 });
 
 describe('WallPalette', () => {
-  const WALL_NAMES = ['Ladrillo', 'Piedra', 'Yeso'];
+  // Plaster first, then stone, then brick.
+  const WALL_NAMES = ['Yeso', 'Piedra', 'Ladrillo'];
 
   it('offers every wall by its Spanish name, as title and accessible name but no text, and no eraser, none pressed while a floor or nothing is picked', () => {
     const { rerender } = render(<WallPalette value={null} onPick={() => {}} walls={catalog.wall} preview={noPreview()} />);
@@ -216,7 +217,9 @@ describe('WallPalette', () => {
   it('cuts each thumbnail from the pack wall sheet, and keeps flat swatches without the catalog', async () => {
     const preview = noPreview();
     const { unmount } = render(<WallPalette value={null} onPick={() => {}} walls={catalog.wall} preview={preview} />);
-    await waitFor(() => expect(preview.sheet).toHaveBeenCalledWith(expect.objectContaining({ id: 'wall-plaster' }), null));
+    // Plaster in its pack default color, the other walls in their own art.
+    await waitFor(() => expect(preview.sheet).toHaveBeenCalledWith(expect.objectContaining({ id: 'wall-plaster' }), '#8e9bb2'));
+    expect(preview.sheet).toHaveBeenCalledWith(expect.objectContaining({ id: 'wall-brick' }), null);
     expect(preview.sheet).toHaveBeenCalledTimes(3);
     unmount();
 
@@ -224,6 +227,31 @@ describe('WallPalette', () => {
     expect(screen.getAllByRole('button')).toHaveLength(WALL_NAMES.length);
     expect(screen.queryAllByRole('img')).toHaveLength(0);
     expect(screen.getAllByRole('button').every((button) => (button as HTMLButtonElement).disabled)).toBe(true);
+  });
+});
+
+describe('WallPalette colors', () => {
+  it('makes plaster a colorable tile: its click picks it in the color it has, its picker reports every color', async () => {
+    const onPick = vi.fn();
+    const onColorChange = vi.fn();
+    const onColorPicking = vi.fn();
+    const preview = noPreview();
+    render(
+      <WallPalette value={null} onPick={onPick} walls={catalog.wall} preview={preview} colors={{ 'wall-plaster': '#123456' }} onColorChange={onColorChange} onColorPicking={onColorPicking} />,
+    );
+
+    const input = screen.getByLabelText('Color de Yeso: #123456');
+    expect(input).toHaveValue('#123456');
+    // Only plaster takes a color.
+    expect(screen.queryByLabelText(/^Color de Piedra/)).not.toBeInTheDocument();
+    expect(screen.queryByLabelText(/^Color de Ladrillo/)).not.toBeInTheDocument();
+    await waitFor(() => expect(preview.sheet).toHaveBeenCalledWith(expect.objectContaining({ id: 'wall-plaster' }), '#123456'));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Yeso' }));
+    expect(onColorChange.mock.calls).toEqual([['wall-plaster', '#123456']]);
+    expect(onPick).not.toHaveBeenCalled();
+    await userEvent.click(screen.getByRole('button', { name: 'Piedra' }));
+    expect(onPick.mock.calls).toEqual([['wall-stone']]);
   });
 });
 

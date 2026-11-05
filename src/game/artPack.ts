@@ -20,6 +20,7 @@ import {
   DOOR_VARIANTS,
   PACK_FACINGS,
   TERRAIN_MATERIALS,
+  WALL_TOP_COLOR,
   artSheetKey,
   doorVariantOf,
   sofaSeatsOf,
@@ -211,7 +212,8 @@ function hasDrawingFields(piece: Record<string, unknown>, kind: ArtPieceKind): b
     case 'floor':
       return isColorModel(piece);
     case 'wall':
-      return Number.isInteger(piece.heightTiles) && Number.isFinite(piece.topHeight);
+      // The color pair is optional on a wall, like on a tree: one exported before wall colors has neither field.
+      return Number.isInteger(piece.heightTiles) && Number.isFinite(piece.topHeight) && (piece.colorable === undefined ? piece.defaultColor === undefined : isColorModel(piece));
     case 'tileset':
       return piece.tileSize === ART_TILE && Array.isArray(piece.materials) && piece.materials.length > 0 && piece.materials.every(isTilesetMaterial);
     case 'tree':
@@ -315,6 +317,8 @@ export function bootLoadRequests(manifest: ArtPackManifest, manifestUrl: string)
 export interface Recolor {
   readonly from: string;
   readonly to: string;
+  /** Colors left as they are (`recolorPixels`): a wall's dark top band and line. */
+  readonly keep?: readonly string[];
 }
 
 /**
@@ -326,12 +330,12 @@ export interface Recolor {
  * there, and anything else is a row this client should not tint.
  */
 export function recolorFor(piece: ArtPiece, color: string | null): Recolor | null {
-  if ((piece.kind !== 'desk' && piece.kind !== 'floor' && piece.kind !== 'chair' && piece.kind !== 'sofa' && piece.kind !== 'tree') || piece.colorable !== true) return null;
+  if ((piece.kind !== 'desk' && piece.kind !== 'floor' && piece.kind !== 'chair' && piece.kind !== 'sofa' && piece.kind !== 'tree' && piece.kind !== 'wall') || piece.colorable !== true) return null;
   if (piece.defaultColor === null || piece.defaultColor === undefined) return null;
   if (color === null) return null;
   const to = color.toLowerCase();
   if (!COLOR_PATTERN.test(to) || to === piece.defaultColor.toLowerCase()) return null;
-  return { from: piece.defaultColor, to };
+  return piece.kind === 'wall' ? { from: piece.defaultColor, to, keep: [WALL_TOP_COLOR] } : { from: piece.defaultColor, to };
 }
 
 /**

@@ -18,13 +18,13 @@ import { tileAreaRect, type TileRect } from './terrainGrid';
  */
 export type TerrainBrush =
   | { readonly kind: 'floor'; readonly material: LayoutMaterial; readonly color?: string; readonly floor?: string }
-  | { readonly kind: 'wall'; readonly piece: WallPieceId | null };
+  | { readonly kind: 'wall'; readonly piece: WallPieceId | null; readonly color?: string };
 
 /** Whether two brushes paint the same thing (brushes are compared by value, not identity). */
 export function sameBrush(a: TerrainBrush | null | undefined, b: TerrainBrush | null | undefined): boolean {
   if (a == null || b == null) return (a ?? null) === (b ?? null);
   if (a.kind === 'floor') return b.kind === 'floor' && a.material === b.material && a.color === b.color && a.floor === b.floor;
-  return b.kind === 'wall' && a.piece === b.piece;
+  return b.kind === 'wall' && a.piece === b.piece && a.color === b.color;
 }
 
 /**

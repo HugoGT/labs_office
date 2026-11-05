@@ -98,17 +98,20 @@ export interface WallSprite {
   readonly depthY: number;
   /** The only part of the frame drawn: the wall beside a narrower door, the base over a vertical door (`WallTileFrame.crop`). */
   readonly crop?: WallTileCrop;
+  /** The color the wall is drawn in (`WallTileFrame.color`); absent, its default art. */
+  readonly color?: string;
 }
 
 /** The sprite of every wall tile (`wallTileFrames`), its frame picked by tile column (`wallFrameIndex`). */
 export function wallSprites(grid: WallGrid): WallSprite[] {
-  return wallTileFrames(grid).map(({ tx, ty, piece, frame, depthY, crop }) => ({
+  return wallTileFrames(grid).map(({ tx, ty, piece, frame, depthY, crop, color }) => ({
     piece,
     frame: wallFrameIndex(frame, tx),
     x: tx * ART_TILE,
     y: ty * ART_TILE,
     depthY,
     ...(crop === undefined ? {} : { crop }),
+    ...(color === undefined ? {} : { color }),
   }));
 }
 

@@ -95,20 +95,30 @@ export function createPgTerrain(pool: DirectoryPool): TerrainStore {
       }
       return walls;
     },
+    async loadWallColors() {
+      const result = await pool.query('SELECT tile_index, color FROM terrain_walls WHERE color IS NOT NULL');
+      const colors = new Map<number, string>();
+      // Same as the walls: an unreadable row is skipped, not fatal.
+      for (const row of result.rows) {
+        if (Number.isInteger(row.tile_index) && isTerrainColor(row.color)) colors.set(row.tile_index as number, row.color);
+      }
+      return colors;
+    },
     async saveWalls(edits, actorId) {
       // One statement, so removals and placements commit together. The
-      // tiles of a batch are distinct, so both halves never touch one row.
+      // tiles of a batch are distinct, so both halves never touch one row. A
+      // missing `color` is NULL, as in `saveBlocks`: the wall loses the one it had.
       await pool.query(
         `WITH entries AS (
-           SELECT entry.index, entry.piece FROM jsonb_to_recordset($1::jsonb) AS entry(index integer, piece text)
+           SELECT entry.index, entry.piece, entry.color FROM jsonb_to_recordset($1::jsonb) AS entry(index integer, piece text, color text)
          ),
          removed AS (
            DELETE FROM terrain_walls WHERE tile_index IN (SELECT index FROM entries WHERE piece IS NULL)
          )
-         INSERT INTO terrain_walls (tile_index, piece_id, updated_by)
-         SELECT index, piece, $2::uuid FROM entries WHERE piece IS NOT NULL
+         INSERT INTO terrain_walls (tile_index, piece_id, color, updated_by)
+         SELECT index, piece, color, $2::uuid FROM entries WHERE piece IS NOT NULL
          ON CONFLICT (tile_index) DO UPDATE
-           SET piece_id = EXCLUDED.piece_id, updated_by = EXCLUDED.updated_by, updated_at = now()`,
+           SET piece_id = EXCLUDED.piece_id, color = EXCLUDED.color, updated_by = EXCLUDED.updated_by, updated_at = now()`,
         [JSON.stringify(edits), actorId],
       );
     },
@@ -150,7 +160,7 @@ export function createPgTerrain(pool: DirectoryPool): TerrainStore {
       // edit per tile of each table, so no two halves touch one row.
       await pool.query(
         `WITH wall_entries AS (
-           SELECT entry.index, entry.piece FROM jsonb_to_recordset($1::jsonb) AS entry(index integer, piece text)
+           SELECT entry.index, entry.piece, entry.color FROM jsonb_to_recordset($1::jsonb) AS entry(index integer, piece text, color text)
          ),
          decor_entries AS (
            SELECT entry.index, entry.layer, entry.piece, entry.rotation, entry.color FROM jsonb_to_recordset($2::jsonb) AS entry(index integer, layer text, piece text, rotation smallint, color text)
@@ -159,10 +169,10 @@ export function createPgTerrain(pool: DirectoryPool): TerrainStore {
            DELETE FROM terrain_walls WHERE tile_index IN (SELECT index FROM wall_entries WHERE piece IS NULL)
          ),
          walls_placed AS (
-           INSERT INTO terrain_walls (tile_index, piece_id, updated_by)
-           SELECT index, piece, $3::uuid FROM wall_entries WHERE piece IS NOT NULL
+           INSERT INTO terrain_walls (tile_index, piece_id, color, updated_by)
+           SELECT index, piece, color, $3::uuid FROM wall_entries WHERE piece IS NOT NULL
            ON CONFLICT (tile_index) DO UPDATE
-             SET piece_id = EXCLUDED.piece_id, updated_by = EXCLUDED.updated_by, updated_at = now()
+             SET piece_id = EXCLUDED.piece_id, color = EXCLUDED.color, updated_by = EXCLUDED.updated_by, updated_at = now()
          ),
          decor_removed AS (
            DELETE FROM office_decor WHERE (tile_index, layer) IN (SELECT index, layer FROM decor_entries WHERE piece IS NULL)

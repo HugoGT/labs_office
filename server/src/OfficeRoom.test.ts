@@ -428,6 +428,22 @@ describe('OfficeRoom: edited terrain', () => {
     expect(blocksOf(late)?.[LAWN]).toBe('water');
   });
 
+  it('replicates wall colors to whoever is inside and whoever joins after, and drops one when its wall goes', async () => {
+    const ana = await join('Ana');
+    await waitFor(() => wallsOf(ana) !== null);
+    expect(ana.state.terrainWallColors ?? '').toBe('');
+
+    await server.terrain.setWalls([{ index: tile(21, 30), piece: 'wall-plaster', color: '#a0b1c2' }], null, nobody);
+
+    await waitFor(() => ana.state.terrainWallColors === `${tile(21, 30)}:#a0b1c2`);
+    expect(wallsOf(ana)?.[tile(21, 30)]).toBe('wall-plaster');
+    const late = await join('Beto');
+    await waitFor(() => late.state.terrainWallColors === `${tile(21, 30)}:#a0b1c2`);
+
+    await server.terrain.setWalls([{ index: tile(21, 30), piece: null }], null, nobody);
+    await waitFor(() => ana.state.terrainWallColors === '');
+  });
+
   it('replicates the walls in placement order, the latest last (#223)', async () => {
     const ana = await join('Ana');
     await waitFor(() => wallsOf(ana) !== null);

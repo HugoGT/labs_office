@@ -1,7 +1,7 @@
 import { terrainFloorPieceId } from '../game/artContract';
 import { previewFrame, type MaterialOption, type PreviewFrame } from '../game/artMaterials';
 import type { ArtPreviewCache } from '../game/artPreview';
-import { LAYOUT_MATERIALS, WALL_PIECES, isColorableTerrainMaterial, type LayoutMaterial, type WallPieceId } from '../game/officeLayout';
+import { LAYOUT_MATERIALS, isColorableTerrainMaterial, isColorableWallPiece, type LayoutMaterial, type WallPieceId } from '../game/officeLayout';
 import type { TerrainBrush } from '../game/terrainEditor';
 import { isTerrainFloorPieceId } from '../game/terrainFloors';
 import { TERRAIN_FLAT_COLORS } from '../game/terrainRender';
@@ -144,8 +144,11 @@ const WALL_ERASER_SIGN = '\u26D4';
 const WALL_FLAT_COLORS: Readonly<Record<WallPieceId, number>> = {
   'wall-brick': 0x9a4a3a,
   'wall-stone': 0x7d8288,
-  'wall-plaster': 0xd8d2c4,
+  'wall-plaster': 0x8e9bb2,
 };
+
+/** The walls in palette order: plaster first, then stone, then brick. */
+const WALL_PALETTE_ORDER: readonly WallPieceId[] = ['wall-plaster', 'wall-stone', 'wall-brick'];
 
 /** The 16px wall frame at three canvas pixels per art pixel: the 48px thumbnail, still pixel exact. */
 const WALL_THUMBNAIL_SCALE = 3;
@@ -156,18 +159,26 @@ export interface WallPaletteProps {
   onPick: (piece: WallPieceId) => void;
   /** Wall pieces of the pack catalog, or `null` while it is unavailable: flat swatches then. */
   walls: readonly MaterialOption[] | null;
+  /** The color chosen per colorable wall (plaster); one without starts in its pack default. */
+  colors?: Readonly<Partial<Record<WallPieceId, string>>>;
+  /** A colorable wall's color, live while its picker is dragged; also what its tile reports when clicked (picked, in its current color). */
+  onColorChange?: (piece: WallPieceId, color: string) => void;
+  /** A colorable tile's color picker opened (`true`) or closed: the editor keeps its rail on screen while it is open. */
+  onColorPicking?: (open: boolean) => void;
   disabled?: boolean;
   preview?: ArtPreviewCache;
 }
 
-export function WallPalette({ value, onPick, walls, disabled = false, preview }: WallPaletteProps) {
+export function WallPalette({ value, onPick, walls, colors = {}, onColorChange, onColorPicking, disabled = false, preview }: WallPaletteProps) {
   const pressed = (piece: WallPieceId): boolean => value?.kind === 'wall' && value.piece === piece;
   return (
     <>
-      {WALL_PIECES.map((piece) => {
+      {WALL_PALETTE_ORDER.map((piece) => {
         const option = walls?.find((candidate) => candidate.id === piece);
         const label = WALL_PIECE_LABELS[piece];
-        return (
+        const defaultColor = isColorableWallPiece(piece) && option?.colorable === true ? option.defaultColor : null;
+        const color = defaultColor === null ? null : (colors[piece] ?? defaultColor);
+        const entry = (
           <button
             key={piece}
             type="button"
@@ -176,15 +187,23 @@ export function WallPalette({ value, onPick, walls, disabled = false, preview }:
             title={label}
             aria-pressed={pressed(piece)}
             disabled={disabled}
-            onClick={() => onPick(piece)}
+            // A colorable wall picks in the color it has, never toggling off: its click also opens the picker.
+            onClick={() => (color !== null && onColorChange !== undefined ? onColorChange(piece, color) : onPick(piece))}
           >
             {/* The flat color stands in for the art only while the pack catalog is unavailable. */}
             <span className={styles.tileThumbnail} aria-hidden="true" style={option === undefined ? { background: hexColor(WALL_FLAT_COLORS[piece]) } : undefined}>
               {option !== undefined && (
-                <ArtPreviewCanvas option={option} color={null} frame={previewFrame(option)} scale={WALL_THUMBNAIL_SCALE} label={label} className={styles.tileCanvas} preview={preview} />
+                <ArtPreviewCanvas option={option} color={color} frame={previewFrame(option)} scale={WALL_THUMBNAIL_SCALE} label={label} className={styles.tileCanvas} preview={preview} />
               )}
             </span>
           </button>
+        );
+        if (color === null) return entry;
+        // Its click picks the wall and opens the picker, whose colors change the picked wall live.
+        return (
+          <ColorableTile key={piece} className={styles.tileCell} label={`Color de ${label}`} value={color} disabled={disabled} onChange={(hex) => onColorChange?.(piece, hex)} onPicking={onColorPicking}>
+            {entry}
+          </ColorableTile>
         );
       })}
     </>

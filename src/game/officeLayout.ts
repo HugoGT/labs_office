@@ -622,15 +622,49 @@ export const MAX_WALL_EDITS = 2000;
 /**
  * One post of a wall edit: a wall piece, or `null` to remove the post there.
  * `index` is row major (`ty * width + tx`) and names the grid vertex at the
- * top-left corner of tile (tx, ty).
+ * top-left corner of tile (tx, ty). A colorable wall (plaster) may carry the
+ * color it is painted in; without one it draws its default art.
  */
 export interface WallEdit {
   readonly index: number;
   readonly piece: WallPieceId | null;
+  readonly color?: string;
 }
 
 export function isWallPieceId(value: unknown): value is WallPieceId {
   return typeof value === 'string' && (WALL_PIECES as readonly string[]).includes(value);
+}
+
+/**
+ * The wall pieces that take a color of their own, like the colorable floors:
+ * the colorable walls of the art pack (pinned by a test against the manifest).
+ */
+export const COLORABLE_WALL_PIECES = ['wall-plaster'] as const satisfies readonly WallPieceId[];
+
+export function isColorableWallPiece(piece: string | null): boolean {
+  return piece !== null && (COLORABLE_WALL_PIECES as readonly string[]).includes(piece);
+}
+
+/**
+ * The colored walls, by post (the tile a wall is placed on); a wall without
+ * an entry draws its default art. Sparse and kept apart from the walls, like
+ * `TerrainColors`, so the walls keep their wire form and every wall stored
+ * before wall colors reads the same. Its wire form is `encodeTerrainColors`'.
+ */
+export type WallColors = ReadonlyMap<number, string>;
+
+/**
+ * The colors after `edits`: an edit sets its post's whole look, so a color it
+ * carries on a colorable wall stays, and any other edit of that post (another
+ * piece, no color, the eraser) leaves it the default art. `colors` is left alone.
+ */
+export function withWallColors(colors: WallColors, edits: readonly WallEdit[]): Map<number, string> {
+  const next = new Map(colors);
+  for (const { index, piece, color } of edits) {
+    if (color !== undefined && isColorableWallPiece(piece)) next.set(index, color);
+    else next.delete(index);
+  }
+  return next;
 }
 
 /** A copy of `walls` with every edit applied in order; a tile off the map throws. */
@@ -704,6 +738,8 @@ export function wallOpeningHiddenTiles(opening: WallOpening, { width, height }: 
 export type WallGrid = Pick<OfficeLayout, 'width' | 'height' | 'walls'> & {
   readonly openings?: readonly WallOpening[];
   readonly wallOrder?: readonly number[];
+  /** The color of each colored wall, by post (`WallColors`); absent, every wall draws its default art. */
+  readonly colors?: WallColors;
 };
 
 /**
@@ -766,6 +802,8 @@ export interface WallStretch {
   readonly bottom: number;
   readonly base: number;
   readonly piece: string;
+  /** The color of the wall at `base`, when it has one (`WallGrid.colors`). */
+  readonly color?: string;
 }
 
 /**
@@ -792,7 +830,7 @@ export function wallPostUnder({ width, height }: Pick<OfficeLayout, 'width' | 'h
 }
 
 /** Every vertical stretch of wall tiles, column by column, top to bottom. */
-export function wallStretches({ width, height, walls }: WallGrid): WallStretch[] {
+export function wallStretches({ width, height, walls, colors }: WallGrid): WallStretch[] {
   const covered = new Array<boolean>(width * height).fill(false);
   walls.forEach((wall, index) => {
     if (wall != null) for (const tile of wallPostTiles({ width, height }, index)) covered[tile] = true;
@@ -805,7 +843,8 @@ export function wallStretches({ width, height, walls }: WallGrid): WallStretch[]
       while (ty + 1 < height && covered[(ty + 1) * width + tx]) ty += 1;
       let base = ty;
       while (walls[base * width + tx] == null) base -= 1;
-      stretches.push({ tx, top, bottom: ty, base, piece: walls[base * width + tx]! });
+      const color = colors?.get(base * width + tx);
+      stretches.push({ tx, top, bottom: ty, base, piece: walls[base * width + tx]!, ...(color === undefined ? {} : { color }) });
     }
   }
   return stretches;
@@ -833,6 +872,8 @@ export interface WallTileFrame {
   readonly frame: WallFrame;
   readonly depthY: number;
   readonly crop?: WallTileCrop;
+  /** The color its wall is drawn in (`WallStretch.color`); absent, its default art. */
+  readonly color?: string;
 }
 
 /**
@@ -871,8 +912,10 @@ function openingTileSets(grid: WallGrid): {
  * bottom `WALL.heightTiles` tiles show the face of the lowest wall (its
  * crown, face and base), and any tile above them, where walls stack into a
  * vertical run, is the dark top band (`cap`). A face tile with no tile of
- * the same piece drawn to its right ends a horizontal run and takes the
- * `End` frame, which closes the right edge.
+ * the same piece (in the same color) drawn to its right ends a horizontal
+ * run and takes the `End` frame, which closes the right edge; one with none
+ * to its left starts it (`Start`, the left edge), and one with neither
+ * stands alone (`Both`).
  *
  * A door (`grid.openings`) takes the place of the tiles it hides
  * (`wallOpeningHiddenTiles`): they are not drawn, the wall beside a door in
@@ -881,21 +924,35 @@ function openingTileSets(grid: WallGrid): {
  * through it is drawn over them. The run above a door in a vertical run ends
  * there too (S14a): the `WALL.heightTiles` tiles right over the door show
  * the run's end face (`crownEnd`, `faceEnd`, `baseEnd`, the base nearest the
- * door), which the door's frame stands against.
+ * door; `Both` when nothing joins it on the left), which the door's frame
+ * stands against.
  */
 export function wallTileFrames(grid: WallGrid): WallTileFrame[] {
   const stretches = wallStretches(grid);
   const { hidden, verticalHidden, kept } = openingTileSets(grid);
-  const pieceAt = new Map<number, string>();
-  for (const { tx, top, bottom, piece } of stretches) {
+  // A run joins walls of the same piece in the same color: plaster in two colors ends where they meet.
+  const lookOf = (piece: string, color: string | undefined): string => (color === undefined ? piece : `${piece}@${color}`);
+  const lookAt = new Map<number, string>();
+  for (const { tx, top, bottom, piece, color } of stretches) {
     for (let ty = top; ty <= bottom; ty += 1) {
       const index = ty * grid.width + tx;
-      if (!hidden.has(index) || kept.has(index)) pieceAt.set(index, piece);
+      if (!hidden.has(index) || kept.has(index)) lookAt.set(index, lookOf(piece, color));
     }
   }
   const column: readonly WallFrame[] = ['crown', 'face', 'base'];
   const tiles: WallTileFrame[] = [];
-  for (const { tx, top, bottom, piece } of stretches) {
+  for (const { tx, top, bottom, piece, color } of stretches) {
+    const look = lookOf(piece, color);
+    // Every tile of the stretch carries its piece and, when it has one, its color.
+    const tinted = color === undefined ? {} : { color };
+    const joinsRight = (index: number, x: number): boolean => x + 1 < grid.width && lookAt.get(index + 1) === look;
+    const joinsLeft = (index: number, x: number): boolean => x > 0 && lookAt.get(index - 1) === look;
+    // A face tile closes each edge no wall of its look continues: Start (left), End (right), Both.
+    const edged = (frame: WallFrame, index: number, x: number, right: boolean): WallFrame => {
+      const left = joinsLeft(index, x);
+      if (left && right) return frame;
+      return `${frame}${left ? 'End' : right ? 'Start' : 'Both'}` as WallFrame;
+    };
     let depthY = (bottom + 1) * WALL.frame.height;
     // Bottom up, so a tile above a door knows it: the door's top is its depth, unless nothing is drawn below the door.
     let drawnBelow = false;
@@ -909,9 +966,7 @@ export function wallTileFrames(grid: WallGrid): WallTileFrame[] {
         overDoor = verticalHidden.has(index) ? 0 : null;
         // The wall beside a narrower door is drawn, but sorts like the door's own tiles.
         if (crop !== undefined && bottom - ty < column.length) {
-          const frame = column[column.length - 1 - (bottom - ty)]!;
-          const joined = tx + 1 < grid.width && pieceAt.get(index + 1) === piece;
-          drawn.push({ tx, ty, piece, frame: joined ? frame : (`${frame}End` as WallFrame), depthY, crop });
+          drawn.push({ tx, ty, piece, frame: edged(column[column.length - 1 - (bottom - ty)]!, index, tx, joinsRight(index, tx)), depthY, crop, ...tinted });
         }
         if (drawnBelow) depthY = ty * WALL.frame.height;
         continue;
@@ -920,19 +975,17 @@ export function wallTileFrames(grid: WallGrid): WallTileFrame[] {
       if (overDoor !== null && overDoor < column.length) {
         // The base right over the door leaves its floor line out, under the door's frame and shadow (L43).
         const base = overDoor === 0 ? { crop: { x: 0, w: WALL.frame.width, h: WALL.frame.height - VERTICAL_DOOR.hidesWallBase } } : {};
-        drawn.push({ tx, ty, piece, frame: `${column[column.length - 1 - overDoor]!}End` as WallFrame, depthY, ...base });
+        drawn.push({ tx, ty, piece, frame: edged(column[column.length - 1 - overDoor]!, index, tx, false), depthY, ...base, ...tinted });
         overDoor += 1;
         continue;
       }
       overDoor = null;
       const fromBottom = bottom - ty;
       if (fromBottom >= column.length) {
-        drawn.push({ tx, ty, piece, frame: 'cap', depthY });
+        drawn.push({ tx, ty, piece, frame: 'cap', depthY, ...tinted });
         continue;
       }
-      const frame = column[column.length - 1 - fromBottom]!;
-      const joined = tx + 1 < grid.width && pieceAt.get(index + 1) === piece;
-      drawn.push({ tx, ty, piece, frame: joined ? frame : (`${frame}End` as WallFrame), depthY });
+      drawn.push({ tx, ty, piece, frame: edged(column[column.length - 1 - fromBottom]!, index, tx, joinsRight(index, tx)), depthY, ...tinted });
     }
     tiles.push(...drawn.reverse());
   }

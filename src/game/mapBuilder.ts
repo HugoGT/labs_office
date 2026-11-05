@@ -291,7 +291,7 @@ export function placeWalls(
 ): Phaser.GameObjects.GameObject[] {
   const drawn: Phaser.GameObjects.GameObject[] = [];
   for (const sprite of wallSprites(grid)) {
-    const sheet = packSheet(art, sprite.piece, isAny);
+    const sheet = packSheet(art, sprite.piece, isAny, sprite.color ?? null);
     const depth = worldAssetDepth(sprite.depthY);
     // The wall beside a narrower door shows only its columns there, the base over a vertical door its top rows (`WallSprite.crop`).
     const { x, w, h = WALL.frame.height } = sprite.crop ?? { x: 0, w: WALL.frame.width };

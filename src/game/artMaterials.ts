@@ -83,8 +83,8 @@ function manifestFolder(manifestUrl: string): string {
 }
 
 /** The kinds that may take a color of their own (`recolorFor`). */
-function tinted(piece: CatalogPiece): piece is ArtDeskPiece | ArtFloorPiece | ArtChairPiece | ArtSofaPiece | ArtTreePiece {
-  return piece.kind === 'desk' || piece.kind === 'floor' || piece.kind === 'chair' || piece.kind === 'sofa' || piece.kind === 'tree';
+function tinted(piece: CatalogPiece): piece is ArtDeskPiece | ArtFloorPiece | ArtChairPiece | ArtSofaPiece | ArtTreePiece | ArtWallPiece {
+  return piece.kind === 'desk' || piece.kind === 'floor' || piece.kind === 'chair' || piece.kind === 'sofa' || piece.kind === 'tree' || piece.kind === 'wall';
 }
 
 function optionOf(piece: CatalogPiece, folder: string): MaterialOption | null {

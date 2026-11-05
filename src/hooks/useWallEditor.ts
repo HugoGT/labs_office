@@ -6,9 +6,10 @@ import { MAP_W } from '../game/mapData';
 import type { OfficeBridge } from '../game/officeBridge';
 import { decorFootprint, decorInfoFromPieceId, type DecorItem, type DecorPieceInfo } from '../game/officeDecor';
 import { doorOwnRect, isDoorPiece, wallEraseOf } from '../game/officeDoors';
-import { BASE_LAYOUT, MAX_WALL_EDITS, wallPostUnder, type WallEdit, type WallPieceId } from '../game/officeLayout';
+import { BASE_LAYOUT, MAX_WALL_EDITS, isColorableWallPiece, wallPostUnder, type WallColors, type WallEdit, type WallPieceId } from '../game/officeLayout';
 import type { TerrainBrush } from '../game/terrainEditor';
 import { tileAreaRect, type TileRect } from '../game/terrainGrid';
+import { usePersistedColors } from './usePersistedColors';
 
 /**
  * The wall tool of "Decoración" (#224): pick a wall in the palette, or the
@@ -27,6 +28,11 @@ import { tileAreaRect, type TileRect } from '../game/terrainGrid';
  * the pending paints. It holds that overlay only while it has something to
  * show, a picked wall or paints on their way, so the decor editor beside it
  * keeps the map the rest of the time.
+ *
+ * A colorable wall (plaster) is picked in the color last settled on its
+ * palette tile, remembered in this browser like the floors' (#222); each
+ * wall it paints carries that color, and a wall the room shows in another
+ * color is repainted.
  *
  * Paints go to the server one request at a time, in click order: the ones
  * queued meanwhile leave together in one `setWalls`, so a long dragged wall
@@ -73,6 +79,12 @@ export interface WallEditor {
   walls: readonly (string | null)[];
   /** The wall (or eraser, `piece` `null`) picked, or `null`. */
   brush: WallBrush | null;
+  /** The color chosen for each colorable wall in this browser; absent, its default art. */
+  colors: Readonly<Partial<Record<WallPieceId, string>>>;
+  /** Settles `color` for the colorable wall `piece` and picks it in that color. */
+  setColor(piece: WallPieceId, color: string): void;
+  /** The browser's color picker of a wall's palette tile is open (or closed): the rail stays while it is. */
+  setPickingColor(picking: boolean): void;
   /** A paint is on its way to the server. */
   pending: boolean;
   blocked: boolean;
@@ -87,6 +99,8 @@ export interface WallEditor {
 interface WallPaint {
   readonly index: number;
   readonly piece: WallPieceId | null;
+  /** The color it paints a colorable wall in; absent, the default art. */
+  readonly color?: string;
   readonly sent: boolean;
   /** Left a refused batch: it goes to the server on its own, so it cannot take its neighbors down with it (#223). */
   readonly alone?: boolean;
@@ -99,6 +113,23 @@ function wallAfter(walls: readonly (string | null)[], paints: readonly WallPaint
   let wall = walls[index] ?? null;
   for (const paint of paints) if (paint.index === index) wall = paint.piece;
   return wall;
+}
+
+/** The color of the wall on a vertex once every pending paint lands, `undefined` for its default art. */
+function colorAfter(colors: WallColors, paints: readonly WallPaint[], index: number): string | undefined {
+  let color = colors.get(index);
+  for (const paint of paints) if (paint.index === index) color = paint.color;
+  return color;
+}
+
+/** The wall brush a pick makes: a colorable wall carries the color chosen for it, if any. */
+function wallBrush(piece: WallPieceId | null, color: string | undefined): WallBrush {
+  return isColorableWallPiece(piece) && color !== undefined ? { kind: 'wall', piece, color } : { kind: 'wall', piece };
+}
+
+/** A paint or preview edit: the color only when there is one, so a wall without one reads as before. */
+function editOf({ index, piece, color }: WallPaint): WallEdit {
+  return color === undefined ? { index, piece } : { index, piece, color };
 }
 
 /** Every wall post once every pending paint lands. */
@@ -132,6 +163,11 @@ export function useWallEditor({ bridge, terrain, eraseDecor, eraseDoors, infoOf 
   /** The live decor layer: the posts its doors span and the tiles its pieces cover, what `eraseDecor` takes them by. */
   const [decor, setDecor] = useState<readonly DecorItem[]>([]);
   const [brush, setBrush] = useState<WallBrush | null>(null);
+  // A palette tile's color picker is open: the rail it hangs from must stay while a brush is in hand.
+  const [pickingColor, setPickingColor] = useState(false);
+  const holdingPicker = brush !== null && pickingColor;
+  // Remembered in this browser, never sent: a painted wall carries its own color.
+  const [colors, saveColor] = usePersistedColors<WallPieceId>('office:wall-colors');
   const [paints, setPaintsState] = useState<readonly WallPaint[]>([]);
   const [draining, setDraining] = useState(false);
   const [blocked, setBlocked] = useState(false);
@@ -139,6 +175,7 @@ export function useWallEditor({ bridge, terrain, eraseDecor, eraseDoors, infoOf 
   // The queue is read and written across awaits: refs are its source of truth, state only renders it.
   const paintsRef = useRef<readonly WallPaint[]>([]);
   const wallsRef = useRef<readonly (string | null)[]>(BASE_LAYOUT.walls);
+  const wallColorsRef = useRef<WallColors>(new Map());
   const drainingRef = useRef(false);
   const blockedRef = useRef(false);
 
@@ -169,7 +206,7 @@ export function useWallEditor({ bridge, terrain, eraseDecor, eraseDoors, infoOf 
         }
         try {
           if (terrain === null) throw new Error('no terrain port: the walls cannot be painted');
-          await terrain.setWalls(batch.map(({ index, piece }) => ({ index, piece })));
+          await terrain.setWalls(batch.map(editOf));
           setPaints(paintsRef.current.map((candidate) => (batch.includes(candidate) ? { ...candidate, sent: true } : candidate)));
         } catch (cause) {
           const underPlacement = cause instanceof AdminError && cause.code === 'terrain-under-placement';
@@ -202,14 +239,14 @@ export function useWallEditor({ bridge, terrain, eraseDecor, eraseDoors, infoOf 
     // A wall covers the tiles above and below the one it stands on: the eraser takes it from any of them.
     const map = { width: MAP_W, height: wallsRef.current.length / MAP_W };
     const target = brush.piece === null ? (wallPostUnder(map, index, (candidate) => wallAfter(wallsRef.current, paintsRef.current, candidate) != null) ?? index) : index;
-    if (wallAfter(wallsRef.current, paintsRef.current, target) === brush.piece) return;
+    if (wallAfter(wallsRef.current, paintsRef.current, target) === brush.piece && (brush.piece === null || colorAfter(wallColorsRef.current, paintsRef.current, target) === brush.color)) return;
     setError(null);
     const erased = brush.piece === null && eraseDoors !== undefined ? wallEraseOf(decor, { ...map, walls: wallsAfter(wallsRef.current, paintsRef.current) }, target) : null;
     if (erased !== null && erased.doors.length > 0) {
       const doorsGone = eraseDoors!(erased.doors);
       setPaints([...paintsRef.current, ...erased.posts.map((post): WallPaint => ({ index: post, piece: null, sent: false, doorsGone }))]);
     } else {
-      setPaints([...paintsRef.current, { index: target, piece: brush.piece, sent: false }]);
+      setPaints([...paintsRef.current, { index: target, piece: brush.piece, ...(brush.color === undefined ? {} : { color: brush.color }), sent: false }]);
     }
     void drain();
   }
@@ -218,6 +255,7 @@ export function useWallEditor({ bridge, terrain, eraseDecor, eraseDoors, infoOf 
     () =>
       bridge.on('terrain', (payload) => {
         wallsRef.current = payload.walls;
+        wallColorsRef.current = payload.wallColors ?? new Map();
         setWalls(payload.walls);
         // The room shows every saved paint from here on, or something newer.
         if (paintsRef.current.some((paint) => paint.sent)) setPaints(paintsRef.current.filter((paint) => !paint.sent));
@@ -247,7 +285,7 @@ export function useWallEditor({ bridge, terrain, eraseDecor, eraseDoors, infoOf 
   }, [brush]);
 
   const previewWalls = useMemo<WallEdit[] | null>(
-    () => (paints.length === 0 ? null : paints.map(({ index, piece }) => ({ index, piece }))),
+    () => (paints.length === 0 ? null : paints.map(editOf)),
     [paints],
   );
   // Only the eraser asks (#241): the walls it would take once every pending paint lands.
@@ -262,7 +300,7 @@ export function useWallEditor({ bridge, terrain, eraseDecor, eraseDoors, infoOf 
     return decor.map((item) => tileAreaRect(isDoorPiece(item.piece) ? doorOwnRect(item, MAP_W) : decorFootprint(item, infoOf(item.piece), MAP_W)));
   }, [brush, decor, takesDecor, infoOf]);
   const shows = brush !== null || previewWalls !== null;
-  const commandKey = JSON.stringify([brush, previewWalls, outlines, erasable, erasableDecor]);
+  const commandKey = JSON.stringify([brush, previewWalls, outlines, erasable, erasableDecor, holdingPicker]);
 
   useEffect(() => {
     if (!shows) return;
@@ -272,6 +310,7 @@ export function useWallEditor({ bridge, terrain, eraseDecor, eraseDoors, infoOf 
       ...(outlines === undefined || outlines.length === 0 ? {} : { outlines }),
       ...(erasable === null ? {} : { erasable }),
       ...(erasableDecor === null ? {} : { erasableDecor }),
+      ...(holdingPicker ? { pickingColor: true as const } : {}),
     });
     // `commandKey` stands for the brush and the preview: only a different drawing is worth a command.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -287,12 +326,22 @@ export function useWallEditor({ bridge, terrain, eraseDecor, eraseDoors, infoOf 
   return {
     walls,
     brush,
+    colors,
+    setColor(piece, color) {
+      if (!isColorableWallPiece(piece)) return;
+      saveColor(piece, color);
+      // A color settled on its tile (its picker was dismissed) picks the wall, so the next click on the map paints it.
+      if (terrain === null) return;
+      setBrush(wallBrush(piece, color));
+      setError(null);
+    },
+    setPickingColor,
     pending: draining,
     blocked,
     error,
     pick(piece) {
       if (terrain === null) return;
-      setBrush((current) => (current !== null && current.piece === piece ? null : { kind: 'wall', piece }));
+      setBrush((current) => (current !== null && current.piece === piece ? null : wallBrush(piece, piece === null ? undefined : colors[piece])));
       setError(null);
     },
     unpick() {
@@ -300,6 +349,7 @@ export function useWallEditor({ bridge, terrain, eraseDecor, eraseDoors, infoOf 
     },
     reset() {
       setBrush(null);
+      setPickingColor(false);
       setError(null);
       setBlockedBoth(false);
     },

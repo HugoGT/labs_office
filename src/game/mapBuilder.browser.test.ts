@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { afterEach, describe, expect, it } from 'vitest';
 import { waitForSceneRunning } from '../test/phaserScene';
-import { TERRAIN_LAYER_COUNT, TERRAIN_LAYER_ORIGIN, propPlacement, type ArtChairPiece, type ArtSofaPiece } from './artContract';
+import { TERRAIN_LAYER_COUNT, TERRAIN_LAYER_ORIGIN, propPlacement, wallFrameIndex, type ArtChairPiece, type ArtSofaPiece } from './artContract';
 import { artSheetKey, findPiece, recoloredSheetKey } from './artPack';
 import { ArtPackLoader } from './artPackLoader';
 import { chairPlacement, deskPlacement, footprintAnchor, sofaPlacement } from './artPlacement';
@@ -327,6 +327,28 @@ describe('placeWalls', () => {
     expect(result.keys.filter((key) => key === artSheetKey('wall-brick', 'sheet')).length).toBe(wallSprites(grid).filter((sprite) => sprite.piece === 'wall-brick').length);
     expect(result.keys).toContain(artSheetKey('wall-plaster', 'sheet'));
     expect(result.left).toBe(0);
+  });
+
+  it('draws a plaster wall in the color of its post from a recolored copy of its sheet, keeping its dark band', async () => {
+    const width = 6;
+    const height = 4;
+    const walls = new Array<string | null>(width * height).fill(null);
+    walls[width + 1] = 'wall-plaster';
+    walls[width + 2] = 'wall-plaster';
+    const grid = { width, height, walls, colors: new Map([[width + 1, '#c0392b']]) };
+    const result = await withArtScene((scene, art) => {
+      const drawn = placeWalls(scene, grid, art);
+      const keys = images(scene).map((img) => img.texture.key);
+      // The cap frame is all dark band: the recolor leaves it as the pack draws it.
+      const recolored = scene.textures.getPixel(0, 0, recoloredSheetKey('wall-plaster', 'sheet', '#c0392b'), wallFrameIndex('cap', 0));
+      const exported = scene.textures.getPixel(0, 0, artSheetKey('wall-plaster', 'sheet'), wallFrameIndex('cap', 0));
+      for (const object of drawn) object.destroy();
+      return { keys, band: [recolored?.color, exported?.color] };
+    });
+
+    expect(result.keys.filter((key) => key === recoloredSheetKey('wall-plaster', 'sheet', '#c0392b'))).toHaveLength(3);
+    expect(result.keys.filter((key) => key === artSheetKey('wall-plaster', 'sheet'))).toHaveLength(3);
+    expect(result.band[0]).toBe(result.band[1]);
   });
 
   it('without the pack draws a grey tile placeholder on every tile a wall covers', async () => {
