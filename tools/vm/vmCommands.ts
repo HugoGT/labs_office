@@ -6,6 +6,7 @@
  */
 import {
   HEAVY_DAYS_METADATA_KEY,
+  HEAVY_WEEKDAYS,
   HOLD_UNTIL_METADATA_KEY,
   addHeavyDay,
   decideNightly,
@@ -48,14 +49,18 @@ export const USAGE = `usage: node tools/vm/vm.ts <command>
   nightly [--dry-run]      stop the VM if it runs after hours with no active hold,
                            then size a stopped VM for the next office day
   status                   status, machine type, hold and heavy days
-  heavy list               upcoming heavy days (YYYY-MM-DD, America/Lima)
-  heavy add|rm YYYY-MM-DD  mark or unmark a heavy day (e2-standard-8)
+  heavy list               heavy weekdays and upcoming heavy dates (America/Lima)
+  heavy add|rm YYYY-MM-DD  mark or unmark a one-off heavy date (e2-standard-8);
+                           heavy weekdays are HEAVY_WEEKDAYS in vmSchedule.ts
   hold <duration>          keep the VM running for 2h, 90m, 1h30m from now
 
   Target: GCP_PROJECT_ID (default: gcloud config), GCP_ZONE (us-central1-a),
   GCP_INSTANCE (labs-office-test).`;
 
 class UsageError extends Error {}
+
+const WEEKDAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const heavyWeekdayNames = () => HEAVY_WEEKDAYS.map((day) => WEEKDAY_NAMES[day]).join(', ');
 
 function heavyDaysOf(description: VmDescription, out: (line: string) => void): string[] {
   const { days, invalid } = parseHeavyDays(description.metadata[HEAVY_DAYS_METADATA_KEY]);
@@ -108,7 +113,8 @@ function heavy(args: readonly string[], deps: VmCommandDeps): number {
   const { vm, out } = deps;
   if (action === 'list' && date === undefined) {
     const days = upcomingHeavyDays(heavyDaysOf(vm.describe(), out), deps.now());
-    out(days.length > 0 ? days.join('\n') : 'no upcoming heavy days');
+    if (HEAVY_WEEKDAYS.length > 0) out(`every ${heavyWeekdayNames()}`);
+    out(days.length > 0 ? days.join('\n') : 'no upcoming heavy dates');
     return 0;
   }
   if ((action !== 'add' && action !== 'rm') || date === undefined || rest.length > 0) {
@@ -159,6 +165,7 @@ function status(args: readonly string[], deps: VmCommandDeps): number {
   } else {
     out(rawHold ? `hold until: invalid value ${JSON.stringify(rawHold)} (no hold)` : 'hold until: none');
   }
+  out(`heavy weekdays: ${HEAVY_WEEKDAYS.length > 0 ? heavyWeekdayNames() : 'none'}`);
   out(`heavy days: ${upcoming.length > 0 ? upcoming.join(', ') : 'none'}`);
   out(`next office day: ${next} (${machineTypeFor(next, heavyDays)})`);
   return 0;

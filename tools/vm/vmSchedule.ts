@@ -27,6 +27,15 @@ export const OFFICE_STOP_CRON = cronOf(OFFICE_STOP);
 export const NORMAL_MACHINE_TYPE = 'e2-standard-4';
 export const HEAVY_MACHINE_TYPE = 'e2-standard-8';
 
+/**
+ * Cron day-of-week numbers that always run on HEAVY_MACHINE_TYPE: Friday, the
+ * weekly all-hands (#278). Recurring days live here rather than in instance
+ * metadata so Terraform never has to ignore another key; a one-off date still
+ * goes through `office-heavy-days`. `scheduleDrift.test.ts` checks the
+ * runbook and `office-vm.sh` name the same days.
+ */
+export const HEAVY_WEEKDAYS: readonly number[] = [5];
+
 export const HEAVY_DAYS_METADATA_KEY = 'office-heavy-days';
 export const HOLD_UNTIL_METADATA_KEY = 'office-hold-until';
 
@@ -221,8 +230,13 @@ export function machineTypeName(value: string): string {
   return value.slice(value.lastIndexOf('/') + 1);
 }
 
-export function machineTypeFor(date: string, heavyDays: readonly string[]): string {
-  return heavyDays.includes(date) ? HEAVY_MACHINE_TYPE : NORMAL_MACHINE_TYPE;
+/** Heavy on a heavy weekday or on a one-off heavy date, normal otherwise. */
+export function machineTypeFor(
+  date: string,
+  heavyDays: readonly string[],
+  heavyWeekdays: readonly number[] = HEAVY_WEEKDAYS,
+): string {
+  return heavyWeekdays.includes(weekdayOf(date)) || heavyDays.includes(date) ? HEAVY_MACHINE_TYPE : NORMAL_MACHINE_TYPE;
 }
 
 export interface NightlyInput {

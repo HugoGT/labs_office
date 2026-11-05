@@ -8,6 +8,8 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
   HEAVY_DAYS_METADATA_KEY,
+  HEAVY_MACHINE_TYPE,
+  HEAVY_WEEKDAYS,
   HOLD_UNTIL_METADATA_KEY,
   OFFICE_START_CRON,
   OFFICE_STOP_CRON,
@@ -40,6 +42,21 @@ describe('Terraform instance schedule', () => {
     expect(ignore).toMatch(/\bmachine_type\b/);
     expect(ignore).toContain(`metadata["${HEAVY_DAYS_METADATA_KEY}"]`);
     expect(ignore).toContain(`metadata["${HOLD_UNTIL_METADATA_KEY}"]`);
+  });
+});
+
+describe('heavy weekdays (#278)', () => {
+  const names = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+  const heavy = HEAVY_WEEKDAYS.map((day) => names[day] as string);
+  const mentioned = (source: string) => names.filter((name) => new RegExp(`every ${name}\\b`).test(source));
+
+  it('are named, and only they, where operators read them', () => {
+    const usage = /usage\(\) \{([\s\S]*?)\n\}/.exec(read('../../infra/gcp/scripts/office-vm.sh'))?.[1] ?? '';
+    const runbook = /## VM schedule \(cost cut\)([\s\S]*?)\n## /.exec(read('../../infra/gcp/README.md'))?.[1] ?? '';
+    expect(heavy.length).toBeGreaterThan(0);
+    expect(mentioned(usage)).toEqual(heavy);
+    expect(mentioned(runbook)).toEqual(heavy);
+    expect(runbook.replace(/\s+/g, ' ')).toContain(`every ${heavy.join(', ')} runs on \`${HEAVY_MACHINE_TYPE}\``);
   });
 });
 

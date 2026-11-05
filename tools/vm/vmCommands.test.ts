@@ -109,11 +109,11 @@ describe('heavy', () => {
     const vm = fakeVm({ metadata: { 'office-heavy-days': '2026-10-01,2026-10-20' } });
     const { code, output } = run(['heavy', 'list'], vm);
     expect(code).toBe(0);
-    expect(output).toBe('2026-10-20');
+    expect(output).toBe('every Friday\n2026-10-20');
   });
 
-  it('says so when there are none', () => {
-    expect(run(['heavy', 'list'], fakeVm()).output).toMatch(/no upcoming heavy days/);
+  it('says so when there are no heavy dates besides the weekly ones', () => {
+    expect(run(['heavy', 'list'], fakeVm()).output).toBe('every Friday\nno upcoming heavy dates');
   });
 
   it('adds a day into the sorted list', () => {
@@ -171,9 +171,15 @@ describe('status', () => {
     expect(output).toMatch(/status: RUNNING/);
     expect(output).toMatch(new RegExp(`machine type: ${NORMAL_MACHINE_TYPE}`));
     expect(output).toMatch(/hold until: 2026-10-14T02:00:00Z \(active\)/);
+    expect(output).toMatch(/heavy weekdays: Friday/);
     expect(output).toMatch(/heavy days: 2026-10-14, 2026-10-30/);
     expect(output).toMatch(new RegExp(`next office day: 2026-10-14 \\(${HEAVY_MACHINE_TYPE}\\)`));
     expect(mutations(vm)).toEqual([]);
+  });
+
+  it('plans a Friday heavy with no heavy date set (#278)', () => {
+    const { output } = run(['status'], fakeVm(), '2026-11-06T01:30:00Z');
+    expect(output).toMatch(new RegExp(`next office day: 2026-11-06 \\(${HEAVY_MACHINE_TYPE}\\)`));
   });
 
   it('marks an expired hold', () => {
