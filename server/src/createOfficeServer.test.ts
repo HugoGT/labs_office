@@ -261,7 +261,17 @@ describe('GET /health', () => {
       room: OFFICE_ROOM_NAME,
       auth: 'disabled',
       directory: 'disabled',
+      players: 0,
     });
+  });
+
+  it('counts the people in the office, which the deploy waits on (#276)', async () => {
+    const room = await new Client(baseUrl.replace(/^http/, 'ws')).joinOrCreate(OFFICE_ROOM_NAME, { name: 'Ana' });
+
+    const res = await fetch(`${baseUrl}/health`);
+
+    expect(await res.json()).toMatchObject({ players: 1 });
+    await room.leave();
   });
 });
 
@@ -287,6 +297,7 @@ describe('createOfficeServer con directorio (#24)', () => {
       room: OFFICE_ROOM_NAME,
       auth: 'disabled',
       directory: 'enabled',
+      players: 0,
     });
     await withDirectory.shutdown();
   });
@@ -386,6 +397,7 @@ describe('POST /livekit/token con auth activa (#8)', () => {
       room: OFFICE_ROOM_NAME,
       auth: 'enabled',
       directory: 'disabled',
+      players: 0,
     });
   });
 

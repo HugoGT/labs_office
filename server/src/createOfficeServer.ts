@@ -736,11 +736,16 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
     // `directory` esta aqui por lo mismo (#24): sin `DATABASE_URL` el servidor
     // arranca igual de bien y deja entrar a todo el mundo para siempre, sin un
     // solo error en el log. Tampoco dice a que base de datos apunta.
+    //
+    // `players` is what the automatic deploy waits on (#276): a count, never
+    // who. It includes sessions inside their reconnection window, since a
+    // restart would drop those too.
     res.json({
       ok: true,
       room: OFFICE_ROOM_NAME,
       auth: auth ? 'enabled' : 'disabled',
       directory: directory ? 'enabled' : 'disabled',
+      players: sessions.size(),
     });
   });
 
