@@ -1251,6 +1251,111 @@ describe('useProximityAudio: reaplica microfono/camara tras cada conexion (#12, 
   });
 });
 
+describe('useProximityAudio: mic and camera across a room change (#277)', () => {
+  /**
+   * Connected to the open floor with `first`, then moved to space 's1' whose
+   * `connect()` stays in flight until `finish()` resolves it with `second`.
+   */
+  async function inTransition(second: LivekitRoomConnection, { micOn = false, camOn = false } = {}) {
+    const bridge = createOfficeBridge();
+    const first = fakeConnection();
+    const pending = deferred<LivekitRoomConnection>();
+    const connect = vi
+      .fn<(opts: ConnectLivekitRoomOptions) => Promise<LivekitRoomConnection>>()
+      .mockResolvedValueOnce(first)
+      .mockReturnValueOnce(pending.promise);
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+
+    const rendered = renderHook(() =>
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
+    );
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
+    });
+    if (micOn) await act(async () => rendered.result.current.toggleMic());
+    if (camOn) await act(async () => rendered.result.current.toggleCam());
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's1' });
+    });
+    expect(connect).toHaveBeenCalledTimes(2);
+
+    const finish = async () => {
+      await act(async () => {
+        pending.resolve(second);
+      });
+    };
+    return { ...rendered, first, finish };
+  }
+
+  it('muting while the new room connects is kept: the new room never opens the microphone', async () => {
+    const second = fakeConnection();
+    const { result, finish } = await inTransition(second, { micOn: true });
+
+    await act(async () => result.current.toggleMic());
+    expect(result.current.micOn).toBe(false);
+    await finish();
+
+    expect(second.setMicrophoneEnabled).not.toHaveBeenCalledWith(true);
+    expect(result.current.micOn).toBe(false);
+  });
+
+  it('turning the camera off while the new room connects is kept too', async () => {
+    const second = fakeConnection();
+    const { result, finish } = await inTransition(second, { camOn: true });
+
+    await act(async () => result.current.toggleCam());
+    expect(result.current.camOn).toBe(false);
+    await finish();
+
+    expect(second.setCameraEnabled).not.toHaveBeenCalledWith(true);
+    expect(result.current.camOn).toBe(false);
+  });
+
+  it('unmuting while the new room connects publishes the microphone there', async () => {
+    const second = fakeConnection();
+    const { result, finish } = await inTransition(second);
+
+    await act(async () => result.current.toggleMic());
+    await finish();
+
+    expect(second.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+    expect(result.current.micOn).toBe(true);
+  });
+
+  it('a microphone the new room fails to publish shows as off', async () => {
+    const second = fakeConnection({ setMicrophoneEnabled: vi.fn(async () => false) });
+    const { result, finish } = await inTransition(second, { micOn: true });
+
+    await finish();
+
+    expect(second.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+    expect(result.current.micOn).toBe(false);
+  });
+
+  it('a camera the new room fails to publish shows as off', async () => {
+    const second = fakeConnection({ setCameraEnabled: vi.fn(async () => false) });
+    const { result, finish } = await inTransition(second, { camOn: true });
+
+    await finish();
+
+    expect(second.setCameraEnabled).toHaveBeenCalledWith(true);
+    expect(result.current.camOn).toBe(false);
+  });
+
+  it('without any room yet a click changes nothing: there is no transition to remember it for', async () => {
+    const bridge = createOfficeBridge();
+    const { result } = renderHook(() =>
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect: vi.fn(), fetchToken: vi.fn() }),
+    );
+
+    await act(async () => result.current.toggleMic());
+    await act(async () => result.current.toggleCam());
+
+    expect(result.current.micOn).toBe(false);
+    expect(result.current.camOn).toBe(false);
+  });
+});
+
 describe('useProximityAudio: screen share (#20)', () => {
   /** Connected to a space room (or the open floor), with the connect callbacks captured. */
   async function connectedTo(spaceId: string | null, initialStatus: PresenceStatus = 'g') {

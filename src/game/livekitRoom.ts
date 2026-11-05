@@ -245,6 +245,19 @@ export async function connectLivekitRoom({
     return run;
   }
 
+  /**
+   * Same for the microphone (#277): a mute clicked while the unmute of a
+   * room just joined is still publishing would otherwise race it, and the
+   * microphone could stay open after the last click said off.
+   */
+  let microphoneQueue: Promise<unknown> = Promise.resolve();
+
+  function serializeMicrophone<T>(task: () => Promise<T>): Promise<T> {
+    const run = microphoneQueue.then(task, task);
+    microphoneQueue = run.catch(() => undefined);
+    return run;
+  }
+
   function cameraPublication(): TrackPublication | undefined {
     return publicationsOf(room.localParticipant, Track.Source.Camera)[0];
   }
@@ -544,13 +557,17 @@ export async function connectLivekitRoom({
       desiredVideo = sessionIds;
       reconcileKind(Track.Kind.Video);
     },
-    async setMicrophoneEnabled(enabled) {
-      try {
-        await room.localParticipant.setMicrophoneEnabled(enabled);
-        return enabled;
-      } catch {
-        return false;
-      }
+    setMicrophoneEnabled(enabled) {
+      return serializeMicrophone(async () => {
+        try {
+          await room.localParticipant.setMicrophoneEnabled(enabled);
+          return enabled;
+        } catch {
+          // Includes livekit-client 2.22.3 giving up after 15 s on a publish
+          // started while the signal was reconnecting (it stops the track).
+          return false;
+        }
+      });
     },
     setCameraEnabled(enabled) {
       return serializeCamera(async () => {
