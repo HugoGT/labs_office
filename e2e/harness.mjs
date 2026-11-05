@@ -704,6 +704,48 @@ export async function waitForNoPeerAudio(page, sessionId) {
   );
 }
 
+/**
+ * #288: picks a microphone from the real "Opciones de micrófono" menu, by the
+ * label Chromium's fake media gives it ("Fake Audio Input 2"). The list fills
+ * once the microphone is on, so this waits for the item to show up.
+ */
+export async function pickMicrophone(page, label) {
+  await page.getByRole('button', { name: 'Opciones de micrófono' }).click();
+  await page.getByRole('group', { name: 'Micrófono' }).getByRole('menuitemradio', { name: label }).click();
+}
+
+/** Resolves once the menu shows `label` as the microphone in use: a failed pick is undone. */
+export async function waitForPickedMicrophone(page, label) {
+  await page.getByRole('button', { name: 'Opciones de micrófono' }).click();
+  const item = page.getByRole('group', { name: 'Micrófono' }).getByRole('menuitemradio', { name: label });
+  await item.and(page.locator('[aria-checked="true"]')).waitFor({ timeout: READINESS_DEADLINE_MS });
+  await page.keyboard.press('Escape');
+}
+
+/**
+ * #288: tags the `<audio>` playing a peer, and the remote track inside it, so
+ * `isSamePeerAudio` can tell a kept subscription from a new one: a
+ * resubscription removes the element and attaches a new track to a new one.
+ */
+export async function markPeerAudio(page, sessionId) {
+  return page.evaluate((id) => {
+    const element = document.querySelector(`audio[data-session-id="${id}"]`);
+    const track = element?.srcObject?.getAudioTracks?.()[0];
+    if (!element || !track) return false;
+    element.__e2eMark = track.id;
+    return true;
+  }, sessionId);
+}
+
+/** Whether the peer still plays through the element and track `markPeerAudio` tagged. */
+export async function isSamePeerAudio(page, sessionId) {
+  return page.evaluate((id) => {
+    const element = document.querySelector(`audio[data-session-id="${id}"]`);
+    const track = element?.srcObject?.getAudioTracks?.()[0];
+    return Boolean(element && track && element.__e2eMark === track.id);
+  }, sessionId);
+}
+
 /** Real click on the camera button, same reasoning as `enableMic`. */
 export async function enableCam(page) {
   await page.getByRole('button', { name: /Cámara/ }).click();

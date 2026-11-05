@@ -10,6 +10,9 @@ import assert from 'node:assert/strict';
 import {
   enableMic,
   getOwnSessionId,
+  isSamePeerAudio,
+  markPeerAudio,
+  pickMicrophone,
   startHarness,
   teleportToTile,
   waitForAudioAvailable,
@@ -17,6 +20,7 @@ import {
   waitForNoPeerAudio,
   waitForOnlineCount,
   waitForPeerAudioPlaying,
+  waitForPickedMicrophone,
   waitForRoomIndicator,
 } from './harness.mjs';
 
@@ -103,6 +107,34 @@ test(
     // resolved. This is the direction obs #570 found broken (the in-flight
     // `voice` update dropped by `useProximityAudio.ts`'s stale snapshot).
     await waitForPeerAudioPlaying(pageB, peerAId);
+  },
+);
+
+/**
+ * #288: switching microphones mid call replaces the captured track under the
+ * same publication (`room.switchActiveDevice`), so A keeps the very same
+ * subscription, `<audio>` element and remote track, and keeps hearing B.
+ * Republishing would make A drop B's track and subscribe to a new one.
+ */
+test(
+  "microphone switch mid call: A keeps hearing B through the same subscription (#288)",
+  { skip: !AUDIO_E2E_ENABLED },
+  async () => {
+    assert.equal(
+      playbackProvenFor,
+      peerBId,
+      'expected the control scenario to have proven A hears B before this one runs',
+    );
+    assert.ok(await markPeerAudio(pageA, peerBId), "expected A to hold B's audio element before the switch");
+
+    await pickMicrophone(pageB, 'Fake Audio Input 2');
+    await waitForPickedMicrophone(pageB, 'Fake Audio Input 2');
+
+    await waitForPeerAudioPlaying(pageA, peerBId);
+    assert.ok(
+      await isSamePeerAudio(pageA, peerBId),
+      "expected A to still play B's original subscription, not a resubscribed track",
+    );
   },
 );
 
