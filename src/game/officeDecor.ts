@@ -14,7 +14,7 @@
  * id alone describes.
  */
 
-import { doorSpanOf, sofaSeatsOf } from './artContract.ts';
+import { doorSpanAlong, doorSpanOf, sofaSeatsOf } from './artContract.ts';
 
 /** 0 is the pack's default down drawing and the rotation turns it clockwise: 90 right, 180 up, 270 left. */
 export type DecorRotation = 0 | 90 | 180 | 270;
@@ -268,7 +268,7 @@ export function decorFootprint(item: DecorPlacement, info: DecorPieceInfo | null
   if (info.kind === 'chair') return { x: tx, y: ty, w: 1, h: 1 };
   if (info.kind === 'door') {
     const span = info.footprint.w;
-    return item.rotation === 0 || item.rotation === 180 ? { x: tx, y: ty - 1, w: span, h: 3 } : { x: tx - 1, y: ty, w: 3, h: span };
+    return item.rotation === 0 || item.rotation === 180 ? { x: tx, y: ty - 1, w: span, h: 3 } : { x: tx - 1, y: ty, w: 3, h: doorSpanAlong('vertical', span) };
   }
   if (info.kind === 'desk') {
     const horizontal = item.rotation === 0 || item.rotation === 180;

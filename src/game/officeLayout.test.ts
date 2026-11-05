@@ -981,15 +981,36 @@ describe('wall openings: doors in tile walls (#223, S9, S10)', () => {
 
   it('removes the dark top of a vertical run where a door stands, and sorts what is above it by the door (S9)', () => {
     const frames = wallTileFrames({ ...grid(), openings: [vertical] });
+    // The run above the door ends there with its own face, base nearest the door (S14a).
     expect(framesAt(frames, 6)).toEqual([
-      [1, 'cap', 4 * T],
-      [2, 'cap', 4 * T],
-      [3, 'cap', 4 * T],
+      [1, 'crownEnd', 4 * T],
+      [2, 'faceEnd', 4 * T],
+      [3, 'baseEnd', 4 * T],
       [6, 'cap', 10 * T],
       [7, 'crownEnd', 10 * T],
       [8, 'faceEnd', 10 * T],
       [9, 'baseEnd', 10 * T],
     ]);
+  });
+
+  it('draws the base right over a vertical door without its last two rows, its floor line, so the door frame and the shadow stand over the doorway alone (L43)', () => {
+    const frames = wallTileFrames({ ...grid(), openings: [vertical] }).filter(({ tx }) => tx === 6);
+    expect(frames.filter(({ crop }) => crop !== undefined).map(({ ty, frame, crop }) => [ty, frame, crop])).toEqual([[3, 'baseEnd', { x: 0, w: T, h: T - 2 }]]);
+  });
+
+  it('ends the run above a vertical door with the three tiles right over it, the dark top above them staying (S14a)', () => {
+    const lower = { axis: 'vertical' as const, tx: 6, ty: 6, span: 2 };
+    expect(framesAt(wallTileFrames({ ...grid(), openings: [lower] }), 6)).toEqual([
+      [1, 'cap', 6 * T],
+      [2, 'cap', 6 * T],
+      [3, 'crownEnd', 6 * T],
+      [4, 'faceEnd', 6 * T],
+      [5, 'baseEnd', 6 * T],
+      [8, 'faceEnd', 10 * T],
+      [9, 'baseEnd', 10 * T],
+    ]);
+    // A horizontal door keeps the run above it as it was: its top tile is still the crown.
+    expect(framesAt(wallTileFrames({ ...grid(), openings: [horizontal] }), 2)).toEqual([[1, 'crown', 4 * T]]);
   });
 
   it('still draws and blocks walls with no door the same as before', () => {

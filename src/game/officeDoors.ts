@@ -20,7 +20,7 @@
  * `officeDecor.ts`: explicit `.ts` imports of other pure modules only.
  */
 
-import { DOOR_FRONT, DOOR_STEPS, doorAxisOf, doorFrontInset, doorHingeOf, doorSpanOf, doorVariantOf, type DoorAxis, type DoorHinge } from './artContract.ts';
+import { DOOR_FRONT, DOOR_STEPS, doorAxisOf, doorFrontInset, doorHingeOf, doorSpanAlong, doorSpanOf, doorVariantOf, VERTICAL_DOOR, verticalDoorLeaves, type DoorAxis, type DoorHinge } from './artContract.ts';
 import { AVATAR_BODY_CENTER_OFFSET, type GeometryPoint } from './avatarGeometry.ts';
 import { decorChairFacing, decorFootprint, isRotatable, rectTiles, type DecorEdit, type DecorItem, type DecorKind, type DecorTileRect } from './officeDecor.ts';
 import { wallFootprintRects, type WallGrid, type WallOpening } from './officeLayout.ts';
@@ -50,9 +50,9 @@ function anchorOf(item: Pick<DecorItem, 'index'>, width: number): { tx: number; 
   return { tx: item.index % width, ty: Math.floor(item.index / width) };
 }
 
-/** How many wall tiles a door spans: 2 for a door or a window, 3 for a double door. */
-export function doorSpan(item: Pick<DecorItem, 'piece'>): number {
-  return doorSpanOf(item.piece);
+/** How many wall tiles a door spans: 2 for a door or a window, 3 for a double door; a tile fewer in a vertical run (L41). */
+export function doorSpan(item: Pick<DecorItem, 'piece' | 'rotation'>): number {
+  return doorSpanAlong(doorAxis(item), doorSpanOf(item.piece));
 }
 
 /** The wall run a door stands in: horizontal for 0 and 180, vertical for 90 and 270. */
@@ -125,7 +125,7 @@ export function doorOnWall(grid: Pick<WallGrid, 'width' | 'height' | 'walls'>, i
  * door's tiles on each side, where its leaf swings, keep it.
  */
 export function doorOwnWallTiles(item: DoorPlacement, width: number): Set<number> {
-  const rect = decorFootprint(item, { kind: 'door', footprint: { w: doorSpan(item), h: 1 } }, width);
+  const rect = decorFootprint(item, { kind: 'door', footprint: { w: doorSpanOf(item.piece), h: 1 } }, width);
   const own = doorAxis(item) === 'horizontal' ? rect : { ...rect, x: rect.x + 1, w: 1 };
   return new Set(rectTiles(own, width));
 }
@@ -159,14 +159,19 @@ export function doorHingeStops(items: readonly DecorItem[], grid: Pick<WallGrid,
       const w = inset + DOOR_FRONT.frame;
       return [tx * DOOR_TILE, (tx + span) * DOOR_TILE - w].map((x): CollisionRect => ({ x, y: (ty - 1) * DOOR_TILE, w, h: 3 * DOOR_TILE }));
     }
+    if (doorAxis(item) === 'vertical') {
+      // Where the art hangs the leaves (`verticalDoorLeaves`): every vertical door from its upper post at
+      // the span's top, half the open leaf's thickness into the doorway; a double door's lower leaf hangs
+      // from under the wall below. Whatever the hinge (L41).
+      const top = ty * DOOR_TILE;
+      return verticalDoorLeaves(doorVariantOf(item.piece), top)
+        .filter(({ hingeY }) => hingeY >= top && hingeY < top + span * DOOR_TILE)
+        .map(({ hingeY }): CollisionRect => ({ x: tx * DOOR_TILE, y: hingeY, w: DOOR_TILE, h: VERTICAL_DOOR.leafThickness / 2 }));
+    }
     const hinges: DoorHinge[] = doorVariantOf(item.piece) === 'double' ? ['start', 'end'] : [doorHingeOf(item.piece, item.rotation)];
     return hinges.map((hinge): CollisionRect => {
-      if (doorAxis(item) === 'horizontal') {
-        const x = hinge === 'start' ? tx * DOOR_TILE : (tx + span) * DOOR_TILE - DOOR_HINGE_STOP_PX;
-        return { x, y: (ty - 1) * DOOR_TILE, w: DOOR_HINGE_STOP_PX, h: 3 * DOOR_TILE };
-      }
-      const y = hinge === 'start' ? ty * DOOR_TILE : (ty + span) * DOOR_TILE - DOOR_HINGE_STOP_PX;
-      return { x: tx * DOOR_TILE, y, w: DOOR_TILE, h: DOOR_HINGE_STOP_PX };
+      const x = hinge === 'start' ? tx * DOOR_TILE : (tx + span) * DOOR_TILE - DOOR_HINGE_STOP_PX;
+      return { x, y: (ty - 1) * DOOR_TILE, w: DOOR_HINGE_STOP_PX, h: 3 * DOOR_TILE };
     });
   });
 }
@@ -284,7 +289,7 @@ export function doorLeaves(items: readonly DecorItem[], width: number): DoorLeaf
     .map((item) => {
       const { tx, ty } = anchorOf(item, width);
       const span = doorSpan(item);
-      const footprint = decorFootprint(item, { kind: 'door', footprint: { w: span, h: 1 } }, width);
+      const footprint = decorFootprint(item, { kind: 'door', footprint: { w: doorSpanOf(item.piece), h: 1 } }, width);
       return { index: item.index, piece: item.piece, rotation: item.rotation, axis: doorAxis(item), tx, ty, span, footprint, hinge: doorHingeOf(item.piece, item.rotation) };
     });
 }

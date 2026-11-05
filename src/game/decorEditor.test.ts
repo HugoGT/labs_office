@@ -253,17 +253,18 @@ describe('decorPlacementAllowed: doors and windows in tile walls (#223, #233, S6
     expect(decorPlacementAllowed(none, infoOf, walled(), null, tile(11, 3), windowBrush(270))).toBe(false);
     expect(decorPlacementAllowed(none, infoOf, walled(), null, tile(11, 3), doorBrush(90))).toBe(true);
     expect(decorPlacementAllowed(none, infoOf, walled(), null, tile(11, 3), doubleBrush(270))).toBe(true);
-    // The run's face, its bottom three tiles, takes none.
-    expect(decorPlacementAllowed(none, infoOf, walled(), null, tile(11, 7), doorBrush(90))).toBe(false);
+    // The run's face, its bottom three tiles, takes none: a single door is one tile there (L41), so row 7 is its last row.
+    expect(decorPlacementAllowed(none, infoOf, walled(), null, tile(11, 7), doorBrush(90))).toBe(true);
+    expect(decorPlacementAllowed(none, infoOf, walled(), null, tile(11, 8), doorBrush(90))).toBe(false);
   });
 
   it('refuses a door in a vertical run whose sides are water, a wall or another item, and any door in a desk', () => {
     const wet = walled();
     const walkable = [...wet.walkable];
-    walkable[tile(12, 4)] = false;
+    walkable[tile(12, 3)] = false;
     expect(decorPlacementAllowed(none, infoOf, { ...wet, walkable }, null, tile(11, 3), doorBrush(90))).toBe(false);
     expect(decorPlacementAllowed([{ index: tile(10, 3), piece: 'chair-wood', rotation: 0 }], infoOf, walled(), null, tile(11, 3), doorBrush(90))).toBe(false);
-    expect(decorPlacementAllowed(none, infoOf, walled([[12, 5]]), null, tile(11, 3), doorBrush(90))).toBe(false);
+    expect(decorPlacementAllowed(none, infoOf, walled([[12, 4]]), null, tile(11, 3), doorBrush(90))).toBe(false);
     expect(decorPlacementAllowed(none, infoOf, walled(), { x: 1, y: 1, w: 3, h: 3 }, tile(2, 2), doorBrush(0))).toBe(false);
   });
 

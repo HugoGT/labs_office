@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { DOOR, DOOR_FRONT, WINDOW_FRONT, doorAxisOf, doorFrameIndex, doorVariantOf, doorLeafDepthYs, doorHingeOf, doorPlacement, doorSlices, propPlacement, tableFrameIndex, type ArtFacing, type ArtPiece, type Point } from './artContract';
+import { DOOR, DOOR_FRONT, WINDOW_FRONT, doorAxisOf, doorFrameIndex, doorVariantOf, doorHingeOf, doorPlacement, doorSlices, propPlacement, tableFrameIndex, type ArtFacing, type ArtPiece, type Point } from './artContract';
 import { artUploadsManifestUrl, findPiece, type ArtAppearance } from './artPack';
 import { artCustomCharactersUrl } from './customCharacterArt';
 import { ArtPackLoader } from './artPackLoader';
@@ -1866,8 +1866,9 @@ export class OfficeScene extends Phaser.Scene {
    * horizontal wall run it is seen from the front (`DOOR_FRONT`,
    * `WINDOW_FRONT`): one image sorted just over the wall it stands in
    * (`doorLook`), so whoever walks through the doorway is drawn behind its
-   * frame. In a vertical run a door is seen from above: each leaf sorts by
-   * its lowest pixel and each jamb by its own bottom (`doorSlices`).
+   * frame. In a vertical run a door stands like the walls (S14), cut into
+   * crops of the same frame sorted apart (`doorSlices`): the column over its
+   * span, the column along it and the leaves beside it.
    */
   private drawDoor(item: DecorItem): Phaser.GameObjects.GameObject[] {
     const tx = item.index % this.layout.width;
@@ -1881,13 +1882,10 @@ export class OfficeScene extends Phaser.Scene {
     if (sheet !== null) {
       const placement = doorPlacement(axis, tx, ty, span);
       if (axis === 'horizontal') return [putArtSprite(this, sheet.key, { ...placement, frame }, worldAssetDepth(depthYs[0]!)).setName(name)];
-      const slices = doorSlices(ty, item.piece);
-      const crop = (image: Phaser.GameObjects.Image, { x, y, width, height }: { x: number; y: number; width: number; height: number }) => image.setCrop(x, y, width, height);
-      // The jambs are the same in every frame of the swing, so they keep the one they were drawn with.
-      return [
-        ...slices.leaves.map((rect, i) => crop(putArtSprite(this, sheet.key, { ...placement, frame }, worldAssetDepth(depthYs[i]!)).setName(name), rect)),
-        ...slices.jambs.map(({ crop: rect, depthY: jambDepthY }) => crop(putArtSprite(this, sheet.key, { ...placement, frame }, worldAssetDepth(jambDepthY)).setName(`${name}:jamb`), rect)),
-      ];
+      // Every crop shows the same frame; the swing switches their frame and depth together (`animateDoors`).
+      return doorSlices(ty, item.piece, 0).map(({ crop: { x, y, width, height } }, i) =>
+        putArtSprite(this, sheet.key, { ...placement, frame }, worldAssetDepth(depthYs[i]!)).setName(name).setCrop(x, y, width, height),
+      );
     }
     if (axis === 'vertical') {
       return [
@@ -1900,8 +1898,9 @@ export class OfficeScene extends Phaser.Scene {
     // The wall's top is the frame's top (`doorPlacement`): a door takes its bottom two tiles, a window its glass.
     const front = isWindowPiece(item.piece) ? WINDOW_FRONT : DOOR_FRONT;
     const width = DOOR.variants[doorVariantOf(item.piece)].frontWidth;
-    const top = (ty - 1) * TILE + front.top;
-    const bottom = (ty - 1) * TILE + front.bottom;
+    const frameTop = doorPlacement(axis, tx, ty, span).y;
+    const top = frameTop + front.top;
+    const bottom = frameTop + front.bottom;
     return [
       this.add
         .rectangle((tx + span / 2) * TILE, (top + bottom) / 2, width, bottom - top, ART_FALLBACK_COLOR, ART_FALLBACK_ALPHA)
@@ -1914,9 +1913,9 @@ export class OfficeScene extends Phaser.Scene {
    * The frame a door shows and the depth each of its images sorts by: its
    * swing so far, turned away from the avatar that opened it (S14). In a
    * horizontal run the one image sorts half a pixel under the bottom of the
-   * wall it stands in, over the wall's own tiles; in a vertical run each leaf
-   * sorts by its lowest pixel in that frame (`doorLeafDepthYs`), so an avatar
-   * below a swung leaf walks in front of it. A window never swings.
+   * wall it stands in, over the wall's own tiles; in a vertical run one depth
+   * per crop (`doorSlices`), each leaf's by its lowest pixel in that frame, so
+   * an avatar below a swung leaf walks in front of it. A window never swings.
    */
   private doorLook(item: Pick<DecorItem, 'index' | 'piece'>, rotation: DecorItem['rotation']): { frame: number; depthYs: number[] } {
     const ty = Math.floor(item.index / this.layout.width);
@@ -1925,7 +1924,7 @@ export class OfficeScene extends Phaser.Scene {
     const turned = doorSwingRotation(rotation, motion?.swing ?? 'inside');
     // The hinge stays where the door was turned to, whichever side it swings to.
     const hinge = doorHingeOf(item.piece, rotation);
-    const depthYs = doorAxisOf(rotation) === 'horizontal' ? [(ty + 2) * TILE + 0.5] : doorLeafDepthYs(ty, item.piece, hinge, step);
+    const depthYs = doorAxisOf(rotation) === 'horizontal' ? [(ty + 2) * TILE + 0.5] : doorSlices(ty, item.piece, step).map(({ depthY }) => depthY);
     return { frame: doorFrameIndex(turned, hinge, step), depthYs };
   }
 

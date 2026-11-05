@@ -37,7 +37,7 @@
  */
 
 import officeMap from './maps/office.json' with { type: 'json' };
-import { WALL, type DoorAxis, type WallFrame } from './artContract.ts';
+import { VERTICAL_DOOR, WALL, type DoorAxis, type WallFrame } from './artContract.ts';
 import { AVATAR_BODY_CENTER_OFFSET, physicalBodyRect } from './avatarGeometry.ts';
 import { MAP_BLOCK_TILES } from './mapData.ts';
 import { boxOverlapsRects, coveredTiles, isPositionBlocked, type CollisionRect } from './pieceCollisions.ts';
@@ -802,10 +802,14 @@ export function wallStretches({ width, height, walls }: WallGrid): WallStretch[]
   return stretches;
 }
 
-/** The pixels of a tile drawn, left to right, when only part of it is (`WallTileFrame.crop`). */
+/**
+ * The pixels of a tile drawn, left to right, when only part of it is
+ * (`WallTileFrame.crop`), and its rows from the top (all when `h` is absent).
+ */
 export interface WallTileCrop {
   readonly x: number;
   readonly w: number;
+  readonly h?: number;
 }
 
 /**
@@ -827,7 +831,12 @@ export interface WallTileFrame {
  * lets people through (`wallOpeningPassTiles`), and among the hidden ones the
  * part still drawn of those beside a narrower door (`WallOpening.inset`).
  */
-function openingTileSets(grid: WallGrid): { readonly hidden: ReadonlySet<number>; readonly pass: ReadonlySet<number>; readonly kept: ReadonlyMap<number, WallTileCrop> } {
+function openingTileSets(grid: WallGrid): {
+  readonly hidden: ReadonlySet<number>;
+  readonly verticalHidden: ReadonlySet<number>;
+  readonly pass: ReadonlySet<number>;
+  readonly kept: ReadonlyMap<number, WallTileCrop>;
+} {
   const openings = grid.openings ?? [];
   const kept = new Map<number, WallTileCrop>();
   for (const opening of openings) {
@@ -842,6 +851,7 @@ function openingTileSets(grid: WallGrid): { readonly hidden: ReadonlySet<number>
   }
   return {
     hidden: new Set(openings.flatMap((opening) => wallOpeningHiddenTiles(opening, grid))),
+    verticalHidden: new Set(openings.filter((opening) => opening.axis === 'vertical').flatMap((opening) => wallOpeningHiddenTiles(opening, grid))),
     pass: new Set(openings.flatMap((opening) => wallOpeningPassTiles(opening, grid))),
     kept,
   };
@@ -859,11 +869,14 @@ function openingTileSets(grid: WallGrid): { readonly hidden: ReadonlySet<number>
  * (`wallOpeningHiddenTiles`): they are not drawn, the wall beside a door in
  * a horizontal run ends against it, and the tiles of a vertical run above a
  * door sort by the door's top instead of the run's bottom, so whoever walks
- * through it is drawn over them.
+ * through it is drawn over them. The run above a door in a vertical run ends
+ * there too (S14a): the `WALL.heightTiles` tiles right over the door show
+ * the run's end face (`crownEnd`, `faceEnd`, `baseEnd`, the base nearest the
+ * door), which the door's frame stands against.
  */
 export function wallTileFrames(grid: WallGrid): WallTileFrame[] {
   const stretches = wallStretches(grid);
-  const { hidden, kept } = openingTileSets(grid);
+  const { hidden, verticalHidden, kept } = openingTileSets(grid);
   const pieceAt = new Map<number, string>();
   for (const { tx, top, bottom, piece } of stretches) {
     for (let ty = top; ty <= bottom; ty += 1) {
@@ -877,11 +890,14 @@ export function wallTileFrames(grid: WallGrid): WallTileFrame[] {
     let depthY = (bottom + 1) * WALL.frame.height;
     // Bottom up, so a tile above a door knows it: the door's top is its depth, unless nothing is drawn below the door.
     let drawnBelow = false;
+    // How many drawn tiles up from a vertical door this one is, null when there is none right under them.
+    let overDoor: number | null = null;
     const drawn: WallTileFrame[] = [];
     for (let ty = bottom; ty >= top; ty -= 1) {
       const index = ty * grid.width + tx;
       const crop = kept.get(index);
       if (hidden.has(index)) {
+        overDoor = verticalHidden.has(index) ? 0 : null;
         // The wall beside a narrower door is drawn, but sorts like the door's own tiles.
         if (crop !== undefined && bottom - ty < column.length) {
           const frame = column[column.length - 1 - (bottom - ty)]!;
@@ -892,6 +908,14 @@ export function wallTileFrames(grid: WallGrid): WallTileFrame[] {
         continue;
       }
       drawnBelow = true;
+      if (overDoor !== null && overDoor < column.length) {
+        // The base right over the door leaves its floor line out, under the door's frame and shadow (L43).
+        const base = overDoor === 0 ? { crop: { x: 0, w: WALL.frame.width, h: WALL.frame.height - VERTICAL_DOOR.hidesWallBase } } : {};
+        drawn.push({ tx, ty, piece, frame: `${column[column.length - 1 - overDoor]!}End` as WallFrame, depthY, ...base });
+        overDoor += 1;
+        continue;
+      }
+      overDoor = null;
       const fromBottom = bottom - ty;
       if (fromBottom >= column.length) {
         drawn.push({ tx, ty, piece, frame: 'cap', depthY });

@@ -951,9 +951,10 @@ describe('createTerrainRuntime doors and windows in tile walls (#223, #233, S6-S
     const runtime = runtimeWith();
     await runtime.load();
     await runtime.setDecor([{ index: at(65, 24), item: VERTICAL }], null);
-    expect(runtime.snapshot().openings).toEqual([{ axis: 'vertical', tx: 65, ty: 24, span: 2 }]);
-    expect([24, 25].map((ty) => centerWalkable(runtime, mid(65), mid(ty)))).toEqual([true, true]);
-    expect([23, 26].map((ty) => centerWalkable(runtime, mid(65), mid(ty)))).toEqual([false, false]);
+    // One tile in a vertical run (L41).
+    expect(runtime.snapshot().openings).toEqual([{ axis: 'vertical', tx: 65, ty: 24, span: 1 }]);
+    expect([24].map((ty) => centerWalkable(runtime, mid(65), mid(ty)))).toEqual([true]);
+    expect([23, 25].map((ty) => centerWalkable(runtime, mid(65), mid(ty)))).toEqual([false, false]);
   });
 
   it('places a window between two walls of a horizontal run without opening the wall (S7, S11)', async () => {
@@ -982,7 +983,7 @@ describe('createTerrainRuntime doors and windows in tile walls (#223, #233, S6-S
       { index: at(66, 21), item: WINDOW },
       { index: at(65, 22), item: DOOR },
       { index: at(69, 22), item: DOUBLE },
-      { index: at(65, 27), item: VERTICAL },
+      { index: at(65, 28), item: VERTICAL },
       { index: at(30, 30), item: DOOR },
       { index: at(W - 1, 22), item: DOOR },
     ] as const;
@@ -1030,9 +1031,9 @@ describe('createTerrainRuntime doors and windows in tile walls (#223, #233, S6-S
     await runtime.load();
     await runtime.setDecor([{ index: at(65, 24), item: VERTICAL }], null);
     const walls = await store.loadWalls();
-    await expect(runtime.setWalls([27, 28, 29].map((ty) => ({ index: at(65, ty), piece: null })), 'admin-1', NONE)).rejects.toThrow(TerrainProtectedError);
+    await expect(runtime.setWalls([26, 27, 28, 29].map((ty) => ({ index: at(65, ty), piece: null })), 'admin-1', NONE)).rejects.toThrow(TerrainProtectedError);
     expect(await store.loadWalls()).toEqual(walls);
-    expect(runtime.snapshot().openings).toEqual([{ axis: 'vertical', tx: 65, ty: 24, span: 2 }]);
+    expect(runtime.snapshot().openings).toEqual([{ axis: 'vertical', tx: 65, ty: 24, span: 1 }]);
   });
 
   it('refuses a window over another window, data unchanged, and takes two side by side (L23)', async () => {
@@ -1119,7 +1120,7 @@ describe('createTerrainRuntime doors and windows in tile walls (#223, #233, S6-S
     await runtime.load();
     const openings = [
       { axis: 'horizontal', tx: 66, ty: 22, span: 2, inset: 10 },
-      { axis: 'vertical', tx: 65, ty: 24, span: 2 },
+      { axis: 'vertical', tx: 65, ty: 24, span: 1 },
     ];
     expect(runtime.snapshot().openings).toEqual(openings);
 

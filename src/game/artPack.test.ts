@@ -104,9 +104,9 @@ describe('parseArtPackManifest: doors (#223, #233)', () => {
   it('reads the pack doors: a single door two tiles wide, a double door three and a window two, each with its variant and anchor', () => {
     expect(doors().map((piece) => piece.id)).toEqual(['door-wood', 'door-wood-double', 'door-glass-window']);
     const [single, double, window] = doors();
-    expect(window).toMatchObject({ kind: 'door', name: 'Ventana', variant: 'window', anchor: { x: 64, y: 64 }, footprint: { w: 2, h: 1 } });
-    expect(single).toMatchObject({ kind: 'door', name: 'Puerta simple', variant: 'single', anchor: { x: 64, y: 64 }, footprint: { w: 2, h: 1 } });
-    expect(double).toMatchObject({ kind: 'door', name: 'Puerta doble', variant: 'double', anchor: { x: 64, y: 64 }, footprint: { w: 3, h: 1 } });
+    expect(window).toMatchObject({ kind: 'door', name: 'Ventana', variant: 'window', anchor: { x: 80, y: 128 }, footprint: { w: 2, h: 1 } });
+    expect(single).toMatchObject({ kind: 'door', name: 'Puerta simple', variant: 'single', anchor: { x: 80, y: 128 }, footprint: { w: 2, h: 1 } });
+    expect(double).toMatchObject({ kind: 'door', name: 'Puerta doble', variant: 'double', anchor: { x: 80, y: 128 }, footprint: { w: 3, h: 1 } });
   });
 
   it('drops a door without its anchor or footprint', () => {

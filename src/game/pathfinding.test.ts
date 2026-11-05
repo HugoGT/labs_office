@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { physicalBodyRect } from './avatarGeometry';
 import { TILE } from './mapData';
 import { wallColliderRects } from './officeLayout';
+import { doorHingeStops, doorOpenings } from './officeDoors';
 import { COLLISION_BODY_CENTER_OFFSET } from './pieceCollisions';
 import {
   BODY_CENTER_OFFSET,
@@ -473,6 +474,29 @@ describe('planWalk against wall and piece rectangles (#219, #221)', () => {
       const route = planWalk(room, from, goal);
       expectClearWalk(room, from, route);
       expect(route!.at(-1)).toEqual(goal);
+    }
+  });
+
+  it('walks across a single door one tile tall in a vertical run, past its open leaf and back (L41)', () => {
+    const width = 12;
+    const height = 12;
+    const walls: (string | null)[] = Array(width * height).fill(null);
+    for (let i = 2; i <= 8; i++) {
+      for (const [tx, ty] of [[i, 2], [i, 8], [2, i], [8, i]] as const) walls[ty * width + tx] = 'wall-brick';
+    }
+    const grid = { width, height, walls };
+    for (const rotation of [90, 270] as const) {
+      const items = [{ index: 4 * width + 8, piece: 'door-wood', rotation }];
+      expect(doorOpenings(items, grid)).toEqual([{ axis: 'vertical', tx: 8, ty: 4, span: 1 }]);
+      const room: WalkWorld = { terrainSolid: openGrid(width, height), rects: [...wallColliderRects({ ...grid, openings: doorOpenings(items, grid) }), ...doorHingeStops(items, grid)] };
+      const inside = centerOf(5, 4);
+      const outside = centerOf(10, 4);
+      const out = planWalk(room, inside, outside);
+      expectClearWalk(room, inside, out);
+      expect(out!.at(-1)).toEqual(outside);
+      const back = planWalk(room, outside, inside);
+      expectClearWalk(room, outside, back);
+      expect(back!.at(-1)).toEqual(inside);
     }
   });
 

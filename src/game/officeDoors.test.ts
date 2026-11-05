@@ -84,7 +84,7 @@ describe('officeDoors: doors and windows in tile walls (tile walls, S7-S10)', ()
     expect(doorOnWall(grid, vertical)).toBe(true);
     const without = (...rows: number[]) => grid.walls.map((wall, index) => (index % WIDTH === 11 && rows.includes(Math.floor(index / WIDTH)) ? null : wall));
     // Erasing the bottom of the run under it leaves it standing in nothing: refused.
-    expect(doorsLeftOffWall([vertical], grid, without(7, 8, 9, 10))).toBe(true);
+    expect(doorsLeftOffWall([vertical], grid, without(6, 7, 8, 9, 10))).toBe(true);
     // The same walls with no door, or erasing a wall the door does not need, is fine.
     expect(doorsLeftOffWall([], grid, without(7, 8, 9, 10))).toBe(false);
     expect(doorsLeftOffWall([door(3, 3, 0)], grid, without(7, 8, 9, 10))).toBe(false);
@@ -101,9 +101,9 @@ describe('officeDoors: doors and windows in tile walls (tile walls, S7-S10)', ()
 
   it('runs its span from its anchor along the run, west to east or north to south, between the walls past each end', () => {
     expect(doorTiles(door(3, 3, 0), WIDTH)).toEqual([at(3, 3), at(4, 3)]);
-    expect(doorTiles(doubleDoor(11, 4, 90), WIDTH)).toEqual([at(11, 4), at(11, 5), at(11, 6)]);
+    expect(doorTiles(doubleDoor(11, 4, 90), WIDTH)).toEqual([at(11, 4), at(11, 5)]);
     expect(doorEndPosts(door(3, 3, 180), WIDTH)).toEqual([at(2, 3), at(5, 3)]);
-    expect(doorPosts(door(11, 4, 270), WIDTH)).toEqual([at(11, 3), at(11, 4), at(11, 5), at(11, 6)]);
+    expect(doorPosts(door(11, 4, 270), WIDTH)).toEqual([at(11, 3), at(11, 4), at(11, 5)]);
   });
 
   it('goes between two walls of a horizontal run, of any material, the run going on under it (S7)', () => {
@@ -139,16 +139,16 @@ describe('officeDoors: doors and windows in tile walls (tile walls, S7-S10)', ()
   it('puts a door in a vertical run where it shows its dark top, above the face at its bottom (S9)', () => {
     expect(doorOnWall(grid, door(11, 4, 90))).toBe(true);
     expect(doorOnWall(grid, doubleDoor(11, 3, 270))).toBe(true);
-    // Rows 9..11 are the face of the run: the door's last tile may not reach it.
-    expect(doorOnWall(grid, door(11, 7, 90))).toBe(true);
-    expect(doorOnWall(grid, door(11, 8, 90))).toBe(false);
+    // The run ends at row 10: the door's last tile must stay two tiles above it (L41: a single door is one tile).
+    expect(doorOnWall(grid, door(11, 8, 90))).toBe(true);
+    expect(doorOnWall(grid, door(11, 9, 90))).toBe(false);
     expect(doorOnWall(grid, door(11, 1, 90))).toBe(false);
   });
 
   it('opens the walls for every door on its wall, in layer order, and for no window nor door off its wall', () => {
     expect(doorOpenings([door(3, 3, 0), windowAt(6, 3), door(1, 3, 0), door(11, 4, 90), { index: at(2, 6), piece: 'chair-wood', rotation: 0 }], grid)).toEqual([
       { axis: 'horizontal', tx: 3, ty: 3, span: 2, inset: 10 },
-      { axis: 'vertical', tx: 11, ty: 4, span: 2 },
+      { axis: 'vertical', tx: 11, ty: 4, span: 1 },
     ]);
   });
 
@@ -158,7 +158,7 @@ describe('officeDoors: doors and windows in tile walls (tile walls, S7-S10)', ()
 
   it('counts its own wall as none of the walls it must keep off: the whole column in a horizontal run, the column only in a vertical one', () => {
     expect(doorOwnWallTiles(door(3, 3, 0), WIDTH)).toEqual(new Set([at(3, 2), at(4, 2), at(3, 3), at(4, 3), at(3, 4), at(4, 4)]));
-    expect(doorOwnWallTiles(door(11, 4, 90), WIDTH)).toEqual(new Set([at(11, 4), at(11, 5)]));
+    expect(doorOwnWallTiles(door(11, 4, 90), WIDTH)).toEqual(new Set([at(11, 4)]));
   });
 
   it('closes the wall of a door that goes for whatever takes its tiles, and keeps the ground as it is otherwise', () => {
@@ -198,7 +198,7 @@ describe('officeDoors: leaves (#223, #233)', () => {
     const leaves = doorLeaves([door(3, 3, 0), windowAt(6, 3), doubleDoor(11, 3, 90)], WIDTH);
     expect(leaves).toEqual([
       expect.objectContaining({ index: at(3, 3), axis: 'horizontal', tx: 3, ty: 3, span: 2, hinge: 'start' }),
-      expect.objectContaining({ index: at(11, 3), axis: 'vertical', tx: 11, ty: 3, span: 3, hinge: 'start' }),
+      expect.objectContaining({ index: at(11, 3), axis: 'vertical', tx: 11, ty: 3, span: 2, hinge: 'start' }),
     ]);
   });
 
@@ -210,7 +210,7 @@ describe('officeDoors: leaves (#223, #233)', () => {
   it('covers the wall three tiles across a horizontal run, and the column with a tile each side in a vertical one', () => {
     const [horizontal, vertical] = doorLeaves([door(3, 3, 0), doubleDoor(11, 3, 90)], WIDTH);
     expect(horizontal!.footprint).toEqual({ x: 3, y: 2, w: 2, h: 3 });
-    expect(vertical!.footprint).toEqual({ x: 10, y: 3, w: 3, h: 3 });
+    expect(vertical!.footprint).toEqual({ x: 10, y: 3, w: 3, h: 2 });
     expect(doorLine(horizontal!)).toBe(3.5 * T);
     expect(doorLine(vertical!)).toBe(11.5 * T);
   });
@@ -366,6 +366,39 @@ describe('officeDoors: the swing (#233)', () => {
   });
 });
 
+describe('officeDoors: a door in a vertical run is a tile shorter than in a horizontal one (L41)', () => {
+  it('spans 1 tile for a single door and 2 for a double in a vertical run, and keeps 2 and 3 in a horizontal one', () => {
+    expect([door(3, 3, 0), doubleDoor(3, 3, 180), door(11, 4, 90), doubleDoor(11, 4, 270)].map(doorSpan)).toEqual([2, 3, 1, 2]);
+    expect(doorTiles(door(11, 4, 90), WIDTH)).toEqual([at(11, 4)]);
+    expect(doorEndPosts(doubleDoor(11, 4, 270), WIDTH)).toEqual([at(11, 3), at(11, 6)]);
+  });
+
+  it('opens the column only on its own tiles and counts only them as its own wall', () => {
+    expect(doorOpenings([door(11, 4, 90), doubleDoor(3, 3, 0)], grid)).toEqual([
+      { axis: 'vertical', tx: 11, ty: 4, span: 1 },
+      { axis: 'horizontal', tx: 3, ty: 3, span: 3 },
+    ]);
+    expect(doorOwnWallTiles(door(11, 4, 90), WIDTH)).toEqual(new Set([at(11, 4)]));
+    expect(doorLeaves([doubleDoor(11, 3, 90)], WIDTH)[0]!.footprint).toEqual({ x: 10, y: 3, w: 3, h: 2 });
+  });
+
+  it('may stand one tile lower in the run, its last tile still above the face', () => {
+    // The run in column 11 ends at row 10, two tiles under row 8: a single door's one tile may be row 8 now, a double's last too.
+    expect(doorOnWall(grid, door(11, 8, 90))).toBe(true);
+    expect(doorOnWall(grid, door(11, 9, 90))).toBe(false);
+    expect(doorOnWall(grid, doubleDoor(11, 7, 90))).toBe(true);
+    expect(doorOnWall(grid, doubleDoor(11, 8, 90))).toBe(false);
+  });
+
+  it('blocks only the open leaf at the span top, where every vertical door hangs it, leaving room for an avatar', () => {
+    const stop = { x: 11 * T, y: 4 * T, w: T, h: 5 };
+    expect(doorHingeStops([door(11, 4, 90)], grid)).toEqual([stop]);
+    expect(doorHingeStops([door(11, 4, 270)], grid)).toEqual([stop]);
+    expect(doorHingeStops([doubleDoor(11, 4, 90)], grid)).toEqual([stop]);
+    expect(T - 5).toBeGreaterThan(physicalBodyRect({ x: 0, y: 0 }).height);
+  });
+});
+
 describe('officeDoors: the hinge stop (#233)', () => {
   it('blocks the wall and the jamb at both ends of a single door in a horizontal run, leaving a 1.2 tile doorway, the three tiles of the wall across', () => {
     const sides = [
@@ -375,11 +408,6 @@ describe('officeDoors: the hinge stop (#233)', () => {
     expect(doorHingeStops([door(3, 3, 0)], grid)).toEqual(sides);
     expect(doorHingeStops([door(3, 3, 180)], grid)).toEqual(sides);
     expect((2 * T - 2 * 13) / T).toBeCloseTo(1.2, 1);
-  });
-
-  it('blocks 16px past the hinge end of a door in a vertical run, the column across', () => {
-    expect(doorHingeStops([door(11, 4, 270)], grid)).toEqual([{ x: 11 * T, y: 4 * T, w: T, h: 16 }]);
-    expect(doorHingeStops([door(11, 4, 90)], grid)).toEqual([{ x: 11 * T, y: 6 * T - 16, w: T, h: 16 }]);
   });
 
   it('blocks past both ends of a double door, which hinges a leaf on each', () => {

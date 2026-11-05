@@ -1,6 +1,6 @@
 {
   "format": "oficina-art-pack",
-  "contractVersion": 2,
+  "contractVersion": 3,
   "fileFormat": "png-rgba8",
   "tile": 32,
   "author": "HugoGT",
@@ -2445,8 +2445,8 @@
       "material": "wood",
       "variant": "single",
       "anchor": {
-        "x": 64,
-        "y": 64
+        "x": 80,
+        "y": 128
       },
       "footprint": {
         "w": 2,
@@ -2457,9 +2457,9 @@
           "role": "sheet",
           "path": "door/wood.png",
           "imageKind": "door",
-          "width": 512,
-          "height": 1024,
-          "sha256": "f8bc1fc4d36e2fddaa42b972cc0c53deb893ce9e0ecedba400d5d27124be0e70"
+          "width": 640,
+          "height": 2048,
+          "sha256": "091fb9277f3951cb565c657dd13f536acd1933124f64eae4813fe7ea3f14eb82"
         }
       ]
     },
@@ -2472,8 +2472,8 @@
       "material": "wood",
       "variant": "double",
       "anchor": {
-        "x": 64,
-        "y": 64
+        "x": 80,
+        "y": 128
       },
       "footprint": {
         "w": 3,
@@ -2484,9 +2484,9 @@
           "role": "sheet",
           "path": "door/wood-double.png",
           "imageKind": "door",
-          "width": 512,
-          "height": 1024,
-          "sha256": "e3a819d32782c76b41a7b5764f8941ac4edff5acbc91d2b4bde7aedc916f2d44"
+          "width": 640,
+          "height": 2048,
+          "sha256": "a9caa6b0c6fb56a01750c8a7b1ac5640ba49380e6f6de451d54af96533e303d3"
         }
       ]
     },
@@ -2499,8 +2499,8 @@
       "material": "glass",
       "variant": "window",
       "anchor": {
-        "x": 64,
-        "y": 64
+        "x": 80,
+        "y": 128
       },
       "footprint": {
         "w": 2,
@@ -2511,9 +2511,9 @@
           "role": "sheet",
           "path": "door/glass-window.png",
           "imageKind": "door",
-          "width": 512,
-          "height": 1024,
-          "sha256": "6486bf76c59451e5b04f60e4df52bad85e2427235aa0fc9276ee4b0bda69d0c4"
+          "width": 640,
+          "height": 2048,
+          "sha256": "b0d8dbe4f85e44f41dbb72644553564feb9054d6d633dcb2aa1a83b9c952fc56"
         }
       ]
     }

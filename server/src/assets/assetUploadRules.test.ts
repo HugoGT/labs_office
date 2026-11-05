@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  ART_CONTRACT_VERSION,
   ART_IMAGE_SPECS,
   CHARACTER_SEATED,
   CHAIR,
@@ -63,7 +64,7 @@ function codeAndField(run: () => unknown): [string, string | null] | undefined {
 
 /** A manifest of uploaded pieces the office parses with the pack's own parser. */
 function asManifest(pieces: unknown[]): unknown {
-  return { format: 'oficina-art-pack', contractVersion: 2, fileFormat: 'png-rgba8', tile: 32, author: 'x', license: 'y', defaults: ART_PACK_DEFAULTS, pieces };
+  return { format: 'oficina-art-pack', contractVersion: ART_CONTRACT_VERSION, fileFormat: 'png-rgba8', tile: 32, author: 'x', license: 'y', defaults: ART_PACK_DEFAULTS, pieces };
 }
 
 describe('prepareAssetUpload', () => {
@@ -291,6 +292,13 @@ describe('prepareContribution (#122)', () => {
     expect(piece.id).toMatch(/^door-upload-[0-9a-f]{16}$/);
     expect(prepareContribution({ ...body, variant: 'single' }, 'Ana').piece).toMatchObject({ variant: 'single' });
     expect(() => prepareContribution({ ...body, variant: 'double' }, 'Ana')).toThrow(expect.objectContaining({ code: 'invalid-metadata', field: 'variant' }));
+  });
+
+  it('takes a door sheet of 160x256 frames and refuses one drawn for the old 128x128 ones (S14)', () => {
+    expect(sheetSize(DOOR)).toEqual({ width: 640, height: 2048 });
+    const old = encodePng({ width: 512, height: 1024, data: new Uint8ClampedArray(512 * 1024 * 4) }).toString('base64');
+    const body = { kind: 'door', name: 'Puerta de roble', material: 'roble', rightsAccepted: true, files: { sheet: old } };
+    expect(codeAndField(() => prepareContribution(body, 'Ana'))).toEqual(['invalid-dimensions', 'sheet']);
   });
 
   it('takes a decor plant', () => {

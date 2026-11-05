@@ -451,13 +451,14 @@ describe('door sheets (#223, #233)', () => {
     for (const material of DOOR_MATERIALS) {
       for (const variant of DOOR_VARIANTS) {
         const sheet = doorSheet(material, variant);
-        expect([sheet.width, sheet.height], `${material} ${variant}`).toEqual([512, 1024]);
+        expect([sheet.width, sheet.height], `${material} ${variant}`).toEqual([640, 2048]);
         expect(validateArtImage('door', sheet), `${material} ${variant}`).toEqual([]);
         for (const rotation of [0, 90, 180, 270] as const) {
           for (const hinge of DOOR_HINGES) {
             for (let open = 0; open < DOOR_STEPS; open += 1) {
               const frame = tileOf(sheet, doorFrameIndex(rotation, hinge, open), DOOR.columns, DOOR.frame.width, DOOR.frame.height);
-              expect(pixels(frame), `${variant} ${rotation} ${hinge} ${open}`).toEqual(pixels(doorSprite(material, variant, rotation, hinge, open)));
+              // Byte equality: a deep compare of 160x256 frames, 96 of them, outruns the test's timeout.
+              expect(Buffer.from(frame.data).equals(Buffer.from(doorSprite(material, variant, rotation, hinge, open).data)), `${variant} ${rotation} ${hinge} ${open}`).toBe(true);
             }
           }
         }

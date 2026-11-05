@@ -96,7 +96,7 @@ export interface WallSprite {
    * is one block an avatar is either behind (north of it) or in front of.
    */
   readonly depthY: number;
-  /** The only columns of the frame drawn, for the wall beside a narrower door (`WallTileFrame.crop`). */
+  /** The only part of the frame drawn: the wall beside a narrower door, the base over a vertical door (`WallTileFrame.crop`). */
   readonly crop?: WallTileCrop;
 }
 

@@ -455,7 +455,9 @@ describe('findDecorConflict', () => {
       expect(check([door(at(74, 20), 90, 'door-glass-window')], [at(74, 20)], run)).toBe('placement');
       expect(check([door(at(74, 20), 270, 'door-glass-window')], [at(74, 20)], run)).toBe('placement');
       expect(check([door(at(74, 20), 90)], [at(74, 20)], run)).toBeNull();
-      expect(check([door(at(74, 24), 90)], [at(74, 24)], run)).toBe('placement');
+      // A single door is one tile in a vertical run (L41): row 24 still leaves the run two tiles under it, row 25 does not.
+      expect(check([door(at(74, 24), 90)], [at(74, 24)], run)).toBeNull();
+      expect(check([door(at(74, 25), 90)], [at(74, 25)], run)).toBe('placement');
     });
 
     it('keeps other items off the tiles of a door, and refuses a door over another item', () => {
@@ -463,7 +465,7 @@ describe('findDecorConflict', () => {
       // Another item in the doorway, on the wall's tile above or below, refuses it.
       expect(check([door(free), { index: at(67, 23), piece: 'chair-wood', rotation: 0 }], [free], run)).toBe('placement');
       // A door in a vertical run keeps its sides clear for its leaf.
-      expect(check([door(at(74, 20), 90), { index: at(75, 21), piece: 'chair-wood', rotation: 0 }], [at(74, 20)], run)).toBe('placement');
+      expect(check([door(at(74, 20), 90), { index: at(75, 20), piece: 'chair-wood', rotation: 0 }], [at(74, 20)], run)).toBe('placement');
       // Beyond the wall it is free.
       expect(check([door(free), { index: at(67, 24), piece: 'chair-wood', rotation: 0 }], [free], run)).toBeNull();
     });

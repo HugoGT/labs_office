@@ -1,13 +1,16 @@
 /**
  * Doors and windows drawn in code (#223, #233, tile walls).
  *
- * In a vertical wall run (rotations 90 and 270) a door is seen from above, like the dark top of
- * the run it replaces (S9): a frame post (jamb) of dark wood at each end of the span, merging with
- * the wall there, and between them one wooden plank (single door) or two meeting in the middle
- * (double door). A closed leaf lies along the run; an open one is swung a quarter turn into the
- * side it opens to, and the steps between (`DOOR_STEPS`) turn it a third of that each, about the
- * hinge. The hinge (dark metal) sits at the outer end of each leaf and the brass handle near the
- * other, so the handles of a double door meet in the middle.
+ * In a vertical wall run (rotations 90 and 270) a door stands in the walls' projection (S9, S14):
+ * what stands on the floor rises straight up the screen. The run above it ends with its own face
+ * (`wallTileFrames`), and against it stands the frame: a box at a horizontal door's height over the
+ * span's top, a dark-wood post under it down to the floor, the shut door's line along the span (only
+ * its top edge shows), and the top 2px of the lower post over the wall below the span. The frame is
+ * the same at every step; the leaves swing under it, a third of a quarter turn per step
+ * (`DOOR_STEPS`), into the side the rotation faces: a single door's one leaf from the upper post, a
+ * double door's two from both posts, the lower one's foot hidden under the wall below. Over all of
+ * it, the column is shaded with the wall-top color from where the material above ends, the ceiling
+ * over the doorway.
  *
  * In a horizontal run (rotations 0 and 180) a door is seen from the front (S10): it fills the
  * bottom two tiles of the wall (`DOOR_FRONT`) with a frame that is the same whatever the wall's
@@ -20,8 +23,22 @@
  * the same light as the rest of the pack (lit top and left faces, 1px ink outline).
  */
 import { OUTLINE_INK, OUTLINE_INK_MIX } from '../../../src/game/artColor.ts';
-import { ART_TILE, DOOR, DOOR_FRONT, DOOR_STEPS, WINDOW_FRONT, type DoorHinge, type DoorVariant } from '../../../src/game/artContract.ts';
-import { makeRamp, mixRgba, type Ramp } from './color.ts';
+import {
+  ART_TILE,
+  DOOR,
+  DOOR_FRONT,
+  DOOR_STEPS,
+  VERTICAL_DOOR,
+  WALL,
+  WALL_TOP_COLOR,
+  WINDOW_FRONT,
+  doorSpanAlong,
+  verticalDoorFeet,
+  verticalDoorLeaves,
+  type DoorHinge,
+  type DoorVariant,
+} from '../../../src/game/artContract.ts';
+import { hexToRgba, makeRamp, mixRgba, type Ramp } from './color.ts';
 import { PixelBuffer, rgba, type Rgba } from '../../../src/art/pixelBuffer.ts';
 
 export const DOOR_MATERIALS = ['wood', 'glass'] as const;
@@ -48,8 +65,8 @@ const HINGE = makeRamp('#6b6f78');
 /** The handle's brass, exported so a test can find where the handle went. */
 export const DOOR_HANDLE: Rgba = makeRamp('#d9b45a').base;
 
-/** Grain breaks every this many pixels along the plank. */
-const GRAIN_BREAK = 9;
+/** The ceiling's shadow over the doorway of a vertical run (S14c): the wall's top band, half seen through. */
+const CEILING = hexToRgba(WALL_TOP_COLOR);
 
 interface Box {
   readonly x: number;
@@ -62,137 +79,139 @@ function ink(color: Rgba): Rgba {
   return mixRgba(rgba(color.r, color.g, color.b), OUTLINE_INK, OUTLINE_INK_MIX.opaque);
 }
 
-/** A plank lit on its top and left faces, with one grain line along its length. */
-function plank(image: PixelBuffer, box: Box, ramp: Ramp): void {
-  const along = box.w >= box.h;
-  const grain = along ? box.y + Math.floor(box.h / 2) : box.x + Math.floor(box.w / 2);
-  for (let y = box.y; y < box.y + box.h; y += 1) {
-    for (let x = box.x; x < box.x + box.w; x += 1) {
-      let tone = ramp.base;
-      if (y === box.y + box.h - 1 || x === box.x + box.w - 1) tone = ramp.shadow;
-      else if (y === box.y || x === box.x) tone = ramp.light;
-      else if ((along ? y : x) === grain && (along ? x - box.x : y - box.y) % GRAIN_BREAK !== GRAIN_BREAK - 1) tone = mixRgba(ramp.base, ramp.shadow, 0.6);
-      image.setPixel(x, y, tone);
-    }
-  }
-}
-
 function fill(image: PixelBuffer, box: Box, color: Rgba): void {
   image.fillRect(box.x, box.y, box.w, box.h, color);
 }
 
 /** A frame post: flat dark wood, lit on its top and left faces. */
-function post(image: PixelBuffer, box: Box, ramp: Ramp): void {
+function post(image: PixelBuffer, box: Box, ramp: Ramp, { foot = true } = {}): void {
+  // Lit on the right like the end of a wall and the door line (L43), shaded on the left; `foot`
+  // false leaves its bottom row unshaded, where it runs on into the door line.
   fill(image, box, ramp.base);
   fill(image, { x: box.x, y: box.y, w: box.w, h: 1 }, ramp.light);
-  fill(image, { x: box.x, y: box.y, w: 1, h: box.h }, ramp.light);
-  fill(image, { x: box.x, y: box.y + box.h - 1, w: box.w, h: 1 }, ramp.shadow);
-  fill(image, { x: box.x + box.w - 1, y: box.y, w: 1, h: box.h }, ramp.shadow);
+  fill(image, { x: box.x + box.w - 1, y: box.y, w: 1, h: box.h }, ramp.light);
+  if (foot) fill(image, { x: box.x, y: box.y + box.h - 1, w: box.w, h: 1 }, ramp.shadow);
+  fill(image, { x: box.x, y: box.y, w: 1, h: box.h }, ramp.shadow);
 }
 
+/** How tall a vertical door's leaves rise from the floor: up to the box on its frame's top. */
+const LEAF_HEIGHT = VERTICAL_DOOR.height - DOOR.variants.single.jamb;
+
 /**
- * A leaf turned `angle` radians about its hinge at (`hx`, `hy`), toward the inside (+1 down, -1
- * up): every pixel whose centre falls in the rotated plank is lit on the face that looks to the
- * top-left, shaded on the other, with a hinge pin at its start and the brass handle near its free
- * end. A leaf hinged at its end is the mirror image of one hinged at its start, computed from the
- * same numbers, so the two leaves of a double door stay exactly symmetric.
+ * A leaf of a door in a vertical run seen like the walls, its height straight up (S14d): its foot
+ * runs on the floor from the hinge (`hx`, `hy`), `down` the run (+1) or up it (-1) when shut,
+ * turned `angle` toward +x (`inside` +1) or -x (-1), and it rises `LEAF_HEIGHT` pixels. Painted
+ * from the floor up, so the higher (nearer) pixel wins. Its top edge is a plain plank (lit edge,
+ * base, shaded edge, no grain line: L38); its face shows two sunken panels, the hinge pins and the
+ * brass handle near the free end, the face looking left lit a little.
  */
-function swungLeaf(image: PixelBuffer, hx: number, hy: number, length: number, hingeAtStart: boolean, inside: 1 | -1, angle: number, ramp: Ramp): void {
-  const thick = DOOR.leafThickness;
-  const [cos, sin] = [Math.cos(angle), Math.sin(angle)];
-  const side = hingeAtStart ? 1 : -1;
-  // Which face looks to the top-left: the one whose outward normal points that way.
-  const lowFaceLit = -side * sin + inside * cos > 0;
-  for (let y = 0; y < image.height; y += 1) {
-    for (let x = 0; x < image.width; x += 1) {
-      const a = side * (x + 0.5 - hx);
-      const c = inside * (y + 0.5 - hy);
-      const u = a * cos + c * sin;
-      const v = -a * sin + c * cos;
-      if (u < 0 || u >= length || v < -thick / 2 || v >= thick / 2) continue;
-      const lowEdge = v < -thick / 2 + 1;
-      const highEdge = v >= thick / 2 - 1;
-      let tone = ramp.base;
-      if (u < 2) tone = HINGE.base;
-      else if (lowEdge) tone = lowFaceLit ? ramp.light : ramp.shadow;
-      else if (highEdge) tone = lowFaceLit ? ramp.shadow : ramp.light;
-      else if (Math.abs(v) < 0.5 && Math.floor(u) % GRAIN_BREAK !== GRAIN_BREAK - 1) tone = mixRgba(ramp.base, ramp.shadow, 0.6);
-      image.setPixel(x, y, tone);
-      if (u >= length - 6 && u < length - 4 && (lowEdge || highEdge)) image.setPixel(x, y, DOOR_HANDLE);
+function prismLeaf(image: PixelBuffer, hx: number, hy: number, down: 1 | -1, length: number, inside: 1 | -1, angle: number, ramp: Ramp): void {
+  const t = VERTICAL_DOOR.leafThickness;
+  const e = { x: inside * Math.sin(angle), y: down * Math.cos(angle) };
+  const n = { x: -e.y, y: e.x };
+  // Only the pixels round the leaf's foot can hold it: its corners on the floor, the height above.
+  const corners = [0, length].flatMap((u) => [-t / 2, t / 2].map((v) => ({ x: u * e.x + v * n.x, y: u * e.y + v * n.y })));
+  const x0 = Math.max(0, Math.floor(hx + Math.min(...corners.map((c) => c.x))) - 2);
+  const x1 = Math.min(image.width - 1, Math.ceil(hx + Math.max(...corners.map((c) => c.x))) + 2);
+  for (let z = 0; z <= LEAF_HEIGHT; z += 1) {
+    const y0 = Math.max(0, Math.floor(hy - z + Math.min(...corners.map((c) => c.y))) - 2);
+    const y1 = Math.min(image.height - 1, Math.ceil(hy - z + Math.max(...corners.map((c) => c.y))) + 2);
+    for (let sy = y0; sy <= y1; sy += 1) {
+      for (let sx = x0; sx <= x1; sx += 1) {
+        const a = sx + 0.5 - hx;
+        const b = sy + 0.5 + z - hy;
+        const u = a * e.x + b * e.y;
+        const v = a * n.x + b * n.y;
+        if (u < 0 || u >= length || Math.abs(v) >= t / 2) continue;
+        let tone: Rgba;
+        if (z >= LEAF_HEIGHT - 1) {
+          tone = v < -t / 2 + 1 ? ramp.light : v >= t / 2 - 1 ? ramp.shadow : ramp.base;
+          if (u < 2) tone = HINGE.base;
+        } else if (u >= length - 1.5 || u < 1.5) {
+          tone = ramp.shadow;
+        } else {
+          const normalX = Math.sign(v) * n.x;
+          tone = normalX < 0 ? mixRgba(ramp.base, ramp.light, 0.3) : ramp.base;
+          const inU = u >= 5 && u < length - 5;
+          for (const [z0, z1] of [[6, 24], [30, 48]] as const) {
+            if (inU && z >= z0 && z < z1) {
+              if (z === z1 - 1 || u < 6) tone = ramp.shadow;
+              else if (z === z0 || u >= length - 6) tone = ramp.light;
+            }
+          }
+          if (u < 3 && ((z >= 8 && z < 12) || (z >= 40 && z < 44))) tone = HINGE.base;
+          if (u >= length - 8 && u < length - 6 && z >= 25 && z < 28) tone = DOOR_HANDLE;
+        }
+        image.setPixel(sx, sy, tone);
+      }
     }
   }
 }
 
-interface Leaf {
-  /** Where it starts along the edge, and how long it is. */
-  readonly x: number;
-  readonly length: number;
-  /** The hinge is at its start (west) end, the handle at the other. */
-  readonly hingeAtStart: boolean;
+/** Clears the pixels of `image` in rows `from` and down within columns `left` to `right` (exclusive). */
+function clearBelow(image: PixelBuffer, from: number, left: number, right: number): void {
+  for (let y = Math.max(0, from); y < image.height; y += 1) for (let x = left; x < right; x += 1) image.setPixel(x, y, CLEAR);
 }
 
 /**
- * One frame of a door seen from above along a horizontal line, in frame pixels: the span runs
- * along row `ay`, centred on the anchor, with a jamb at each end. `inside` is +1 when the door
- * opens down, -1 up; `hinge` is the end a single door's leaf turns about (a double door always
- * hinges its two leaves at the outer ends). Turned about the frame's diagonal, it is the door of a
- * vertical run (`doorSprite`).
+ * Half the wall-top color over a pixel (S14c), as a pixel of the sprite: what shows through it,
+ * drawn over whatever is under the door, is half darkened toward the band.
  */
-function topDownDoor(material: DoorMaterial, variant: DoorVariant, inside: 1 | -1, hinge: DoorHinge, step: number): PixelBuffer {
-  const image = new PixelBuffer(DOOR.frame.width, DOOR.frame.height);
-  const { x: ax, y: ay } = DOOR.anchor;
-  const { span, leafLength, jamb } = DOOR.variants[variant];
-  const thick = DOOR.leafThickness;
-  const left = ax - (span * ART_TILE) / 2;
-  const right = ax + (span * ART_TILE) / 2;
-  const postThick = thick + 4;
-  post(image, { x: left, y: ay - postThick / 2, w: jamb, h: postThick }, JAMB);
-  post(image, { x: right - jamb, y: ay - postThick / 2, w: jamb, h: postThick }, JAMB);
-  const leaves: Leaf[] =
-    variant === 'double'
-      ? [
-          { x: left + jamb, length: leafLength / 2, hingeAtStart: true },
-          { x: ax, length: leafLength / 2, hingeAtStart: false },
-        ]
-      : [{ x: left + jamb, length: leafLength, hingeAtStart: hinge === 'start' }];
-  const open = step === DOOR_STEPS - 1;
-  for (const leaf of leaves) {
-    const start = leaf.hingeAtStart;
-    if (step > 0 && !open) {
-      swungLeaf(image, start ? leaf.x : leaf.x + leaf.length, ay, leaf.length, start, inside, (step / (DOOR_STEPS - 1)) * (Math.PI / 2), WOOD[material]);
-    } else if (!open) {
-      plank(image, { x: leaf.x, y: ay - thick / 2, w: leaf.length, h: thick }, WOOD[material]);
-      // The hinge pin at its end, the handle near the other, on both faces of the leaf.
-      fill(image, { x: start ? leaf.x : leaf.x + leaf.length - 2, y: ay - thick / 2 - 1, w: 2, h: thick + 2 }, HINGE.base);
-      const handleX = start ? leaf.x + leaf.length - 6 : leaf.x + 4;
-      fill(image, { x: handleX, y: ay - thick / 2 - 1, w: 2, h: 1 }, DOOR_HANDLE);
-      fill(image, { x: handleX, y: ay + thick / 2, w: 2, h: 1 }, DOOR_HANDLE);
-    } else {
-      // Swung a quarter turn about the hinge into the inside, flush with the frame post.
-      const x = start ? leaf.x : leaf.x + leaf.length - thick;
-      const reach = leaf.length - 2;
-      const y = inside === 1 ? ay + 1 : ay - 1 - reach;
-      plank(image, { x, y, w: thick, h: reach }, WOOD[material]);
-      fill(image, { x, y: ay - 1, w: thick, h: 2 }, HINGE.base);
-      const handleY = inside === 1 ? y + reach - 6 : y + 4;
-      fill(image, { x: x - 1, y: handleY, w: 1, h: 2 }, DOOR_HANDLE);
-      fill(image, { x: x + thick, y: handleY, w: 1, h: 2 }, DOOR_HANDLE);
-    }
+function shaded(color: Rgba): Rgba {
+  const a = color.a / 255;
+  const out = 0.5 + 0.5 * a;
+  const mix = (top: number, band: number): number => Math.round((0.5 * top * a + 0.5 * band) / out);
+  return rgba(mix(color.r, CEILING.r), mix(color.g, CEILING.g), mix(color.b, CEILING.b), Math.round(out * 255));
+}
+
+/**
+ * One frame of a door in a vertical wall run (S9, S14), swung `step` toward `inside` (+1 right,
+ * -1 left), drawn back to front: the leaves (none shut), the shut door's line, the post, then the
+ * box and the stub of the lower post, and the ceiling's one shadow (50%, L45) over
+ * the whole column. Whatever of the leaves and the door line falls in the column under the span
+ * stands behind the wall below and is cut.
+ */
+function verticalDoor(material: DoorMaterial, variant: DoorVariant, inside: 1 | -1, step: number): PixelBuffer {
+  const { width, height } = DOOR.frame;
+  const x = DOOR.anchor.x;
+  const { jamb } = DOOR.variants[variant];
+  const span = doorSpanAlong('vertical', DOOR.variants[variant].span);
+  const top = DOOR.anchor.y - (span * ART_TILE) / 2;
+  const bottom = top + span * ART_TILE;
+  const column = { left: x - ART_TILE / 2, right: x + ART_TILE / 2 };
+  const t = VERTICAL_DOOR.leafThickness;
+  const { upper, lower } = verticalDoorFeet(variant, top);
+  const image = new PixelBuffer(width, height);
+  const layer = (draw: (into: PixelBuffer) => void): void => {
+    const into = new PixelBuffer(width, height);
+    draw(into);
+    into.addOutline(ink);
+    clearBelow(into, bottom, column.left, column.right);
+    image.blit(into, 0, 0);
+  };
+  if (step > 0) {
+    const angle = (step / (DOOR_STEPS - 1)) * (Math.PI / 2);
+    layer((into) => {
+      for (const leaf of verticalDoorLeaves(variant, top)) prismLeaf(into, x, leaf.hingeY, leaf.down, leaf.length, inside, angle, WOOD[material]);
+    });
   }
-  image.addOutline(ink);
-  // The span ends against the walls on both sides: no outline past them, nothing over their bodies.
-  for (let y = 0; y < image.height; y += 1) {
-    for (let x = 0; x < image.width; x += 1) if (x < left || x >= right) image.setPixel(x, y, CLEAR);
+  // The shut door's line stays put at every step: it reads as the frame's head (L37), in the frame's wood (L45).
+  layer((into) => prismLeaf(into, x, upper, 1, lower - upper, inside, 0, JAMB));
+  post(image, { x: x - t / 2, y: top - LEAF_HEIGHT, w: t, h: LEAF_HEIGHT }, JAMB, { foot: false });
+  const frame = new PixelBuffer(width, height);
+  post(frame, { x: x - t / 2, y: top - VERTICAL_DOOR.height, w: t, h: jamb }, JAMB);
+  // The lower post's foot is under the wall below the span: only its top shows over it.
+  post(frame, { x: x - t / 2, y: bottom - VERTICAL_DOOR.stubShows, w: t, h: jamb }, JAMB);
+  frame.addOutline(ink);
+  for (let y = 0; y < height; y += 1) {
+    for (let px = 0; px < width; px += 1) if (y < top - VERTICAL_DOOR.height || y >= bottom) frame.setPixel(px, y, CLEAR);
+  }
+  image.blit(frame, 0, 0);
+  // The ceiling's shadow, over the door too: from where the material of the run above ends (S14c).
+  for (let y = top - WALL.heightTiles * ART_TILE + WALL.topHeight; y < bottom; y += 1) {
+    for (let px = column.left; px < column.right; px += 1) image.setPixel(px, y, shaded(image.getPixel(px, y)));
   }
   return image;
-}
-
-function transposed(image: PixelBuffer): PixelBuffer {
-  const out = new PixelBuffer(image.height, image.width);
-  for (let y = 0; y < image.height; y += 1) {
-    for (let x = 0; x < image.width; x += 1) out.setPixel(y, x, image.getPixel(x, y));
-  }
-  return out;
 }
 
 /**
@@ -331,13 +350,13 @@ function clipTo(image: PixelBuffer, box: Box): void {
  * The frame of a door or window: turned `rotation` (0 opens down, 90 right, 180 up, 270 left), a
  * single door hinged at `hinge` (`start`: west or north end of its span; a double door ignores
  * it), at `step` of its swing, 0 closed up to `DOOR_STEPS - 1` open. In a horizontal run (0, 180)
- * it is seen from the front, the same whichever side it opens to; in a vertical one (90, 270) from
- * above, the top-down drawing turned about the frame's diagonal, which keeps the light top-left. A
- * window is the same frame at every step and hinge, and none in a vertical run.
+ * it is seen from the front, the same whichever side it opens to; in a vertical one (90, 270) it
+ * stands like the walls (`verticalDoor`), whatever the hinge: its lower post is under the wall
+ * below. A window is the same frame at every step and hinge, and none in a vertical run.
  */
 export function doorSprite(material: DoorMaterial, variant: DoorVariant, rotation: 0 | 90 | 180 | 270, hinge: DoorHinge, step: number): PixelBuffer {
   const horizontal = rotation === 0 || rotation === 180;
   if (variant === 'window') return horizontal ? frontWindow() : new PixelBuffer(DOOR.frame.width, DOOR.frame.height);
   if (horizontal) return frontDoor(material, variant, hinge, step);
-  return transposed(topDownDoor(material, variant, rotation === 90 ? 1 : -1, hinge, step));
+  return verticalDoor(material, variant, rotation === 90 ? 1 : -1, step);
 }

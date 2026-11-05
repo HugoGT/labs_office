@@ -47,7 +47,7 @@ import { PixelBuffer } from '../../src/art/pixelBuffer.ts';
 import type { Terrain } from './domain/tiles.ts';
 import { type WallMaterial } from './domain/wallMap.ts';
 import { wallTileFrames } from '../../src/game/officeLayout.ts';
-import { doorAxis, doorOpenings } from '../../src/game/officeDoors.ts';
+import { doorAxis, doorOpenings, doorSpan } from '../../src/game/officeDoors.ts';
 import type { DecorItem } from '../../src/game/officeDecor.ts';
 import { BACKDROP, crop, upscale } from './imageOps.ts';
 import { treeSprite } from './domain/props.ts';
@@ -253,15 +253,15 @@ function wallOpeningsPreview(sheets: PackSheets): PixelBuffer {
     const openings = doorOpenings(OPENING_ITEMS, grid);
     for (const { tx, ty, frame, crop: part } of wallTileFrames({ ...grid, openings })) {
       const at = wallFrameIndex(frame, tx);
-      const { x, w } = part ?? { x: 0, w: ART_TILE };
-      room.blit(crop(image, (at % WALL.columns) * ART_TILE + x, Math.floor(at / WALL.columns) * ART_TILE, w, ART_TILE), tx * ART_TILE + x, ty * ART_TILE);
+      const { x, w, h = ART_TILE } = part ?? { x: 0, w: ART_TILE };
+      room.blit(crop(image, (at % WALL.columns) * ART_TILE + x, Math.floor(at / WALL.columns) * ART_TILE, w, h), tx * ART_TILE + x, ty * ART_TILE);
     }
     for (const item of OPENING_ITEMS) {
       const sheet = sheets.doors.find((entry) => entry.variant === doorVariantOf(item.piece))!.image;
       const frame = doorFrameIndex(item.rotation, doorHingeOf(item.piece, item.rotation), 0);
       const tx = item.index % OPENING_COLS;
       const ty = Math.floor(item.index / OPENING_COLS);
-      const placed = doorPlacement(doorAxis(item), tx, ty, DOOR.variants[doorVariantOf(item.piece)].span);
+      const placed = doorPlacement(doorAxis(item), tx, ty, doorSpan(item));
       room.blit(frameOf(sheet, DOOR, frame % DOOR.columns, Math.floor(frame / DOOR.columns)), placed.x, placed.y);
     }
     out.blit(room, GAP + index * (width + GAP), GAP);
