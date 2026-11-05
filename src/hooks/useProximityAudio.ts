@@ -14,9 +14,12 @@ import type { LivekitConfig } from '../game/livekitEndpoint';
 import {
   audioOutputSelectionSupported,
   connectLivekitRoom,
+  createSharedMicrophone,
+  releaseSharedMicrophone,
   type ConnectionQualityLevel,
   type ConnectLivekitRoomOptions,
   type LivekitRoomConnection,
+  type SharedMicrophone,
 } from '../game/livekitRoom';
 import {
   LivekitTokenError,
@@ -278,6 +281,12 @@ export function useProximityAudio(
   /** A share request in flight: the browser picker is open, a second click must not open another. */
   const screenShareBusyRef = useRef(false);
   const connectionRef = useRef<LivekitRoomConnection | null>(null);
+  /**
+   * The microphone capture every room of this visit publishes (#286): a door
+   * hands it on instead of capturing it again. Replaced, and the old one
+   * stopped, when the visit ends; "No molestar" stops it too.
+   */
+  const microphoneRef = useRef<SharedMicrophone>(createSharedMicrophone());
   /** Objetivo (sessionId, spaceId) conectado o en vuelo (#12, D7): reemplaza al `sessionRef` de solo-sesion, porque un cambio de espacio con la MISMA sesion tambien exige sala nueva. */
   const targetRef = useRef<VoiceTarget | null>(null);
   /**
@@ -420,7 +429,13 @@ export function useProximityAudio(
       // estaba en vuelo se veria borrada por este reset tardio.
       desiredRef.current = null;
       clearRoomState();
+      // A fresh one right away: the next visit never publishes a capture
+      // this teardown is about to stop.
+      const microphone = microphoneRef.current;
+      microphoneRef.current = createSharedMicrophone();
       if (connection) await connection.disconnect();
+      // After the room let go of it: the system's indicator goes off.
+      await releaseSharedMicrophone(microphone);
     }
 
     /** Everything a room reported dies with it: `teardown` and a room lost for good (#84). */
@@ -466,6 +481,7 @@ export function useProximityAudio(
         url: config?.url ?? tokenResponse.url,
         token: tokenResponse.token,
         preferredDevices: devicePreferencesRef.current,
+        microphone: microphoneRef.current,
         onDevicesChanged: (lists) => {
           if (!isCurrent()) return;
           setDevices(lists);
@@ -857,8 +873,13 @@ export function useProximityAudio(
     const connection = connectionRef.current;
     setMicOn(false);
     setCamOn(false);
-    if (!connection) return;
-    void connection.setMicrophoneEnabled(false);
+    // Stopped, not muted (#286): the system's microphone indicator goes off.
+    // Between rooms nobody publishes it, and no room publishes it in DND.
+    if (!connection) {
+      void releaseSharedMicrophone(microphoneRef.current);
+      return;
+    }
+    void connection.releaseMicrophone();
     void connection.setCameraEnabled(false);
     void connection.setScreenShareEnabled(false);
   }, [dnd, audioAvailable]);

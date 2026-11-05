@@ -24,6 +24,7 @@ function fakeConnection(overrides: Partial<LivekitRoomConnection> = {}): Livekit
     setDesiredAudioPeers: vi.fn(),
     setDesiredVideoPeers: vi.fn(),
     setMicrophoneEnabled: vi.fn(async (enabled: boolean) => enabled),
+    releaseMicrophone: vi.fn(async () => undefined),
     setCameraEnabled: vi.fn(async (enabled: boolean) => enabled),
     setCameraFilter: vi.fn(async (filter: CameraFilter) => filter),
     switchDevice: vi.fn(async () => true),
@@ -502,7 +503,9 @@ describe('useProximityAudio', () => {
 
       // La escena ya corta la SUSCRIPCION (emite un conjunto de pares vacio);
       // lo que falta aqui es dejar de PUBLICAR.
-      expect(connection.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+      // The capture is stopped, not just muted (#286): the system's
+      // microphone indicator goes off.
+      expect(connection.releaseMicrophone).toHaveBeenCalled();
       expect(connection.setCameraEnabled).toHaveBeenLastCalledWith(false);
       expect(result.current.micOn).toBe(false);
       expect(result.current.camOn).toBe(false);
@@ -566,7 +569,7 @@ describe('useProximityAudio', () => {
       const { result, connection } = await connectedWithStatus('r');
 
       expect(result.current.dnd).toBe(true);
-      expect(connection.setMicrophoneEnabled).toHaveBeenLastCalledWith(false);
+      expect(connection.releaseMicrophone).toHaveBeenCalled();
       expect(connection.setCameraEnabled).toHaveBeenLastCalledWith(false);
     });
   });
@@ -2525,5 +2528,176 @@ describe('useProximityAudio: crossing a door (#286)', () => {
 
     // One report for the door that ended in a room, none for the one dropped.
     expect(sent.filter((event) => (event as { event: string }).event === 'switched')).toHaveLength(1);
+  });
+});
+
+describe('useProximityAudio: one microphone capture for the whole visit (#286)', () => {
+  function liveTrack() {
+    const track = {
+      mediaStreamTrack: { readyState: 'live' },
+      stop: vi.fn(() => {
+        track.mediaStreamTrack.readyState = 'ended';
+      }),
+    };
+    return track;
+  }
+
+  function renderVisit(connections: LivekitRoomConnection[]) {
+    const bridge = createOfficeBridge();
+    const options: ConnectLivekitRoomOptions[] = [];
+    const connect = vi.fn(async (opts: ConnectLivekitRoomOptions) => {
+      options.push(opts);
+      const next = connections[options.length - 1];
+      if (!next) throw new Error('no connection left');
+      return next;
+    });
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+    const rendered = renderHook(
+      ({ status }: { status: PresenceStatus }) => useProximityAudio(bridge, { config: CONFIG, status, connect, fetchToken }),
+      { initialProps: { status: 'g' as PresenceStatus } },
+    );
+    const walkTo = async (spaceId: string | null) => {
+      await act(async () => {
+        bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId });
+      });
+    };
+    const leave = async () => {
+      await act(async () => {
+        bridge.emit('voice', { selfSessionId: null, selfName: 'Yo', peers: peersOf([]), spaceId: null });
+      });
+    };
+    /** Stands in for the capture the first room took. */
+    const capture = () => {
+      const track = liveTrack();
+      options[0].microphone!.track = track as unknown as NonNullable<ConnectLivekitRoomOptions['microphone']>['track'];
+      return track;
+    };
+    return { ...rendered, options, walkTo, leave, capture };
+  }
+
+  it('every room of a visit shares the same microphone capture', async () => {
+    const { options, walkTo } = renderVisit([fakeConnection(), fakeConnection(), fakeConnection()]);
+    await walkTo(null);
+    await walkTo('s1');
+    await walkTo(null);
+
+    expect(options[0].microphone).toBeDefined();
+    expect(options[1].microphone).toBe(options[0].microphone);
+    expect(options[2].microphone).toBe(options[0].microphone);
+  });
+
+  it('a door keeps the capture running', async () => {
+    const first = fakeConnection();
+    const { walkTo, capture } = renderVisit([first, fakeConnection()]);
+    await walkTo(null);
+    const track = capture();
+
+    await walkTo('s1');
+
+    expect(first.disconnect).toHaveBeenCalled();
+    expect(track.stop).not.toHaveBeenCalled();
+  });
+
+  it('leaving the office stops the capture, after the room let go of it, and the next visit captures anew', async () => {
+    const first = fakeConnection();
+    const { options, walkTo, leave, capture } = renderVisit([first, fakeConnection()]);
+    await walkTo(null);
+    const track = capture();
+    vi.mocked(first.disconnect).mockImplementation(async () => {
+      expect(track.stop).not.toHaveBeenCalled();
+    });
+
+    await leave();
+
+    expect(first.disconnect).toHaveBeenCalled();
+    expect(track.stop).toHaveBeenCalled();
+    await walkTo(null);
+    expect(options[1].microphone).not.toBe(options[0].microphone);
+    expect(options[1].microphone?.track).toBeNull();
+  });
+
+  it('closing the office (unmount) stops the capture too', async () => {
+    const { walkTo, capture, unmount } = renderVisit([fakeConnection()]);
+    await walkTo(null);
+    const track = capture();
+
+    await act(async () => unmount());
+
+    expect(track.stop).toHaveBeenCalled();
+  });
+
+  it('"No molestar" between two rooms stops the capture as well', async () => {
+    const pending = deferred<LivekitRoomConnection>();
+    const bridge = createOfficeBridge();
+    const options: ConnectLivekitRoomOptions[] = [];
+    const connect = vi
+      .fn<(opts: ConnectLivekitRoomOptions) => Promise<LivekitRoomConnection>>()
+      .mockImplementationOnce(async (opts) => {
+        options.push(opts);
+        return fakeConnection();
+      })
+      .mockImplementationOnce((opts) => {
+        options.push(opts);
+        return pending.promise;
+      });
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+    const { rerender } = renderHook(
+      ({ status }: { status: PresenceStatus }) => useProximityAudio(bridge, { config: CONFIG, status, connect, fetchToken }),
+      { initialProps: { status: 'g' as PresenceStatus } },
+    );
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
+    });
+    const track = liveTrack();
+    options[0].microphone!.track = track as unknown as NonNullable<ConnectLivekitRoomOptions['microphone']>['track'];
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's1' });
+    });
+
+    await act(async () => rerender({ status: 'r' }));
+
+    expect(track.stop).toHaveBeenCalled();
+  });
+
+  it('fast doors back and forth leave one live room, never an orphan, and never stop the capture', async () => {
+    // Every door's connect resolves late and out of order.
+    const gates = [0, 1, 2, 3].map(() => deferred<LivekitRoomConnection>());
+    const rooms = [0, 1, 2, 3].map(() => fakeConnection());
+    const bridge = createOfficeBridge();
+    const options: ConnectLivekitRoomOptions[] = [];
+    const first = fakeConnection();
+    let calls = 0;
+    const connect = vi.fn((opts: ConnectLivekitRoomOptions) => {
+      options.push(opts);
+      calls += 1;
+      return calls === 1 ? Promise.resolve(first) : gates[calls - 2].promise;
+    });
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+    const { result } = renderHook(() => useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }));
+    const walkTo = async (spaceId: string | null) => {
+      await act(async () => {
+        bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId });
+      });
+    };
+    await walkTo(null);
+    await act(async () => result.current.toggleMic());
+    const track = liveTrack();
+    options[0].microphone!.track = track as unknown as NonNullable<ConnectLivekitRoomOptions['microphone']>['track'];
+
+    await walkTo('s1');
+    await walkTo(null);
+    await walkTo('s1');
+    await walkTo(null);
+    for (const i of [2, 0, 3, 1]) await act(async () => gates[i].resolve(rooms[i]));
+
+    const live = [first, ...rooms].filter((connection) => !vi.mocked(connection.disconnect).mock.calls.length);
+    expect(live).toEqual([rooms[3]]);
+    // Only the room that stayed publishes the microphone: no audio twice.
+    const publishing = [first, ...rooms].filter((connection) =>
+      vi.mocked(connection.setMicrophoneEnabled).mock.calls.some(([enabled]) => enabled),
+    );
+    expect(publishing).toEqual([first, rooms[3]]);
+    expect(result.current.micOn).toBe(true);
+    expect(track.stop).not.toHaveBeenCalled();
   });
 });
