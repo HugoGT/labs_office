@@ -262,6 +262,26 @@ que se notan al operarlo:
 es la vía para redesplegar sin cambiar código (por ejemplo, después de un
 `terraform apply`). Ahí el SHA es el del commit elegido a mano.
 
+### Deploy window (issue #276)
+
+Recreating the `colyseus` container drops everyone in the office, and a
+`livekit.yaml` change restarts LiveKit and cuts every call. So the automatic
+deploy (`workflow_run`) waits, after building the images and before touching
+the VM, until `GET /health` reports `players: 0` (`tools/ci/deployWindow.ts`).
+It asks once a minute for up to 300 minutes; a VM that does not answer, as
+after the 20:00 stop, counts as empty. If the office stays busy the whole
+time, the run fails red and nothing is deployed.
+
+`gh workflow run deploy-test.yml` never waits: it is the way to ship something
+urgent during office hours. Clients still recover on their own from such a
+deploy: the server closes every session with code 4102 on shutdown, and each
+client joins again after a random wait of a few seconds. A screen share does
+not survive it (recapturing the screen needs a click), and the LiveKit room is
+joined again under a new identity.
+
+Meetings are not scheduled anywhere the workflow can read, so a meeting that
+has not started yet does not hold a deploy.
+
 **Terraform no corre en la CI, y es deliberado.** La cuenta de servicio de despliegue
 solo puede escribir en el Artifact Registry, tunelizar por IAP hacia *esta* instancia y
 entrar en ella (ver `terraform/main.tf`, cada binding acotado a su recurso); since
