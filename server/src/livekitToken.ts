@@ -27,7 +27,10 @@
  * Lo que sigue SIN estar resuelto, incluso con la auth activa:
  *
  * - No hay roles ni permisos: todo el que entra recibe los mismos grants de
- *   LiveKit. Quien puede publicar audio en que sitio es la issue #7.
+ *   LiveKit. Quien puede publicar audio en que sitio es la issue #7. A
+ *   meeting room (#282) does not change the grants either: an admin there
+ *   mutes microphones through the room API (`moderation/`), and only their
+ *   owner can open them again.
  * - No hay invitaciones: basta con tener cuenta en el proyecto de Identity
  *   Platform, y hoy esas cuentas las crea un administrador a mano (issue #7).
  * - El CORS de `createOfficeServer.ts` sigue abierto en `*` (issue #9).

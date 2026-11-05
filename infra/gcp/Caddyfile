@@ -162,6 +162,11 @@ http://{$APP_HOST}, http://{$LK_HOST}, http://{$TURN_HOST} {
 		reverse_proxy colyseus:2567
 	}
 
+	# Moderacion de salas de junta (issue #282).
+	handle /livekit/mute {
+		reverse_proxy colyseus:2567
+	}
+
 	handle /health {
 		reverse_proxy colyseus:2567
 	}
