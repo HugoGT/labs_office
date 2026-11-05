@@ -377,6 +377,40 @@ describe('video, camara local y habla llegan hacia afuera (issue #17, D3/D7): li
   });
 });
 
+describe('microphone toggles run one at a time (#277)', () => {
+  it('a mute right after an unmute waits for it, so the last click is what stays', async () => {
+    const room = fakeRoom();
+    const calls: string[] = [];
+    let finishUnmute!: () => void;
+    room.localParticipant.setMicrophoneEnabled = vi.fn(async (enabled: boolean) => {
+      calls.push(`start ${enabled}`);
+      if (enabled) await new Promise<void>((resolve) => (finishUnmute = resolve));
+      calls.push(`end ${enabled}`);
+    }) as never;
+    const connection = await connect(room, document.createElement('div'));
+
+    const unmute = connection.setMicrophoneEnabled(true);
+    const mute = connection.setMicrophoneEnabled(false);
+    await Promise.resolve();
+    finishUnmute();
+
+    expect(await Promise.all([unmute, mute])).toEqual([true, false]);
+    expect(calls).toEqual(['start true', 'end true', 'start false', 'end false']);
+  });
+
+  it('a failed unmute resolves false and does not block the next toggle', async () => {
+    const room = fakeRoom();
+    room.localParticipant.setMicrophoneEnabled = vi
+      .fn<(enabled: boolean) => Promise<undefined>>()
+      .mockRejectedValueOnce(new Error('publishing rejected as engine not connected within timeout'))
+      .mockResolvedValue(undefined) as never;
+    const connection = await connect(room, document.createElement('div'));
+
+    expect(await connection.setMicrophoneEnabled(true)).toBe(false);
+    expect(await connection.setMicrophoneEnabled(true)).toBe(true);
+  });
+});
+
 /** Captured screen track, as `createScreenTracks` returns it. */
 function fakeLocalTrack(source: 'screen_share' | 'screen_share_audio') {
   return { source, kind: source === 'screen_share' ? 'video' : 'audio', stop: vi.fn() };
