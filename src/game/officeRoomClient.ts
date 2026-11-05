@@ -574,7 +574,7 @@ export async function connectOfficeRoom({
     // for a deploy (#276).
     console.warn(`[office] sesion cerrada (${closeCode}); intento ${attempt}`);
 
-    const decision = decideReconnect({ closeCode, attempt });
+    const decision = decideReconnect({ closeCode, attempt, random: Math.random() });
     if (decision.kind === 'stop' && decision.reason === 'replaced') {
       handlers.onConnectionState?.('replaced');
       return;

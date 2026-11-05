@@ -21,14 +21,14 @@ describe('decideReconnect', () => {
   it('una salida voluntaria no reintenta: nadie se cayo, alguien se fue', () => {
     // El caso que no puede fallar: reintentar aqui resucitaria una sesion que
     // el usuario acaba de cerrar, y el avatar volveria a aparecerle a todos.
-    expect(decideReconnect({ closeCode: CONSENTED_CLOSE_CODE, attempt: 0 })).toEqual({
+    expect(decideReconnect({ closeCode: CONSENTED_CLOSE_CODE, attempt: 0, random: 0 })).toEqual({
       kind: 'stop',
       reason: 'consented',
     });
   });
 
   it('una salida voluntaria no reintenta aunque queden intentos por gastar', () => {
-    expect(decideReconnect({ closeCode: CONSENTED_CLOSE_CODE, attempt: 2 })).toEqual({
+    expect(decideReconnect({ closeCode: CONSENTED_CLOSE_CODE, attempt: 2, random: 0 })).toEqual({
       kind: 'stop',
       reason: 'consented',
     });
@@ -37,7 +37,7 @@ describe('decideReconnect', () => {
   it('a session replaced by a newer join of the same account never retries (#78)', () => {
     // Retrying would evict the newer tab, which would then retry and evict
     // this one back: two tabs taking the account from each other forever.
-    expect(decideReconnect({ closeCode: SESSION_REPLACED_CLOSE_CODE, attempt: 0 })).toEqual({
+    expect(decideReconnect({ closeCode: SESSION_REPLACED_CLOSE_CODE, attempt: 0, random: 0 })).toEqual({
       kind: 'stop',
       reason: 'replaced',
     });
@@ -46,7 +46,7 @@ describe('decideReconnect', () => {
   it('a replaced session stops as replaced even past the last attempt, not as give-up (#78)', () => {
     // "Give up" offers a retry button; "replaced" must not.
     expect(
-      decideReconnect({ closeCode: SESSION_REPLACED_CLOSE_CODE, attempt: RECONNECT_DELAYS_MS.length }),
+      decideReconnect({ closeCode: SESSION_REPLACED_CLOSE_CODE, attempt: RECONNECT_DELAYS_MS.length, random: 0 }),
     ).toEqual({ kind: 'stop', reason: 'replaced' });
   });
 
@@ -54,7 +54,7 @@ describe('decideReconnect', () => {
     // The directory refuses the join anyway, and "give up" would offer a
     // retry button that can only fail.
     for (const attempt of [0, RECONNECT_DELAYS_MS.length]) {
-      expect(decideReconnect({ closeCode: SESSION_REVOKED_CLOSE_CODE, attempt })).toEqual({
+      expect(decideReconnect({ closeCode: SESSION_REVOKED_CLOSE_CODE, attempt, random: 0 })).toEqual({
         kind: 'stop',
         reason: 'revoked',
       });
@@ -65,7 +65,7 @@ describe('decideReconnect', () => {
     // 1006 es el cierre anormal que manda un socket que se muere sin decir
     // nada: el caso exacto de la issue #52 (wifi que parpadea, NAT que expira).
     RECONNECT_DELAYS_MS.forEach((delayMs, attempt) => {
-      expect(decideReconnect({ closeCode: 1006, attempt })).toEqual({ kind: 'retry', delayMs });
+      expect(decideReconnect({ closeCode: 1006, attempt, random: 0 })).toEqual({ kind: 'retry', delayMs });
     });
   });
 
@@ -73,20 +73,20 @@ describe('decideReconnect', () => {
     // No es un cierre voluntario del usuario, es el servidor pidiendo que se
     // vuelva a entrar. Tratarlo como una salida dejaria la oficina muda tras
     // cada recarga en caliente.
-    expect(decideReconnect({ closeCode: DEVMODE_RESTART_CLOSE_CODE, attempt: 0 })).toEqual({
+    expect(decideReconnect({ closeCode: DEVMODE_RESTART_CLOSE_CODE, attempt: 0, random: 0 })).toEqual({
       kind: 'retry',
       delayMs: RECONNECT_DELAYS_MS[0],
     });
   });
 
   it('el intento siguiente al ultimo retardo se rinde en vez de reintentar para siempre', () => {
-    expect(decideReconnect({ closeCode: 1006, attempt: RECONNECT_DELAYS_MS.length })).toEqual({
+    expect(decideReconnect({ closeCode: 1006, attempt: RECONNECT_DELAYS_MS.length, random: 0 })).toEqual({
       kind: 'give-up',
     });
   });
 
   it('un intento muy por encima del ultimo sigue rindiendose, no da la vuelta al arreglo', () => {
-    expect(decideReconnect({ closeCode: 1006, attempt: RECONNECT_DELAYS_MS.length + 7 })).toEqual({
+    expect(decideReconnect({ closeCode: 1006, attempt: RECONNECT_DELAYS_MS.length + 7, random: 0 })).toEqual({
       kind: 'give-up',
     });
   });
@@ -96,11 +96,11 @@ describe('decideReconnect: server restart (#276)', () => {
   it('a server that restarts asks for a fresh join, never the dead token', () => {
     // The process takes its rooms with it, so `client.reconnect` could only
     // fail; the scene joins again instead.
-    expect(decideReconnect({ closeCode: SERVER_RESTART_CLOSE_CODE, attempt: 0 })).toEqual({ kind: 'rejoin' });
+    expect(decideReconnect({ closeCode: SERVER_RESTART_CLOSE_CODE, attempt: 0, random: 0 })).toEqual({ kind: 'rejoin' });
   });
 
   it('asks for a rejoin at any attempt, not a give-up', () => {
-    expect(decideReconnect({ closeCode: SERVER_RESTART_CLOSE_CODE, attempt: 99 })).toEqual({ kind: 'rejoin' });
+    expect(decideReconnect({ closeCode: SERVER_RESTART_CLOSE_CODE, attempt: 99, random: 0 })).toEqual({ kind: 'rejoin' });
   });
 });
 
@@ -140,6 +140,26 @@ describe('RECONNECT_DELAYS_MS', () => {
     // contra un asiento que el servidor ya solto.
     const total = RECONNECT_DELAYS_MS.reduce((sum, delay) => sum + delay, 0);
     expect(total).toBeLessThan(30_000);
+  });
+
+  it('still fits the window with the largest jitter on every step (#283)', () => {
+    let total = 0;
+    for (let attempt = 0; attempt < RECONNECT_DELAYS_MS.length; attempt++) {
+      const decision = decideReconnect({ closeCode: 1006, attempt, random: 0.999999 });
+      if (decision.kind !== 'retry') throw new Error('expected a retry');
+      total += decision.delayMs;
+    }
+    expect(total).toBeLessThan(30_000);
+  });
+
+  it('spreads clients dropped together over half of each step (#283)', () => {
+    const delays = [0, 0.25, 0.5, 0.75, 0.999].map((random) => {
+      const decision = decideReconnect({ closeCode: 1006, attempt: 3, random });
+      return decision.kind === 'retry' ? decision.delayMs : -1;
+    });
+    expect(new Set(delays).size).toBe(delays.length);
+    expect(Math.min(...delays)).toBe(RECONNECT_DELAYS_MS[3]);
+    expect(Math.max(...delays)).toBeLessThan(RECONNECT_DELAYS_MS[3]! * 1.5);
   });
 
   it('cada retardo crece respecto al anterior: es backoff, no un reintento plano', () => {
