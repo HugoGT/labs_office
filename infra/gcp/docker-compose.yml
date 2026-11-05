@@ -23,6 +23,13 @@
 #
 # Las variables salen de /opt/office/.env, que `office-deploy` regenera en cada
 # despliegue con los secretos recien leidos de Secret Manager.
+#
+# CPU (#278): the SFU must never starve. Every service but LiveKit and Egress
+# has a hard `cpus` cap, all of them together below the 4 vCPU of a normal
+# day, so a runaway Colyseus or a TLS storm in Caddy cannot eat the machine.
+# LiveKit has no cap and a `cpu_shares` weight above the rest together, so
+# under contention the kernel serves it first. See "CPU per container" in
+# README.md.
 
 name: labs-office
 
@@ -43,6 +50,8 @@ services:
     image: "${REGISTRY}/caddy:${IMAGE_TAG}"
     restart: unless-stopped
     logging: *logging
+    # TLS for the app and for TURN over 443 (relayed media goes through here).
+    cpus: "1"
     environment:
       APP_HOST: "${APP_HOST}"
       LK_HOST: "${LK_HOST}"
@@ -85,6 +94,8 @@ services:
     image: "${REGISTRY}/web:${IMAGE_TAG}"
     restart: unless-stopped
     logging: *logging
+    # Static files only.
+    cpus: "0.5"
     # Sin `ports`: solo Caddy le habla, por la red interna del compose.
     networks: [office]
 
@@ -92,6 +103,9 @@ services:
     image: "${REGISTRY}/colyseus:${IMAGE_TAG}"
     restart: unless-stopped
     logging: *logging
+    # Node runs the rooms on one thread; the half core on top is for GC and
+    # libuv. Saturated, players lag; audio does not.
+    cpus: "1.5"
     environment:
       PORT: "2567"
       # El servidor es la fuente de verdad de esta URL: la devuelve en la
@@ -182,6 +196,10 @@ services:
     image: livekit/livekit-server:v1.13.7@sha256:6fd3b7088874c4d119160dd688798dfec852bc014786d392caad15f6f63912a3
     restart: unless-stopped
     logging: *logging
+    # No `cpus` cap on the SFU, and a weight (default 1024) above every other
+    # service together, so CFS gives it the CPU first when the VM saturates
+    # (#278). Only matters under contention: idle cores stay usable by all.
+    cpu_shares: 16384
     command: --config /etc/livekit.yaml
     # Red del host a proposito. Publicar el rango 50000-60000/udp con el
     # mecanismo normal de Docker crea una regla (y con el proxy en espacio de
@@ -207,6 +225,7 @@ services:
     image: redis:7.4.11-alpine@sha256:ff02b58f971e7d7d156a1267e283fcbbeee91773b6aa36c49dac28ecfe28eadf
     restart: unless-stopped
     logging: *logging
+    cpus: "0.5"
     # Pure message bus between LiveKit and Egress: nothing to persist.
     command: redis-server --save "" --appendonly no
     # Published on loopback ONLY: LiveKit runs on the host network and cannot
@@ -226,6 +245,10 @@ services:
     image: livekit/egress:v1.14.1@sha256:bf2b648b947349c3e9ff7aa8c718f00378d5c06af7624652a3653318e00333ce
     restart: unless-stopped
     logging: *logging
+    # Egress gets no `cpus` quota on purpose (#278): it admits a recording by
+    # the CPUs it sees, and it reads them from the cgroup quota, so any cap
+    # under 3.75 refuses every recording (cpu_cost below). What keeps it from
+    # starving the SFU is LiveKit's `cpu_shares`: Chrome slows down first.
     environment:
       # No storage section: the upload target (bucket and key) travels in
       # every request (server/src/recording/egressPort.ts), and with no

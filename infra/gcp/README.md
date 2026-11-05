@@ -472,6 +472,43 @@ SQL is separate. Check the billing report, filtered by the `app` label.
   the likelier to hit it. Instance schedules guarantee no capacity; retry
   later, or start it with the smaller size.
 
+## CPU per container (issue #278)
+
+Everything runs on one VM, so any container can take the CPU the SFU needs and
+make every call sound robotic. `docker-compose.yml` prevents it two ways:
+
+| Service | Limit | Why |
+|---|---|---|
+| `livekit` | none, `cpu_shares: 16384` | The SFU. Its weight is above the default 1024 of the five others together, so under contention the kernel serves it first; idle cores stay usable by all |
+| `caddy` | `cpus: "1"` | TLS for the app and for TURN over 443 |
+| `colyseus` | `cpus: "1.5"` | One Node thread for the rooms, plus GC and libuv |
+| `web` | `cpus: "0.5"` | Static files |
+| `redis` | `cpus: "0.5"` | Message bus between LiveKit and Egress |
+| `egress` | none, default weight | Its admission (`cpu_cost`, see *Recordings*) counts the CPUs of its cgroup quota, so a cap under 3.75 would refuse every recording on `e2-standard-4`. The LiveKit weight is what keeps it from starving the SFU: Chrome slows down first |
+
+The caps add up to 3.5, below the 4 vCPU of a normal day.
+`tools/vm/cpuIsolation.test.ts` keeps that true and keeps the LiveKit weight
+above the rest. The compose reaches the VM as instance metadata, so the change
+ships with `terraform apply` (a metadata update, `update in-place`) followed by
+a deploy.
+
+**Checking it under load** (with the #274 load test, by hand). While the bots
+talk, saturate one container at a time on the VM over IAP and watch the
+dashboard (*SFU Mbps*, *CPU por contenedor*, *desconexiones*) and the audio of
+a real client:
+
+```sh
+cd /opt/office
+# Two busy loops of 5 minutes each: they hit the 1.5 cap and end by themselves.
+docker compose exec -d colyseus node -e 'const end = Date.now() + 300000; while (Date.now() < end) {}'
+docker compose exec -d colyseus node -e 'const end = Date.now() + 300000; while (Date.now() < end) {}'
+docker stats --no-stream                                 # colyseus at about 150 %
+```
+
+For Egress, start one recording per allowed slot from the office. The audio
+must not degrade in either case; if it does, the next step is a smaller cap or
+weight on the culprit, not a bigger machine.
+
 ## Secretos: de dónde salen y dónde no están
 
 `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, la contraseña de la base de datos y la
