@@ -1636,6 +1636,82 @@ describe('connectLivekitRoom: picking devices and surviving their loss (#284)', 
     expect(onDeviceFailed).toHaveBeenCalledExactlyOnceWith('videoinput', 'in-use');
   });
 
+  it.each(['audioinput', 'videoinput'] as const)(
+    'a %s switch that fails goes back to the device in use before it (#288)',
+    async (kind) => {
+      // livekit-client stops the old capture before opening the new one, so
+      // a failed open would leave a live track silent or black.
+      const { room, connected, onDeviceFailed } = connectWithDevices();
+      const connection = await connected;
+      room.activeDevices.set(kind, 'before');
+      room.switchActiveDevice.mockRejectedValueOnce(domError('OverconstrainedError'));
+
+      expect(await connection.switchDevice(kind, 'broken')).toBe(false);
+
+      expect(room.switchActiveDevice.mock.calls).toEqual([
+        [kind, 'broken', true],
+        [kind, 'before', true],
+      ]);
+      expect(onDeviceFailed).toHaveBeenCalledOnce();
+    },
+  );
+
+  it('a failed switch with no device in use before it has nothing to go back to', async () => {
+    const { room, connected } = connectWithDevices();
+    const connection = await connected;
+    room.switchActiveDevice.mockRejectedValueOnce(domError('NotReadableError'));
+
+    expect(await connection.switchDevice('audioinput', 'headset')).toBe(false);
+
+    expect(room.switchActiveDevice).toHaveBeenCalledOnce();
+  });
+
+  it('a failed switch whose way back fails too is still reported once, as the switch it was', async () => {
+    const { room, connected, onDeviceFailed } = connectWithDevices();
+    const connection = await connected;
+    room.activeDevices.set('audioinput', 'before');
+    room.switchActiveDevice.mockRejectedValue(domError('NotReadableError'));
+
+    expect(await connection.switchDevice('audioinput', 'headset')).toBe(false);
+
+    expect(onDeviceFailed).toHaveBeenCalledExactlyOnceWith('audioinput', 'in-use');
+  });
+
+  it('a speaker switch that fails is not retried: livekit-client keeps the old speaker by itself', async () => {
+    const { room, connected } = connectWithDevices();
+    const connection = await connected;
+    room.activeDevices.set('audiooutput', 'before');
+    room.switchActiveDevice.mockRejectedValueOnce(new Error('cannot switch audio output'));
+
+    expect(await connection.switchDevice('audiooutput', 'altavoces')).toBe(false);
+
+    expect(room.switchActiveDevice).toHaveBeenCalledOnce();
+  });
+
+  it('a camera switch waits for a camera toggle in flight, which may replace the blurred track', async () => {
+    const { room, connected } = connectWithDevices();
+    const calls: string[] = [];
+    let finishCameraOn!: () => void;
+    room.localParticipant.setCameraEnabled = vi.fn(async () => {
+      calls.push('camera on start');
+      await new Promise<void>((resolve) => (finishCameraOn = resolve));
+      calls.push('camera on end');
+    }) as never;
+    room.switchActiveDevice.mockImplementation(async () => {
+      calls.push('switch');
+      return true;
+    });
+    const connection = await connected;
+
+    const cameraOn = connection.setCameraEnabled(true);
+    const switched = connection.switchDevice('videoinput', 'cam1');
+    await Promise.resolve();
+    finishCameraOn();
+    await Promise.all([cameraOn, switched]);
+
+    expect(calls).toEqual(['camera on start', 'camera on end', 'switch']);
+  });
+
   it('a microphone switch waits for a microphone toggle in flight: both change the same track', async () => {
     const { room, connected } = connectWithDevices();
     const calls: string[] = [];

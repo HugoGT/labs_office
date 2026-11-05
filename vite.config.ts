@@ -140,9 +140,11 @@ export default defineConfig(({ mode }) => {
               // diseno original) -- confirmadas por ejecucion, no documentacion.
               // Habilitan camara/microfono falsos para livekitRoom.browser.test.ts
               // sin afectar al resto de la capa `browser` (nadie mas pide medios).
+              // `device-count=2` adds a second fake camera so a camera switch
+              // has somewhere to go (#288).
               provider: playwright({
                 launchOptions: {
-                  args: ['--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream'],
+                  args: ['--use-fake-device-for-media-stream=device-count=2', '--use-fake-ui-for-media-stream'],
                 },
                 contextOptions: { permissions: ['microphone', 'camera'] },
               }),
