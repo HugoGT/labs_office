@@ -85,5 +85,14 @@ turn:
   proxy_protocol_trusted_cidrs:
     - 172.30.0.0/24
 
+# Prometheus metrics (#275), scraped by the Ops Agent on the VM
+# (ops-agent.yaml). `prometheus.port` and not the deprecated `prometheus_port`.
+# LiveKit listens on every interface of the host network and has no setting to
+# bind it to loopback, so what keeps it off the internet is the firewall: no
+# rule in terraform/main.tf opens 6789, which only the VPC's internal ranges
+# reach (server/src/observability/metricsExposure.test.ts pins it).
+prometheus:
+  port: 6789
+
 logging:
   level: info

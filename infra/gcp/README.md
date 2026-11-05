@@ -27,6 +27,8 @@ Todo está parametrizado por `var.env` para que el segundo entorno sea un
 | `docker/web.Dockerfile` | Imagen del SPA construido |
 | `docker/web-nginx.conf` | Configuración de la capa estática del SPA |
 | `test/mux/` | Arnés local del multiplexado TURN/TLS (`pnpm test:mux`, issue #19). Nunca corre en CI |
+| `ops-agent.yaml` | Ops Agent config: Prometheus scraping of LiveKit, Egress and the server (issue #275, see *Observability*) |
+| `terraform/monitoring.tf`, `terraform/dashboard.json.tftpl` | Cloud Monitoring dashboard, uptime check and alerts (issue #275) |
 | `recordings-lifecycle.json` | Retention rule for dev recording buckets created with gcloud (issues #5, #58). The deployed bucket gets the same rule from Terraform |
 
 El workflow de despliegue es `.github/workflows/deploy-test.yml`, separado de
@@ -495,6 +497,13 @@ Todos acotados a la etiqueta de red `labs-office`, nunca a toda la red.
 | `tcp:5349` | TURN embebido sobre TLS |
 | `udp:50000-60000` | Media WebRTC |
 | `tcp:22` | **Solo** desde `35.235.240.0/20`, el rango del túnel IAP |
+
+Metrics ports (issue #275) are deliberately absent: LiveKit `6789`, Egress
+`9090` and the server `9464`. Egress and the server publish them on the VM
+loopback only; LiveKit runs on the host network and listens on every interface,
+so only the VPC-internal `default-allow-internal` rule reaches it. No rule above
+opens them, and `server/src/observability/metricsExposure.test.ts` fails if one
+ever does.
 
 El proyecto tiene además una regla preexistente `default-allow-ssh` que abre el 22
 desde `0.0.0.0/0` sin etiquetas. No se toca: afecta también a la VM ajena. El
@@ -1096,6 +1105,68 @@ Without the bucket (a VM from before this change, or `ASSET_GCS_BUCKET`
 empty), uploads and file reads answer 503 `asset-upload-not-configured` and the
 office keeps drawing the default pack. Rolling it out is a `terraform apply`
 (the bucket, its two bindings and the metadata key) followed by a deploy.
+
+## Observability (issue #275)
+
+After each meeting it should be possible to answer how many people there were,
+how much CPU and bandwidth it took, and who lost their connection and why.
+Everything is GCP-native: no Prometheus or Grafana of our own.
+
+| Piece | Where |
+|---|---|
+| VM CPU, disk, CPU per process | Ops Agent built-in `hostmetrics` (`agent.googleapis.com/*`) |
+| CPU per container | `agent.googleapis.com/processes/cpu_time` by command: each container runs one main process (`livekit-server`, `egress` plus its `chrome`, `node`, `caddy`, `nginx`, `redis-server`) |
+| LiveKit rooms, participants, tracks, bytes | `prometheus.port: 6789` in `livekit.yaml.tpl`, scraped by the Ops Agent |
+| Egress | `prometheus_port: 9090` in `EGRESS_CONFIG_BODY`, published on `127.0.0.1` |
+| Players per LiveKit room, active recordings, client reports | `METRICS_PORT=9464` of the server (`server/src/observability/`), published on `127.0.0.1`, never through Caddy |
+| Client reports | Each browser sends `connected` and `reconnected` with their duration and `disconnected` with the LiveKit reason, as the `media` room message. The server keeps counts by reason only: no session, account or name |
+| Connection quality | Shown to each user in the bottom bar, from LiveKit's `ConnectionQualityChanged` |
+| Scraping | `ops-agent.yaml`, metadata `office-ops-agent-config`, installed and configured by `office-deploy` on every deploy and boot. Never fatal: without it only the metrics are missing |
+| Dashboard | `google_monitoring_dashboard.office`: players per room, tracks, SFU Mbps, VM CPU, CPU per container, disk, recordings, disconnections by reason, connect time |
+| Alerts | `terraform/monitoring.tf`: CPU above 85 % for 10 min; LiveKit uptime check failing 5 min while the VM runs (AND with the VM uptime, so the nightly stop is silent); disk above 85 % while a recording runs |
+| Who is notified | `alert_email` in `terraform.tfvars`. Empty: incidents only show in the console |
+
+### Rolling it out (by hand, once)
+
+```sh
+gcloud services enable monitoring.googleapis.com --project "${PROJECT_ID}"
+```
+
+Then, from `infra/gcp/terraform`, with `alert_email` set in `terraform.tfvars`:
+
+```sh
+terraform plan     # expect: metricWriter for the VM account, the dashboard,
+                   # the uptime check, 3 alert policies, 1 notification channel,
+                   # the new metadata key; the instance only `update in-place`
+terraform apply
+gh workflow run deploy-test.yml   # installs the Ops Agent, new compose and livekit.yaml
+```
+
+The deploy restarts LiveKit once (its config changed) and drops the live calls,
+so run it outside a meeting (the deploy window already waits for an empty office).
+Confirm the email channel from the message Google sends to `alert_email`.
+
+### Checking it
+
+```sh
+# On the VM (IAP): the three endpoints answer on loopback...
+curl -s 127.0.0.1:6789/metrics | grep livekit_participant_total
+curl -s 127.0.0.1:9090/metrics | head
+curl -s 127.0.0.1:9464/metrics
+sudo systemctl status google-cloud-ops-agent
+
+# ...and from outside none does (expect a timeout on each):
+curl -m 5 http://<static_ip>:6789/metrics
+curl -m 5 http://<static_ip>:9090/metrics
+curl -m 5 http://<static_ip>:9464/metrics
+gcloud compute firewall-rules list --filter="targetTags:labs-office-test" \
+  --format="table(name,sourceRanges.list(),allowed[].map().firewall_rule().list())"
+```
+
+Metrics reach Cloud Monitoring a few minutes after the first scrape; until then
+the Prometheus panels are empty. Cost: the Ops Agent keeps only the series the
+dashboard reads (`metric_relabel_configs`), scraped every 60 s, during office
+hours only.
 
 ## Caveats conocidos
 

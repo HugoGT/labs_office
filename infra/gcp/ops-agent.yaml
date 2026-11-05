@@ -1,0 +1,57 @@
+# Google Cloud Ops Agent configuration of the VM (#275). office-deploy installs
+# the agent and writes this file to /etc/google-cloud-ops-agent/config.yaml from
+# the `office-ops-agent-config` metadata key, restarting the agent only when it
+# changed.
+#
+# The agent's built-in configuration is merged with this one and is left as it
+# is: its `hostmetrics` pipeline already sends VM CPU, memory, disk use and the
+# CPU of every process (agent.googleapis.com/processes/cpu_time, by command),
+# which is how the dashboard shows CPU per container: each container runs one
+# main process (livekit-server, egress and its chrome, node, caddy, nginx,
+# redis-server). That keeps cAdvisor, a privileged container, off the VM.
+#
+# Below: scraping the three Prometheus endpoints of the stack. All of them are
+# reached on the VM loopback; none is open to the internet
+# (server/src/observability/metricsExposure.test.ts). Only the series the
+# dashboard and the alerts read are kept: Cloud Monitoring bills Prometheus
+# samples, and the Go runtime series of each target add nothing here.
+metrics:
+  receivers:
+    prometheus:
+      type: prometheus
+      config:
+        scrape_configs:
+          # LiveKit (livekit.yaml.tpl, `prometheus.port`). Node-wide: LiveKit
+          # labels nothing by room, the office server does that below.
+          - job_name: livekit
+            scrape_interval: 60s
+            static_configs:
+              - targets: ['127.0.0.1:6789']
+            metric_relabel_configs:
+              - source_labels: [__name__]
+                regex: 'livekit_(room_total|participant_total|track_published_total|track_subscribed_total|packet_bytes|packet_total)'
+                action: keep
+          # Egress (`prometheus_port` in EGRESS_CONFIG_BODY, docker-compose.yml).
+          - job_name: egress
+            scrape_interval: 60s
+            static_configs:
+              - targets: ['127.0.0.1:9090']
+            metric_relabel_configs:
+              - source_labels: [__name__]
+                regex: 'livekit_egress_.*'
+                action: keep
+          # The office server (server/src/observability/officeMetrics.ts):
+          # players per LiveKit room, active recordings, client media reports.
+          - job_name: office
+            scrape_interval: 60s
+            static_configs:
+              - targets: ['127.0.0.1:9464']
+            metric_relabel_configs:
+              - source_labels: [__name__]
+                regex: 'office_.*'
+                action: keep
+  service:
+    pipelines:
+      prometheus_pipeline:
+        receivers:
+          - prometheus

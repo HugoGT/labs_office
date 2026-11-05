@@ -163,3 +163,14 @@ variable "vm_stop_schedule" {
   type        = string
   default     = "0 20 * * 1-5"
 }
+
+variable "alert_email" {
+  description = "Email that receives the monitoring alerts (#275): sustained high CPU, LiveKit down, disk almost full during a recording. Empty: the alert policies still exist and open incidents in the Cloud Monitoring console, but nobody is notified."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.alert_email == "" || can(regex("^[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$", var.alert_email))
+    error_message = "alert_email must be an email address (user@domain.tld) or empty."
+  }
+}

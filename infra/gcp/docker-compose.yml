@@ -151,6 +151,14 @@ services:
       # asset-upload-not-configured and the default pack keeps working. Same
       # credentials as above, the VM service account.
       ASSET_GCS_BUCKET: "${ASSET_GCS_BUCKET:-}"
+      # Metrics endpoint (#275, server/src/observability/metricsServer.ts):
+      # its own port, never the app port Caddy proxies. 0.0.0.0 inside the
+      # container so the publish below reaches it; the publish itself is on
+      # the VM loopback only, where the Ops Agent scrapes it.
+      METRICS_PORT: "9464"
+      METRICS_HOST: "0.0.0.0"
+    ports:
+      - "127.0.0.1:9464:9464"
     volumes:
       # The CA is public (it proves the server, it grants nothing), hence a
       # plain read-only bind mount and not a secret.
@@ -161,6 +169,7 @@ services:
     # this compose. If it is unreachable at startup the migration fails with a
     # clear error and `restart: unless-stopped` retries.
     # Tampoco publica el 2567 al host: la unica entrada es Caddy sobre 443.
+    # Only the metrics port above is published, and on the loopback.
     networks: [office]
 
   livekit:
@@ -240,8 +249,13 @@ services:
         cpu_cost:
           room_composite_cpu_cost: 3
         log_level: info
+        prometheus_port: 9090
     # Egress runs a headless Chrome to compose the room: SYS_ADMIN for its
     # sandbox and a large /dev/shm, or the browser dies while rendering.
+    # Metrics (#275): on the VM loopback only, for the Ops Agent. Egress is on
+    # the bridge network, so it needs a publish where LiveKit does not.
+    ports:
+      - "127.0.0.1:9090:9090"
     cap_add:
       - SYS_ADMIN
     shm_size: 1gb

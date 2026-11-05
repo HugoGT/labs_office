@@ -1,0 +1,250 @@
+{
+  "displayName": "Oficina virtual ${name}: LiveKit, Egress, VM y clientes",
+  "mosaicLayout": {
+    "columns": 48,
+    "tiles": [
+      {
+        "xPos": 0,
+        "yPos": 0,
+        "width": 24,
+        "height": 16,
+        "widget": {
+          "title": "Participantes por sala",
+          "xyChart": {
+            "dataSets": [
+              {
+                "timeSeriesQuery": {
+                  "prometheusQuery": "sum by (room) (office_room_players)"
+                },
+                "plotType": "LINE"
+              }
+            ],
+            "yAxis": {
+              "label": "personas",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 24,
+        "yPos": 0,
+        "width": 24,
+        "height": 16,
+        "widget": {
+          "title": "Pistas publicadas y suscritas en LiveKit",
+          "xyChart": {
+            "dataSets": [
+              {
+                "timeSeriesQuery": {
+                  "prometheusQuery": "label_replace(sum by (kind) (livekit_track_published_total), \"pistas\", \"publicadas\", \"\", \"\")"
+                },
+                "plotType": "LINE"
+              },
+              {
+                "timeSeriesQuery": {
+                  "prometheusQuery": "label_replace(sum by (kind) (livekit_track_subscribed_total), \"pistas\", \"suscritas\", \"\", \"\")"
+                },
+                "plotType": "LINE"
+              }
+            ],
+            "yAxis": {
+              "label": "pistas",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 0,
+        "yPos": 16,
+        "width": 24,
+        "height": 16,
+        "widget": {
+          "title": "Ancho de banda del SFU (Mbps)",
+          "xyChart": {
+            "dataSets": [
+              {
+                "timeSeriesQuery": {
+                  "prometheusQuery": "sum by (direction) (rate(livekit_packet_bytes[5m])) * 8 / 1e6"
+                },
+                "plotType": "LINE"
+              }
+            ],
+            "yAxis": {
+              "label": "Mbps",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 24,
+        "yPos": 16,
+        "width": 24,
+        "height": 16,
+        "widget": {
+          "title": "CPU de la VM (%)",
+          "xyChart": {
+            "dataSets": [
+              {
+                "timeSeriesQuery": {
+                  "prometheusQuery": "avg(compute_googleapis_com:instance_cpu_utilization{monitored_resource=\"gce_instance\", instance_id=\"${instance_id}\"}) * 100"
+                },
+                "plotType": "LINE"
+              }
+            ],
+            "yAxis": {
+              "label": "%",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 0,
+        "yPos": 32,
+        "width": 24,
+        "height": 16,
+        "widget": {
+          "title": "CPU por contenedor (nucleos, por proceso principal)",
+          "xyChart": {
+            "dataSets": [
+              {
+                "timeSeriesQuery": {
+                  "prometheusQuery": "topk(8, sum by (command) (rate(agent_googleapis_com:processes_cpu_time{monitored_resource=\"gce_instance\", instance_id=\"${instance_id}\"}[5m])) / 1e6)"
+                },
+                "plotType": "LINE"
+              }
+            ],
+            "yAxis": {
+              "label": "nucleos",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 24,
+        "yPos": 32,
+        "width": 24,
+        "height": 16,
+        "widget": {
+          "title": "Disco usado (%)",
+          "xyChart": {
+            "dataSets": [
+              {
+                "timeSeriesQuery": {
+                  "prometheusQuery": "max by (device) (agent_googleapis_com:disk_percent_used{monitored_resource=\"gce_instance\", instance_id=\"${instance_id}\", state=\"used\"})"
+                },
+                "plotType": "LINE"
+              }
+            ],
+            "yAxis": {
+              "label": "%",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 0,
+        "yPos": 48,
+        "width": 24,
+        "height": 16,
+        "widget": {
+          "title": "Desconexiones de clientes por motivo (cada 5 min)",
+          "xyChart": {
+            "dataSets": [
+              {
+                "timeSeriesQuery": {
+                  "prometheusQuery": "sum by (reason) (increase(office_media_disconnections_total[5m]))"
+                },
+                "plotType": "LINE"
+              }
+            ],
+            "yAxis": {
+              "label": "desconexiones",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 24,
+        "yPos": 48,
+        "width": 24,
+        "height": 16,
+        "widget": {
+          "title": "Tiempo medio de conexion y reconexion a LiveKit (s)",
+          "xyChart": {
+            "dataSets": [
+              {
+                "timeSeriesQuery": {
+                  "prometheusQuery": "sum by (event) (rate(office_media_connect_seconds_sum[15m])) / sum by (event) (rate(office_media_connect_seconds_count[15m]))"
+                },
+                "plotType": "LINE"
+              }
+            ],
+            "yAxis": {
+              "label": "segundos",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 0,
+        "yPos": 64,
+        "width": 24,
+        "height": 16,
+        "widget": {
+          "title": "Grabaciones activas",
+          "xyChart": {
+            "dataSets": [
+              {
+                "timeSeriesQuery": {
+                  "prometheusQuery": "max(office_recordings_active)"
+                },
+                "plotType": "LINE"
+              }
+            ],
+            "yAxis": {
+              "label": "grabaciones",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      },
+      {
+        "xPos": 24,
+        "yPos": 64,
+        "width": 24,
+        "height": 16,
+        "widget": {
+          "title": "Salas y participantes segun LiveKit",
+          "xyChart": {
+            "dataSets": [
+              {
+                "timeSeriesQuery": {
+                  "prometheusQuery": "label_replace(max(livekit_room_total), \"serie\", \"salas\", \"\", \"\")"
+                },
+                "plotType": "LINE"
+              },
+              {
+                "timeSeriesQuery": {
+                  "prometheusQuery": "label_replace(max(livekit_participant_total), \"serie\", \"participantes\", \"\", \"\")"
+                },
+                "plotType": "LINE"
+              }
+            ],
+            "yAxis": {
+              "label": "total",
+              "scale": "LINEAR"
+            }
+          }
+        }
+      }
+    ]
+  }
+}
