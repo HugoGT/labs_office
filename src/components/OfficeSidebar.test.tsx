@@ -1001,3 +1001,36 @@ describe('OfficeSidebar: Escape closes the open panel', () => {
     expect(toggle).toHaveAttribute('aria-expanded', 'true');
   });
 });
+
+describe('OfficeSidebar: moderating a meeting room (#282)', () => {
+  it('offers to mute each person in the meeting room, and nobody outside it', async () => {
+    const user = userEvent.setup();
+    const onMutePeer = vi.fn();
+    renderSidebar({ moderation: { roomPeerIds: new Set(['b']), onMutePeer, onMuteAll: vi.fn() } });
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+
+    expect(screen.queryByRole('button', { name: 'Silenciar a Ana' })).toBeNull();
+    await user.click(screen.getByRole('button', { name: 'Silenciar a Beto' }));
+
+    expect(onMutePeer).toHaveBeenCalledWith('b', 'Beto');
+  });
+
+  it('offers to mute everyone else in the room at once', async () => {
+    const user = userEvent.setup();
+    const onMuteAll = vi.fn();
+    renderSidebar({ moderation: { roomPeerIds: new Set(['a', 'b']), onMutePeer: vi.fn(), onMuteAll } });
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+
+    await user.click(screen.getByRole('button', { name: 'Silenciar a todos' }));
+
+    expect(onMuteAll).toHaveBeenCalledTimes(1);
+  });
+
+  it('offers nothing of the kind without moderation', async () => {
+    const user = userEvent.setup();
+    renderSidebar();
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+
+    expect(screen.queryByRole('button', { name: /Silenciar/ })).toBeNull();
+  });
+});

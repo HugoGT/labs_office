@@ -14,6 +14,10 @@ export interface LivekitTokenResponse {
   url: string;
   identity: string;
   room: string;
+  /** A meeting room (#282): entering it publishes nothing until a click. */
+  meeting: boolean;
+  /** This person may mute others in this meeting room (#282). A hint for the UI: the server checks again. */
+  moderator: boolean;
 }
 
 /**
@@ -77,5 +81,10 @@ export async function fetchLivekitToken(
     throw new LivekitTokenError(response.status, await errorCodeOf(response));
   }
 
-  return (await response.json()) as LivekitTokenResponse;
+  const served = (await response.json()) as Omit<LivekitTokenResponse, 'meeting' | 'moderator'> & {
+    meeting?: unknown;
+    moderator?: unknown;
+  };
+  // Only a literal `true` counts: an older server sends neither field.
+  return { ...served, meeting: served.meeting === true, moderator: served.moderator === true };
 }

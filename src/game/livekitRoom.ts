@@ -187,6 +187,13 @@ export interface ConnectLivekitRoomOptions {
    * itself are its result instead, never this callback.
    */
   onCameraFilterFailed?: () => void;
+  /**
+   * The own microphone was muted by somebody else (#282): a moderator, through
+   * the server's `mutePublishedTrack`. livekit-client mutes the track by
+   * itself; this only tells the caller, whose button would stay lit
+   * otherwise. Never called for this client's own `setMicrophoneEnabled`.
+   */
+  onMicrophoneMutedRemotely?: () => void;
 }
 
 /** livekit-client's `ConnectionQuality` values, as plain strings for the UI. */
@@ -297,6 +304,7 @@ export async function connectLivekitRoom({
   now = () => performance.now(),
   loadBackgroundBlur = loadRealBackgroundBlur,
   onCameraFilterFailed,
+  onMicrophoneMutedRemotely,
 }: ConnectLivekitRoomOptions): Promise<LivekitRoomConnection> {
   const room = createRoom();
   const sink = createRemoteAudioSink(audioContainer);
@@ -326,6 +334,9 @@ export async function connectLivekitRoom({
    * microphone could stay open after the last click said off.
    */
   let microphoneQueue: Promise<unknown> = Promise.resolve();
+
+  /** Own microphone calls running: a mute while one runs is this client's own. */
+  let ownMicrophoneCalls = 0;
 
   function serializeMicrophone<T>(task: () => Promise<T>): Promise<T> {
     const run = microphoneQueue.then(task, task);
@@ -601,6 +612,15 @@ export async function connectLivekitRoom({
     }
     if (publication.kind === Track.Kind.Video) onLocalVideoTrackChanged?.(null);
   });
+  // A server mute (#282) reaches livekit-client as a `mute` signal, which
+  // mutes the publication and emits `TrackMuted` for the local participant,
+  // the same event as an own mute: only the call counter tells them apart.
+  room.on(RoomEvent.TrackMuted, (publication: TrackPublication, participant: Participant) => {
+    if (participant !== room.localParticipant || publication.source !== Track.Source.Microphone) return;
+    if (ownMicrophoneCalls > 0) return;
+    onMicrophoneMutedRemotely?.();
+  });
+
   // D7: unica fuente de habla. No lee `micOn` ni ningun umbral de audioLevel
   // propio -- solo lo que LiveKit ya calculo y reporta por este evento.
   room.on(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
@@ -656,6 +676,7 @@ export async function connectLivekitRoom({
     },
     setMicrophoneEnabled(enabled) {
       return serializeMicrophone(async () => {
+        ownMicrophoneCalls += 1;
         try {
           await room.localParticipant.setMicrophoneEnabled(enabled);
           return enabled;
@@ -663,6 +684,8 @@ export async function connectLivekitRoom({
           // Includes livekit-client 2.22.3 giving up after 15 s on a publish
           // started while the signal was reconnecting (it stops the track).
           return false;
+        } finally {
+          ownMicrophoneCalls -= 1;
         }
       });
     },

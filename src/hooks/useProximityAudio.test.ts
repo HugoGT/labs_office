@@ -32,7 +32,7 @@ function fakeConnection(overrides: Partial<LivekitRoomConnection> = {}): Livekit
 }
 
 function fakeTokenResponse(): LivekitTokenResponse {
-  return { token: 'jwt', url: 'ws://localhost:7880', identity: 'yo', room: 'office-livekit' };
+  return { token: 'jwt', url: 'ws://localhost:7880', identity: 'yo', room: 'office-livekit', meeting: false, moderator: false };
 }
 
 /** Construye `voice.peers` a partir de una lista simple de sessionIds. */
@@ -2050,5 +2050,162 @@ describe('useProximityAudio: media reports and connection quality (#275)', () =>
 
     await act(async () => options[0].onDisconnected?.('stop'));
     expect(result.current.connectionQuality).toBe('unknown');
+  });
+});
+
+describe('useProximityAudio: meeting rooms (#282)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function connectSeries(...connections: LivekitRoomConnection[]) {
+    const options: ConnectLivekitRoomOptions[] = [];
+    const connect = vi.fn(async (opts: ConnectLivekitRoomOptions) => {
+      options.push(opts);
+      const next = connections[options.length - 1];
+      if (!next) throw new Error('no connection left');
+      return next;
+    });
+    return { connect, options };
+  }
+
+  /** The corridor is a normal room; `junta` is a meeting room, moderated when `moderator`. */
+  function meetingTokens(moderator = false) {
+    return vi.fn(async (request: LivekitTokenRequest) =>
+      request.spaceId === 'junta'
+        ? { ...fakeTokenResponse(), room: 'office-livekit-space-junta', meeting: true, moderator }
+        : fakeTokenResponse(),
+    );
+  }
+
+  it('entering a meeting room with the microphone and camera on publishes neither until a click', async () => {
+    const bridge = createOfficeBridge();
+    const corridor = fakeConnection();
+    const meeting = fakeConnection();
+    const { connect } = connectSeries(corridor, meeting);
+    const onMeetingNotice = vi.fn();
+
+    // Hoisted: a new function per render would rebuild the room each time.
+    const fetchToken = meetingTokens();
+    const { result } = renderHook(() =>
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken, onMeetingNotice }),
+    );
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
+    });
+    await act(async () => result.current.toggleMic());
+    await act(async () => result.current.toggleCam());
+    expect(result.current.micOn).toBe(true);
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), spaceId: 'junta' });
+    });
+
+    expect(meeting.setMicrophoneEnabled).not.toHaveBeenCalledWith(true);
+    expect(meeting.setCameraEnabled).not.toHaveBeenCalledWith(true);
+    expect(result.current.micOn).toBe(false);
+    expect(result.current.camOn).toBe(false);
+    expect(result.current.meetingRoom).toBe(true);
+    expect(onMeetingNotice).toHaveBeenCalledWith('entered-muted');
+
+    // A click afterwards publishes as anywhere else.
+    await act(async () => result.current.toggleMic());
+    expect(meeting.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+    expect(result.current.micOn).toBe(true);
+  });
+
+  it('a normal room keeps what was on, as before', async () => {
+    const bridge = createOfficeBridge();
+    const room = fakeConnection();
+    const { connect } = connectSeries(fakeConnection(), room);
+    const onMeetingNotice = vi.fn();
+
+    // Hoisted: a new function per render would rebuild the room each time.
+    const fetchToken = meetingTokens();
+    const { result } = renderHook(() =>
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken, onMeetingNotice }),
+    );
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: null });
+    });
+    await act(async () => result.current.toggleMic());
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 'sala' });
+    });
+
+    expect(room.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+    expect(result.current.meetingRoom).toBe(false);
+    expect(onMeetingNotice).not.toHaveBeenCalled();
+  });
+
+  it('a rebuild of the same meeting room keeps the microphone opened inside it', async () => {
+    vi.useFakeTimers();
+    const bridge = createOfficeBridge();
+    const rebuilt = fakeConnection();
+    const { connect, options } = connectSeries(fakeConnection(), rebuilt);
+
+    // Hoisted: a new function per render would rebuild the room each time.
+    const fetchToken = meetingTokens();
+    const { result } = renderHook(() =>
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken, random: () => 0 }),
+    );
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 'junta' });
+    });
+    await act(async () => result.current.toggleMic());
+
+    await act(async () => options[0].onDisconnected?.('rebuild'));
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(rebuildDelay(0, 0));
+    });
+
+    expect(rebuilt.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+    expect(result.current.micOn).toBe(true);
+  });
+
+  it('a microphone muted by a moderator turns the button off and says why', async () => {
+    const bridge = createOfficeBridge();
+    const { connect, options } = connectSeries(fakeConnection());
+    const onMeetingNotice = vi.fn();
+
+    // Hoisted: a new function per render would rebuild the room each time.
+    const fetchToken = meetingTokens();
+    const { result } = renderHook(() =>
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken, onMeetingNotice }),
+    );
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 'junta' });
+    });
+    await act(async () => result.current.toggleMic());
+    expect(result.current.micOn).toBe(true);
+
+    await act(async () => options[0].onMicrophoneMutedRemotely?.());
+
+    expect(result.current.micOn).toBe(false);
+    expect(onMeetingNotice).toHaveBeenLastCalledWith('muted-by-moderator');
+  });
+
+  it('offers moderation only in a meeting room the token says this person moderates, with who is in it', async () => {
+    const bridge = createOfficeBridge();
+    const { connect } = connectSeries(fakeConnection(), fakeConnection());
+
+    // Hoisted: a new function per render would rebuild the room each time.
+    const fetchToken = meetingTokens(true);
+    const { result } = renderHook(() =>
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
+    );
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), spaceId: 'junta' });
+    });
+
+    expect(result.current.canModerate).toBe(true);
+    expect([...result.current.roomPeerIds]).toEqual(['ana']);
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['bea']), spaceId: null });
+    });
+
+    expect(result.current.canModerate).toBe(false);
+    expect(result.current.meetingRoom).toBe(false);
   });
 });
