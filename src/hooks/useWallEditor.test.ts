@@ -1,11 +1,11 @@
 /**
- * The wall tool of "Editar terreno" (#224, in "Decoración" until it moved back): what it asks the map to show through
+ * The wall tool of "Decoración" (#224): what it asks the map to show through
  * `terrainedit`, how a picked wall turns map clicks into wall paints, and
  * what it tells the admin.
  */
 
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AdminError } from '../dashboard/adminPort';
 import type { TerrainAdminPort } from '../dashboard/terrainAdminPort';
 import { createOfficeBridge, type OfficeCommandMap } from '../game/officeBridge';
@@ -49,11 +49,9 @@ describe('useWallEditor', () => {
     const { result, commands } = setup();
     expect(commands).toEqual([]);
 
-    expect(result.current.showing).toBe(false);
     act(() => result.current.pick('wall-brick'));
     expect(result.current.brush).toEqual({ kind: 'wall', piece: 'wall-brick' });
     expect(commands.at(-1)).toEqual({ brush: { kind: 'wall', piece: 'wall-brick' } });
-    expect(result.current.showing).toBe(true);
 
     act(() => result.current.pick(null));
     expect(result.current.brush).toEqual({ kind: 'wall', piece: null });
@@ -136,12 +134,9 @@ describe('useWallEditor', () => {
     act(() => result.current.unpick());
 
     expect(commands.at(-1)).toEqual({ brush: null, previewWalls: [{ index: TILE_A, piece: 'wall-brick' }] });
-    // It still holds the overlay: a tool sharing it waits until it lets go.
-    expect(result.current.showing).toBe(true);
     await act(async () => calls[0]!.resolve());
     act(() => bridge.emit('terrain', { blocks: BASE_LAYOUT.blocks, walls: withWalls(BASE_LAYOUT.walls, [{ index: TILE_A, piece: 'wall-brick' }]), colors: NO_COLORS }));
     expect(commands.at(-1)).toBeNull();
-    expect(result.current.showing).toBe(false);
   });
 
   it('never sends one tile twice in a request', async () => {
@@ -243,14 +238,14 @@ describe('useWallEditor', () => {
 });
 
 describe('WALL_UNDER_PLACEMENT_MESSAGE (#223)', () => {
-  it('names the doors among what keeps a post in place', () => {
+  it('names the doors among what a wall may not cover, and promises no post stays: the eraser takes its door along', () => {
     expect(WALL_UNDER_PLACEMENT_MESSAGE).toMatch(/puerta/);
-    expect(WALL_UNDER_PLACEMENT_MESSAGE).not.toMatch(/cambia/);
+    expect(WALL_UNDER_PLACEMENT_MESSAGE).not.toMatch(/cambia|poste/);
   });
 });
 
 describe('useWallEditor: what the eraser would take (#241)', () => {
-  it('tells the map, only with the eraser picked, every post that holds a wall or a door once pending paints land, and every decor piece', async () => {
+  it('tells the map, only with the eraser picked, every wall standing once pending paints land, and every door, window and decor piece', async () => {
     const bridge = createOfficeBridge();
     const commands: OfficeCommandMap['terrainedit'][] = [];
     bridge.onCommand('terrainedit', (command) => commands.push(command));
@@ -258,22 +253,21 @@ describe('useWallEditor: what the eraser would take (#241)', () => {
     const empty = BASE_LAYOUT.walls.map(() => null);
     const { result } = renderHook(() => useWallEditor({ bridge, terrain, eraseDecor: () => false }));
     act(() => bridge.emit('terrain', { blocks: BASE_LAYOUT.blocks, walls: withWalls(empty, [{ index: TILE_A, piece: 'wall-stone' }, { index: TILE_B, piece: 'wall-brick' }]), colors: NO_COLORS }));
-    // A two-tile door anchored on DOOR needs the walls DOOR - 1 to DOOR + 2: its span and one past each end; a chair is taken by its tile.
+    // A door or a chair is taken by a tile under it, not by the walls it needs.
     act(() => bridge.emit('decor', { items: [{ index: DOOR, piece: 'door-wood', rotation: 0 }, { index: TILE_C, piece: 'chair-office', rotation: 0 }] }));
 
     act(() => result.current.pick('wall-brick'));
     expect(commands.at(-1)).toEqual({ brush: { kind: 'wall', piece: 'wall-brick' } });
 
     act(() => result.current.pick(null));
-    // Each wall covers the tile it stands on and the ones above and below it.
-    const W = BASE_LAYOUT.width;
-    expect(commands.at(-1)?.erasable).toEqual([TILE_A - W, TILE_B - W, TILE_A, TILE_B, DOOR - 1, DOOR, DOOR + 1, DOOR + 2, TILE_A + W, TILE_B + W]);
-    expect(commands.at(-1)?.erasableDecor).toEqual([{ x0: 69, y0: 22, x1: 69, y1: 22 }]);
+    expect(commands.at(-1)?.erasable).toEqual([TILE_A, TILE_B]);
+    // The door is outlined whole, its span by the wall's three rows, like the chair by its tile.
+    expect(commands.at(-1)?.erasableDecor).toEqual([{ x0: 77, y0: 21, x1: 78, y1: 23 }, { x0: 69, y0: 22, x1: 69, y1: 22 }]);
 
     // An erase on its way already leaves its wall with nothing to take.
     act(() => bridge.emit('wallpick', { index: TILE_A }));
     await waitFor(() => expect(calls).toHaveLength(1));
-    expect(commands.at(-1)?.erasable).toEqual([TILE_B - W, TILE_B, DOOR - 1, DOOR, DOOR + 1, DOOR + 2, TILE_B + W]);
+    expect(commands.at(-1)?.erasable).toEqual([TILE_B]);
   });
 
   it('erases a wall from any of its three tiles, and nothing from a tile no wall covers', async () => {
@@ -309,6 +303,57 @@ describe('useWallEditor: what the eraser would take (#241)', () => {
     act(() => bridge.emit('wallpick', { index: TILE_B }));
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0]!.edits).toEqual([{ index: TILE_B, piece: 'wall-plaster' }]);
+  });
+});
+
+describe('useWallEditor: erasing a wall a door or window needs', () => {
+  const RUN = [DOOR - 1, DOOR, DOOR + 1, DOOR + 2, DOOR + 3];
+
+  function onRun(eraseDoors: (anchors: readonly number[]) => Promise<boolean>) {
+    const bridge = createOfficeBridge();
+    const { terrain, calls } = deferredWalls();
+    const walls = withWalls(BASE_LAYOUT.walls.map(() => null), RUN.map((index) => ({ index, piece: 'wall-brick' as const })));
+    const { result } = renderHook(() => useWallEditor({ bridge, terrain, eraseDecor: () => false, eraseDoors }));
+    act(() => bridge.emit('terrain', { blocks: BASE_LAYOUT.blocks, walls, colors: NO_COLORS }));
+    act(() => bridge.emit('decor', { items: [{ index: DOOR, piece: 'door-wood', rotation: 0 }] }));
+    act(() => result.current.pick(null));
+    return { bridge, calls };
+  }
+
+  it('sends the door first, then in one request the wall and the two tiles the door stood on', async () => {
+    let doorsGone: (gone: boolean) => void = () => {};
+    const eraseDoors = vi.fn(() => new Promise<boolean>((resolve) => (doorsGone = resolve)));
+    const { bridge, calls } = onRun(eraseDoors);
+
+    act(() => bridge.emit('wallpick', { index: DOOR - 1, tile: DOOR - 1 }));
+    expect(eraseDoors).toHaveBeenCalledWith([DOOR]);
+    await act(async () => undefined);
+    // The room refuses a wall while its door stands: nothing leaves until the door has.
+    expect(calls).toHaveLength(0);
+
+    await act(async () => doorsGone(true));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.edits).toEqual([
+      { index: DOOR - 1, piece: null },
+      { index: DOOR, piece: null },
+      { index: DOOR + 1, piece: null },
+    ]);
+  });
+
+  it('leaves the walls standing when the door could not go', async () => {
+    const { bridge, calls } = onRun(async () => false);
+    act(() => bridge.emit('wallpick', { index: DOOR + 2, tile: DOOR + 2 }));
+    await act(async () => undefined);
+    expect(calls).toHaveLength(0);
+  });
+
+  it('asks nothing of the doors for a wall none of them needs', async () => {
+    const eraseDoors = vi.fn(async () => true);
+    const { bridge, calls } = onRun(eraseDoors);
+    act(() => bridge.emit('wallpick', { index: DOOR + 3, tile: DOOR + 3 }));
+    await waitFor(() => expect(calls).toHaveLength(1));
+    expect(calls[0]!.edits).toEqual([{ index: DOOR + 3, piece: null }]);
+    expect(eraseDoors).not.toHaveBeenCalled();
   });
 });
 
@@ -353,5 +398,61 @@ describe('useWallEditor: space outlines (#216)', () => {
 
     act(() => result.current.reset());
     expect(commands.at(-1)).toBeNull();
+  });
+});
+
+describe('useWallEditor colors', () => {
+  afterEach(() => window.localStorage.clear());
+
+  it('picks plaster in the color settled on its tile, remembers it, and paints and previews walls in it', async () => {
+    const { terrain, calls } = deferredWalls();
+    const { bridge, result, commands } = setup(terrain);
+
+    act(() => result.current.setColor('wall-plaster', '#123456'));
+    expect(result.current.brush).toEqual({ kind: 'wall', piece: 'wall-plaster', color: '#123456' });
+    expect(result.current.colors).toEqual({ 'wall-plaster': '#123456' });
+    expect(JSON.parse(window.localStorage.getItem('office:wall-colors') ?? '{}')).toEqual({ 'wall-plaster': '#123456' });
+
+    act(() => bridge.emit('wallpick', { index: TILE_A }));
+    expect(calls[0]!.edits).toEqual([{ index: TILE_A, piece: 'wall-plaster', color: '#123456' }]);
+    expect(commands.at(-1)).toMatchObject({ previewWalls: [{ index: TILE_A, piece: 'wall-plaster', color: '#123456' }] });
+    await act(async () => calls[0]!.resolve());
+
+    // Put down and picked again, plaster comes back in its remembered color.
+    act(() => result.current.unpick());
+    act(() => result.current.pick('wall-plaster'));
+    expect(result.current.brush).toEqual({ kind: 'wall', piece: 'wall-plaster', color: '#123456' });
+  });
+
+  it('repaints a plaster wall the room shows in another color, and skips one already in the brush color', async () => {
+    const { terrain, calls } = deferredWalls();
+    const { bridge, result } = setup(terrain);
+    const walls = withWalls(BASE_LAYOUT.walls, [{ index: TILE_A, piece: 'wall-plaster' }, { index: TILE_B, piece: 'wall-plaster' }]);
+    act(() => bridge.emit('terrain', { blocks: BASE_LAYOUT.blocks, walls, colors: NO_COLORS, wallColors: new Map([[TILE_A, '#aa0000'], [TILE_B, '#123456']]) }));
+
+    act(() => result.current.setColor('wall-plaster', '#123456'));
+    act(() => bridge.emit('wallpick', { index: TILE_B }));
+    act(() => bridge.emit('wallpick', { index: TILE_A }));
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.edits).toEqual([{ index: TILE_A, piece: 'wall-plaster', color: '#123456' }]);
+    await act(async () => calls[0]!.resolve());
+  });
+
+  it('never gives a color to a wall that takes none', () => {
+    const { result } = setup();
+    act(() => result.current.setColor('wall-brick', '#123456'));
+    expect(result.current.brush).toBeNull();
+    act(() => result.current.pick('wall-brick'));
+    expect(result.current.brush).toEqual({ kind: 'wall', piece: 'wall-brick' });
+  });
+
+  it('holds the rail while the picker of its tile is open', () => {
+    const { result, commands } = setup();
+    act(() => result.current.pick('wall-plaster'));
+    act(() => result.current.setPickingColor(true));
+    expect(commands.at(-1)).toMatchObject({ pickingColor: true });
+    act(() => result.current.setPickingColor(false));
+    expect(commands.at(-1)).not.toHaveProperty('pickingColor');
   });
 });

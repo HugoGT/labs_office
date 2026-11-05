@@ -110,6 +110,12 @@ export interface OfficeState {
    */
   terrainColors: string;
   /**
+   * The live wall colors (a colorable wall such as plaster), by post, in the
+   * sparse wire form of `encodeTerrainColors`. Apart from `terrainWalls` so
+   * that field keeps its encoding and an older client ignores this one.
+   */
+  terrainWallColors: string;
+  /**
    * The live uploaded floors painted on wood blocks, in the sparse wire form of
    * `encodeTerrainFloors` (`<block>:<piece id>` pairs, empty for none). Apart
    * from `terrainBlocks` (an uploaded floor is `wood` there) so that field
@@ -149,6 +155,7 @@ export class OfficeState extends Schema {
     this.recordings = new MapSchema<RecordingState>();
     this.terrainBlocks = '';
     this.terrainColors = '';
+    this.terrainWallColors = '';
     this.terrainFloors = '';
     this.terrainWalls = '';
     this.officeDecor = '';
@@ -157,4 +164,4 @@ export class OfficeState extends Schema {
   }
 }
 
-defineTypes(OfficeState, { players: { map: PlayerState }, recordings: { map: RecordingState }, terrainBlocks: 'string', terrainWalls: 'string', officeDecor: 'string', pieceCollisions: 'string', terrainColors: 'string', terrainFloors: 'string', lockedSpaces: 'string' });
+defineTypes(OfficeState, { players: { map: PlayerState }, recordings: { map: RecordingState }, terrainBlocks: 'string', terrainWalls: 'string', officeDecor: 'string', pieceCollisions: 'string', terrainColors: 'string', terrainFloors: 'string', lockedSpaces: 'string', terrainWallColors: 'string' });

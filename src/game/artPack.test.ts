@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ART_CONTRACT_VERSION, type ArtPackManifest } from './artContract';
+import { ART_CONTRACT_VERSION, WALL_TOP_COLOR, type ArtPackManifest } from './artContract';
 import {
   ART_PACK_MANIFEST_URL,
   artPackFileUrl,
@@ -227,6 +227,18 @@ describe('load requests', () => {
       frameWidth: 32,
       frameHeight: 32,
     });
+  });
+});
+
+describe('recolorFor walls', () => {
+  it('recolors only plaster, keeping the dark top band and line of the wall as they are', () => {
+    const manifest = pack();
+    const plaster = findPiece(manifest, 'wall-plaster');
+    const brick = findPiece(manifest, 'wall-brick');
+    if (plaster === undefined || brick === undefined) throw new Error('missing pieces');
+    expect(recolorFor(plaster, '#C0392B')).toEqual({ from: '#8e9bb2', to: '#c0392b', keep: [WALL_TOP_COLOR] });
+    expect(recolorFor(plaster, '#8e9bb2')).toBeNull();
+    expect(recolorFor(brick, '#c0392b')).toBeNull();
   });
 });
 

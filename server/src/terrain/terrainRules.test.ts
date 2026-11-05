@@ -244,8 +244,20 @@ describe('parseWallBatch', () => {
     ['a missing piece', { edits: [{ index: 3 }] }],
     ['a repeated tile', { edits: [{ index: 3, piece: 'wall-brick' }, { index: 3, piece: null }] }],
     ['an edit that is not an object', { edits: [3] }],
+    ['a color on a wall that takes none', { edits: [{ index: 3, piece: 'wall-brick', color: '#112233' }] }],
+    ['a color on the eraser', { edits: [{ index: 3, piece: null, color: '#112233' }] }],
+    ['a malformed color', { edits: [{ index: 3, piece: 'wall-plaster', color: 'red' }] }],
+    ['a short color', { edits: [{ index: 3, piece: 'wall-plaster', color: '#123' }] }],
   ])('refuses %s', (_name, body) => {
     expect(() => parseWallBatch(body, TILES)).toThrow(InvalidTerrainEditError);
+  });
+
+  it('reads the color of a plaster wall in lower case, and a null color as none', () => {
+    expect(parseWallBatch({ edits: [{ index: 3, piece: 'wall-plaster', color: '#ABCDEF' }, { index: 4, piece: 'wall-plaster', color: null }, { index: 5, piece: 'wall-brick', color: null }] }, TILES)).toEqual([
+      { index: 3, piece: 'wall-plaster', color: '#abcdef' },
+      { index: 4, piece: 'wall-plaster' },
+      { index: 5, piece: 'wall-brick' },
+    ]);
   });
 
   it('caps a batch at MAX_WALL_EDITS tiles', () => {

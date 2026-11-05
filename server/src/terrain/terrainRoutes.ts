@@ -76,7 +76,7 @@ export async function handleSetTerrainBlock(
 }
 
 /**
- * `POST /admin/terrain/walls` `{ edits: [{ index, piece }] }`: places (`piece`
+ * `POST /admin/terrain/walls` `{ edits: [{ index, piece, color? }] }`: places (`piece`
  * a wall piece) or removes (`null`) walls on single tiles, all or none. A
  * dragged wall is one request.
  */

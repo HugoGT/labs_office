@@ -472,6 +472,11 @@ ALTER TABLE terrain_walls DROP CONSTRAINT IF EXISTS terrain_walls_piece_id_check
 -- Its art_pieces row is retired by the pack sync, like any piece a newer pack drops.
 DELETE FROM terrain_walls WHERE piece_id = 'wall-glass';
 ALTER TABLE terrain_walls ADD CONSTRAINT terrain_walls_piece_id_check CHECK (piece_id IN ('wall-brick', 'wall-stone', 'wall-plaster'));
+-- The color of a painted wall (a colorable piece such as plaster), NULL for its
+-- default art. An ALTER like `terrain_blocks.color`, so every wall stored before
+-- wall colors keeps NULL and draws exactly as before. Which pieces take one is
+-- the server's rule (`COLORABLE_WALL_PIECES`), not a CHECK.
+ALTER TABLE terrain_walls ADD COLUMN IF NOT EXISTS color text CHECK (color IS NULL OR color ~ '^#[0-9a-f]{6}$');
 
 -- LEGACY since the office decor layer (#208): read only by its one-time copy
 -- at the end of this file. Placed chairs (terrain editor). One row per TILE holding a chair an admin

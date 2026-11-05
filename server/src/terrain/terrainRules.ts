@@ -17,6 +17,7 @@ import {
   isLayoutMaterial,
   isTerrainColor,
   isWallPieceId,
+  isColorableWallPiece,
   wallPostTiles,
   type LayoutMaterial,
   type OfficeLayout,
@@ -214,9 +215,10 @@ export function findUnwalkableConflict(
 }
 
 /**
- * The body of `POST /admin/terrain/walls`: `{ edits: [{ index, piece }] }`,
+ * The body of `POST /admin/terrain/walls`: `{ edits: [{ index, piece, color? }] }`,
  * one tile each, a wall piece or `null` to remove the wall. At most
- * `MAX_WALL_EDITS` tiles, each once.
+ * `MAX_WALL_EDITS` tiles, each once. A color is normalized to lower case like
+ * a block's, and only a colorable wall takes it; `null` is no color.
  */
 export function parseWallBatch(body: unknown, tileCount: number): WallEdit[] {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) throw new InvalidTerrainEditError('invalid wall batch');
@@ -225,12 +227,16 @@ export function parseWallBatch(body: unknown, tileCount: number): WallEdit[] {
   const seen = new Set<number>();
   return edits.map((edit: unknown) => {
     if (typeof edit !== 'object' || edit === null || Array.isArray(edit)) throw new InvalidTerrainEditError('invalid wall edit');
-    const { index, piece } = edit as Record<string, unknown>;
+    const { index, piece, color } = edit as Record<string, unknown>;
     if (typeof index !== 'number' || !Number.isInteger(index) || index < 0 || index >= tileCount) throw new InvalidTerrainEditError('invalid tile');
     if (piece !== null && !isWallPieceId(piece)) throw new InvalidTerrainEditError('unknown wall piece');
     if (seen.has(index)) throw new InvalidTerrainEditError('duplicate tile');
     seen.add(index);
-    return { index, piece };
+    if (color === undefined || color === null) return { index, piece };
+    const normalized = typeof color === 'string' ? color.toLowerCase() : color;
+    if (!isTerrainColor(normalized)) throw new InvalidTerrainEditError('invalid color');
+    if (!isColorableWallPiece(piece)) throw new InvalidTerrainEditError('this wall takes no color');
+    return { index, piece, color: normalized };
   });
 }
 

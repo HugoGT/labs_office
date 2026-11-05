@@ -52,6 +52,12 @@
   overflow: hidden;
 }
 
+/* A colorable wall's tile (plaster) with its color input in its top-right corner, a grid cell like a plain tile. */
+.tileCell {
+  position: relative;
+  min-width: 0;
+}
+
 /* A wall tile: only its picture, as wide as the cell and square, like DecorPalette's. */
 .tile {
   position: relative;

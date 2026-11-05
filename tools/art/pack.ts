@@ -49,6 +49,7 @@ import { DEFAULT_TREE_COLOR, type PlantKind, type TreeKind } from './domain/prop
 import { DESK_DEFAULT_COLORS, ROOM_TABLE_FOOTPRINTS, type RoomTable, type TableMaterial } from './domain/tables.ts';
 import { DEFAULT_CARPET_COLOR, DEFAULT_PLAIN_COLOR, type Terrain } from './domain/tiles.ts';
 import type { WallMaterial } from './domain/wallMap.ts';
+import { DEFAULT_PLASTER_COLOR } from './domain/wallColumns.ts';
 import { encodePng } from '../../server/src/assets/pngCodec.ts';
 import { renderPreviews } from './preview.ts';
 import { buildPackSheets } from './sheets.ts';
@@ -222,6 +223,9 @@ export function renderPackFiles(): Map<string, Uint8Array> {
         heightTiles: WALL.heightTiles,
         topHeight: WALL.topHeight,
         translucent: false,
+        // Only plaster takes a color; brick and stone keep their own.
+        colorable: material === 'plaster',
+        defaultColor: material === 'plaster' ? DEFAULT_PLASTER_COLOR : null,
         files: [png(`wall/${material}.png`, 'sheet', 'wall', image)],
       }),
     ),

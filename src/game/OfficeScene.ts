@@ -84,12 +84,14 @@ import {
   encodeTerrainWalls,
   terrainSnapshot,
   withWallOrder,
+  withWallColors,
   withWalls,
   type LayoutMaterial,
   type TerrainColors,
   type TerrainSnapshot,
   type OfficeLayout,
   type WallEdit,
+  type WallColors,
 } from './officeLayout';
 import { BASE_COLLISION_RECTS, STATIC_COLLISION_INSTANCES, decorInfoFromManifest, officeCollisionInstances } from './officeCollisions';
 import {
@@ -292,6 +294,8 @@ export class OfficeScene extends Phaser.Scene {
   private terrainWalls: readonly (string | null)[] = BASE_LAYOUT.walls;
   /** The tiles of `terrainWalls` in placement order, oldest first (#223): which wall is drawn over which. */
   private terrainWallOrder: readonly number[] = [];
+  /** The live wall colors, by post: only colorable walls painted in a color of their own. */
+  private terrainWallColors: WallColors = new Map();
   /** The terrain editor's pending wall paints, drawn over `terrainWalls` and never collided with. */
   private wallPreview: readonly WallEdit[] | null = null;
   /** What the walls drew, destroyed and drawn again whenever the walls or their preview change. */
@@ -1143,6 +1147,7 @@ export class OfficeScene extends Phaser.Scene {
           onTerrainColors: (colors) => this.applyTerrainColors(colors),
           onTerrainFloors: (floors) => this.applyTerrainFloors(floors),
           onWalls: (walls, order) => this.applyWalls(walls, order),
+          onWallColors: (colors) => this.applyWallColors(colors),
           onDecor: (items) => this.applyDecor(items),
           onLockedSpaces: (locks) => {
             this.lockedSpaces = locks;
@@ -2169,6 +2174,19 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   /**
+   * New wall colors from the room: a drawing change only, like the block
+   * colors. A server that predates them sends none, and the walls keep their art.
+   */
+  private applyWallColors(colors: WallColors): void {
+    if (!this.alive) return;
+    if (encodeTerrainColors(colors) !== encodeTerrainColors(this.terrainWallColors)) {
+      this.terrainWallColors = colors;
+      this.paintWalls();
+    }
+    this.emitTerrain();
+  }
+
+  /**
    * New placed chairs from the room: drawn, offered as seats and collided
    * with (by their pieces' rectangles) at once. A chair the local player sits
    * on that is gone stands them up here too, without waiting for the room's
@@ -2226,6 +2244,7 @@ export class OfficeScene extends Phaser.Scene {
       colors: this.terrainColors,
       // Absent while no block has one: what the editor saw before uploaded floors existed.
       ...(this.terrainFloors.size === 0 ? {} : { floors: this.terrainFloors }),
+      ...(this.terrainWallColors.size === 0 ? {} : { wallColors: this.terrainWallColors }),
     });
     this.decorEditLayer?.refresh();
   }
@@ -2335,8 +2354,9 @@ export class OfficeScene extends Phaser.Scene {
     const walls = this.wallPreview === null ? this.terrainWalls : withWalls(this.terrainWalls, this.wallPreview);
     // The pending paints are the latest posts, as they will be once saved.
     const wallOrder = this.wallPreview === null ? this.terrainWallOrder : withWallOrder(this.terrainWallOrder, this.terrainWalls, this.wallPreview);
+    const colors = this.wallPreview === null ? this.terrainWallColors : withWallColors(this.terrainWallColors, this.wallPreview);
     const openings = doorOpenings(this.officeDecor, { width: this.layout.width, height: this.layout.height, walls });
-    this.wallObjects = placeWalls(this, { width: this.layout.width, height: this.layout.height, walls, openings, wallOrder }, this.art);
+    this.wallObjects = placeWalls(this, { width: this.layout.width, height: this.layout.height, walls, openings, wallOrder, colors }, this.art);
   }
 
   /** Camara principal siguiendo al jugador + minimapa en la esquina superior derecha (app.js:410-431). */

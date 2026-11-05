@@ -9,6 +9,8 @@ import { FACINGS } from '../../src/art/seating.ts';
 import { DEFAULT_GAMER_LIGHT, DEFAULT_TABLE_COLOR, tableSprite } from './domain/tables.ts';
 import { carpetTile, DEFAULT_CARPET_COLOR, DEFAULT_PLAIN_COLOR, plainTile } from './domain/tiles.ts';
 import { DEFAULT_TREE_COLOR, treeSprite } from './domain/props.ts';
+import { DEFAULT_PLASTER_COLOR, wallFrame } from './domain/wallColumns.ts';
+import { WALL_FRAMES, WALL_TOP_COLOR, type WallFrame } from '../../src/game/artContract.ts';
 
 /**
  * The office never runs the generators: it recolors the exported default-color
@@ -192,6 +194,17 @@ test('recoloring the exported pouf matches the exporter within a few levels, lik
         const dark = Math.max(source[i] ?? 0, source[i + 1] ?? 0, source[i + 2] ?? 0) < DARK_BELOW;
         assert.ok(worst <= (dark ? 24 : 20), `${facing} ${color} pixel ${i / 4}: off by ${worst}${dark ? ' (dark)' : ''}`);
       }
+    }
+  }
+});
+
+test('recoloring the exported plaster wall matches the exporter painting it in that color, its dark top untouched', () => {
+  for (const frame of Object.keys(WALL_FRAMES) as WallFrame[]) {
+    const exported = wallFrame('plaster', frame).data;
+    for (const color of COLORS) {
+      const result = drift(recolorPixels(exported, DEFAULT_PLASTER_COLOR, color, [WALL_TOP_COLOR]), wallFrame('plaster', frame, 0, undefined, color).data);
+      assert.ok(result.mean < 0.5, `${frame} ${color}: mean drift ${result.mean}`);
+      assert.equal(result.offShare, 0, `${frame} ${color}: ${result.offShare} of the pixels drift`);
     }
   }
 });

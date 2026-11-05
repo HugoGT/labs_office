@@ -57,6 +57,7 @@ import {
   isFootprintWalkable,
   type LayoutMaterial,
   type TerrainColors,
+  type WallColors,
   type TerrainSnapshot,
 } from '../../src/game/officeLayout.ts';
 import { encodeTerrainFloors, type TerrainFloors } from '../../src/game/terrainFloors.ts';
@@ -256,6 +257,11 @@ export interface OfficeRoomOptions {
    */
   terrainColors?: () => TerrainColors;
   /**
+   * The live wall colors, by post, read like `terrainColors` and replicated
+   * as `state.terrainWallColors`. Absent, every wall draws its default art.
+   */
+  wallColors?: () => WallColors;
+  /**
    * The live uploaded block floors, read like `terrainColors` and replicated
    * as `state.terrainFloors`. Absent, no block has one.
    */
@@ -435,6 +441,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   private mapSeats = BASE_MAP_SEATS;
   private decor: () => readonly DecorItem[] = () => [];
   private terrainColors: () => TerrainColors = () => new Map();
+  private wallColors: () => WallColors = () => new Map();
   private terrainFloors: () => TerrainFloors = () => new Map();
   private desks: () => readonly DecorTileRect[] = () => [];
   private spaces: () => readonly SpaceArea[] = () => [];
@@ -451,6 +458,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     if (options?.terrain) this.terrain = options.terrain;
     if (options?.decor) this.decor = options.decor;
     if (options?.terrainColors) this.terrainColors = options.terrainColors;
+    if (options?.wallColors) this.wallColors = options.wallColors;
     if (options?.terrainFloors) this.terrainFloors = options.terrainFloors;
     if (options?.desks) this.desks = options.desks;
     if (options?.spaces) this.spaces = options.spaces;
@@ -458,12 +466,14 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
     this.state.terrainColors = encodeTerrainColors(this.terrainColors());
     this.state.terrainFloors = encodeTerrainFloors(this.terrainFloors());
     this.state.terrainWalls = encodeTerrainWalls(this.terrain().walls, this.terrain().wallOrder);
+    this.state.terrainWallColors = encodeTerrainColors(this.wallColors());
     this.state.officeDecor = encodeOfficeDecor(this.decor());
     this.unsubscribeTerrainChanges = options?.subscribeTerrainChanges?.((blocks) => {
       this.state.terrainBlocks = encodeTerrainBlocks(blocks);
       this.state.terrainColors = encodeTerrainColors(this.terrainColors());
       this.state.terrainFloors = encodeTerrainFloors(this.terrainFloors());
       this.state.terrainWalls = encodeTerrainWalls(this.terrain().walls, this.terrain().wallOrder);
+      this.state.terrainWallColors = encodeTerrainColors(this.wallColors());
       this.state.officeDecor = encodeOfficeDecor(this.decor());
       this.recheckChairSeats();
       // The runtime has persisted and published its authoritative snapshot.

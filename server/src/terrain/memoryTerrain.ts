@@ -23,7 +23,7 @@ export function createMemoryTerrain(
 ): MemoryTerrain {
   const blocks = new Map<number, { material: LayoutMaterial; color?: string; floor?: string; actorId: string | null }>();
   for (const [index, material] of seed) blocks.set(index, { material, actorId: null });
-  const walls = new Map<number, { piece: WallPieceId; actorId: string | null }>();
+  const walls = new Map<number, { piece: WallPieceId; color?: string; actorId: string | null }>();
   for (const [index, piece] of wallSeed) walls.set(index, { piece, actorId: null });
   let decor: readonly DecorItem[] = withDecor([], [...decorSeed].map(({ index, ...item }) => ({ index, item })));
   // By `decorItemKey`, like the store's primary key (tile, layer).
@@ -57,12 +57,16 @@ export function createMemoryTerrain(
     async loadWalls() {
       return new Map([...walls].map(([index, { piece }]) => [index, piece]));
     },
+    async loadWallColors() {
+      return new Map([...walls].flatMap(([index, { color }]) => (color === undefined ? [] : [[index, color] as const])));
+    },
     async saveWalls(edits, actorId) {
       // Synchronous between the read and the writes, like one Postgres statement.
-      for (const { index, piece } of edits) {
+      for (const { index, piece, color } of edits) {
         // Deleted first: a placed or repainted wall goes to the end of the map, like its newer `updated_at`.
         walls.delete(index);
-        if (piece !== null) walls.set(index, { piece, actorId });
+        // Like the Postgres row: an edit without a color leaves the wall with none.
+        if (piece !== null) walls.set(index, { piece, ...(color === undefined ? {} : { color }), actorId });
       }
     },
     wallActorOf(index) {
@@ -80,9 +84,9 @@ export function createMemoryTerrain(
       }
     },
     async saveWallsAndDecor(wallEdits, decorEdits, actorId) {
-      for (const { index, piece } of wallEdits) {
+      for (const { index, piece, color } of wallEdits) {
         walls.delete(index);
-        if (piece !== null) walls.set(index, { piece, actorId });
+        if (piece !== null) walls.set(index, { piece, ...(color === undefined ? {} : { color }), actorId });
       }
       decor = withDecor(decor, decorEdits);
       for (const edit of decorEdits) {

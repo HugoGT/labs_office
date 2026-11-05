@@ -913,11 +913,84 @@ describe('useDecorEditor: the wall eraser over decor', () => {
     expect(kept).toBe(false);
     expect(calls).toEqual([]);
 
+    // Past the end of the door: its post, which is the walls' to judge.
     act(() => {
-      kept = result.current.erase(at(60, 60), at(60, 59));
+      kept = result.current.erase(at(59, 60), at(59, 60));
+    });
+    expect(kept).toBe(false);
+    expect(calls).toEqual([]);
+
+    // Over the door, on any of the wall's three rows: the door alone.
+    act(() => {
+      kept = result.current.erase(at(60, 59), at(60, 59));
     });
     expect(kept).toBe(true);
     expect(calls.map((call) => call.edits)).toEqual([[{ index: at(60, 60), item: null }]]);
+  });
+
+  it('takes a vertical door by its own tiles, never the ones beside it where its leaf swings', () => {
+    const { decor, calls } = deferredPort();
+    const { bridge, result } = setup({ decor });
+    act(() => bridge.emit('decor', { items: [{ index: at(60, 60), piece: 'door-wood', rotation: 90 }] }));
+
+    let kept = true;
+    act(() => {
+      kept = result.current.erase(at(59, 60), at(59, 60));
+    });
+    expect(kept).toBe(false);
+    expect(calls).toEqual([]);
+
+    act(() => {
+      kept = result.current.erase(at(60, 60), at(60, 60));
+    });
+    expect(kept).toBe(true);
+    expect(calls.map((call) => call.edits)).toEqual([[{ index: at(60, 60), item: null }]]);
+  });
+
+  it('says when the doors a wall takes with it have left, and when they could not', async () => {
+    const { decor, calls } = deferredPort();
+    const { bridge, result } = setup({ decor });
+    act(() => bridge.emit('decor', { items: [{ index: at(60, 60), piece: 'door-wood', rotation: 0 }] }));
+
+    let left: boolean | undefined;
+    act(() => void result.current.takeDoors([at(60, 60)]).then((gone) => (left = gone)));
+    expect(calls.map((call) => call.edits)).toEqual([[{ index: at(60, 60), item: null }]]);
+    expect(left).toBeUndefined();
+    await act(async () => calls[0]!.resolve());
+    expect(left).toBe(true);
+
+    act(() => void result.current.takeDoors([at(60, 60)]).then((gone) => (left = gone)));
+    await act(async () => calls[1]!.reject(new AdminError('terrain-under-placement')));
+    expect(left).toBe(false);
+    expect(result.current.error).toBe(DECOR_UNDER_PLACEMENT_MESSAGE);
+  });
+
+  it('never leaves a wall waiting on doors the editor dropped: they count as not gone', async () => {
+    const { decor, calls } = deferredPort();
+    const { result } = setup({ decor });
+    act(() => void result.current.takeDoors([at(10, 10)]));
+
+    let left: boolean | undefined;
+    // The first request holds the queue, so this one has not left when the editor closes.
+    act(() => void result.current.takeDoors([at(20, 20)]).then((gone) => (left = gone)));
+    act(() => result.current.exit());
+    await act(async () => calls[0]!.resolve());
+    expect(left).toBe(false);
+    expect(calls).toHaveLength(1);
+  });
+
+  it('refuses to take doors once editing is gone', async () => {
+    const { decor, calls } = deferredPort();
+    const { result } = setup({ decor });
+    act(() => void result.current.takeDoors([at(10, 10)]));
+    await act(async () => calls[0]!.reject(new AdminError('forbidden')));
+
+    let left: boolean | undefined;
+    await act(async () => {
+      left = await result.current.takeDoors([at(20, 20)]);
+    });
+    expect(left).toBe(false);
+    expect(calls).toHaveLength(1);
   });
 
   it('in a desk area takes only what is wholly inside it', () => {

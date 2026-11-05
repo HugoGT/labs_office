@@ -23,8 +23,9 @@ export interface PaintRegion {
  * canvas). Callers cache the result per material and color. With `region`,
  * only that rectangle, on a canvas of its size: the carpet band of the
  * terrain tileset (#222), whose other bands are painted from other colors.
+ * The colors of `keep` stay as they are (`recolorPixels`).
  */
-export function paintRecoloredCanvas(image: PaintableImage, from: string, to: string, region?: PaintRegion): HTMLCanvasElement | null {
+export function paintRecoloredCanvas(image: PaintableImage, from: string, to: string, region?: PaintRegion, keep?: readonly string[]): HTMLCanvasElement | null {
   const { x, y, width, height } = region ?? { x: 0, y: 0, width: image.width, height: image.height };
   const canvas = document.createElement('canvas');
   canvas.width = width;
@@ -34,7 +35,7 @@ export function paintRecoloredCanvas(image: PaintableImage, from: string, to: st
   try {
     context.drawImage(image, x, y, width, height, 0, 0, width, height);
     const pixels = context.getImageData(0, 0, canvas.width, canvas.height);
-    pixels.data.set(recolorPixels(pixels.data, from, to));
+    pixels.data.set(recolorPixels(pixels.data, from, to, keep));
     context.putImageData(pixels, 0, 0);
   } catch {
     return null;

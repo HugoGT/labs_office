@@ -266,24 +266,27 @@ describe('floor motifs', () => {
 });
 
 describe('tile walls', () => {
-  it('draws a wall as a column one tile wide and three tall: 32x32 frames, 7 per variant row, a 19px top band', () => {
+  it('draws a wall as a column one tile wide and three tall: 32x32 frames, 13 per variant row, a 19px top band', () => {
     expect(WALL.frame).toEqual({ width: ART_TILE, height: ART_TILE });
     expect(WALL.heightTiles).toBe(3);
     expect(WALL.topHeight).toBe(19);
     expect(WALL.columns).toBe(Object.keys(WALL_FRAMES).length);
     expect(WALL.rows).toBe(WALL_VARIANTS);
     expect(WALL_VARIANTS).toBe(3);
-    expect(sheetSize(WALL)).toEqual({ width: 7 * ART_TILE, height: 3 * ART_TILE });
+    expect(sheetSize(WALL)).toEqual({ width: 13 * ART_TILE, height: 3 * ART_TILE });
     expect(WALL_TOP_COLOR).toBe('#1b1a2b');
   });
 
   it('numbers frames across in WALL_FRAMES order, one row per variant picked by the tile column modulo 3', () => {
-    expect(WALL_FRAMES).toEqual({ cap: 0, crown: 1, face: 2, base: 3, crownEnd: 4, faceEnd: 5, baseEnd: 6 });
+    expect(WALL_FRAMES).toEqual({
+      cap: 0, crown: 1, face: 2, base: 3, crownEnd: 4, faceEnd: 5, baseEnd: 6, crownStart: 7, faceStart: 8, baseStart: 9, crownBoth: 10, faceBoth: 11, baseBoth: 12,
+    });
     expect(wallFrameIndex('cap', 0)).toBe(0);
     expect(wallFrameIndex('face', 0)).toBe(2);
     expect(wallFrameIndex('baseEnd', 0)).toBe(6);
-    expect(wallFrameIndex('crown', 1)).toBe(7 + 1);
-    expect(wallFrameIndex('base', 2)).toBe(2 * 7 + 3);
+    expect(wallFrameIndex('baseBoth', 0)).toBe(12);
+    expect(wallFrameIndex('crown', 1)).toBe(13 + 1);
+    expect(wallFrameIndex('base', 2)).toBe(2 * 13 + 3);
     // Column 3 starts the pattern over; negative columns wrap instead of giving a negative frame.
     expect(wallFrameIndex('face', 3)).toBe(wallFrameIndex('face', 0));
     expect(wallFrameIndex('face', -1)).toBe(wallFrameIndex('face', 2));

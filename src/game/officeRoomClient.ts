@@ -19,7 +19,7 @@
 
 import { Client, getStateCallbacks, type Room } from 'colyseus.js';
 import { createMoveThrottle } from './moveThrottle';
-import { BASE_LAYOUT, decodeTerrainBlocks, decodeTerrainColors, decodeTerrainWallOrder, decodeTerrainWalls, type LayoutMaterial, type TerrainColors } from './officeLayout';
+import { BASE_LAYOUT, decodeTerrainBlocks, decodeTerrainColors, decodeTerrainWallOrder, decodeTerrainWalls, type LayoutMaterial, type TerrainColors, type WallColors } from './officeLayout';
 import { decodeTerrainFloors, type TerrainFloors } from './terrainFloors';
 import { decodeCollisionTable, type CollisionTable } from './pieceCollisions';
 import {
@@ -76,6 +76,7 @@ interface OfficeRoomState {
   terrainBlocks: string;
   terrainWalls: string;
   terrainColors: string;
+  terrainWallColors?: string;
   terrainFloors: string;
   officeDecor: string;
   pieceCollisions: string;
@@ -236,6 +237,12 @@ export interface OfficeRoomHandlers {
    * Not called while the office has none: start from an empty map.
    */
   onTerrainColors?(colors: TerrainColors): void;
+  /**
+   * The colors of painted walls, by post, a whole map on each change. Not
+   * called while the office has none, nor by a server that predates them:
+   * start from an empty map.
+   */
+  onWallColors?(colors: WallColors): void;
   /**
    * The uploaded floors painted on terrain blocks (S13), a whole map on each change. Not called
    * while the office has none, nor by a server that predates them: start from an empty map.
@@ -409,7 +416,7 @@ export async function connectOfficeRoom({
       (state: OfficeRoomState): {
         players: PlayersCallbacks;
         recordings: RecordingsCallbacks;
-        listen(property: 'terrainBlocks' | 'terrainWalls' | 'terrainColors' | 'terrainFloors' | 'officeDecor' | 'pieceCollisions' | 'lockedSpaces', handler: (value: string) => void): () => void;
+        listen(property: 'terrainBlocks' | 'terrainWalls' | 'terrainColors' | 'terrainWallColors' | 'terrainFloors' | 'officeDecor' | 'pieceCollisions' | 'lockedSpaces', handler: (value: string) => void): () => void;
       };
       (player: RemotePlayer): PlayerCallbacks;
     };
@@ -498,6 +505,11 @@ export async function connectOfficeRoom({
     $(target.state).listen('terrainColors', (value) => {
       const colors = decodeTerrainColors(value, BASE_LAYOUT.blocks.length);
       if (colors !== null) handlers.onTerrainColors?.(colors);
+    });
+    // Wall colors: same rule, by post over the whole grid of tiles.
+    $(target.state).listen('terrainWallColors', (value) => {
+      const colors = decodeTerrainColors(value, BASE_LAYOUT.width * BASE_LAYOUT.height);
+      if (colors !== null) handlers.onWallColors?.(colors);
     });
     // Uploaded floors (S13): same rule; a value that does not decode is not reported.
     $(target.state).listen('terrainFloors', (value) => {

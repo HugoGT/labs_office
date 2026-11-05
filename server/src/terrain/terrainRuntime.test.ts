@@ -136,6 +136,7 @@ describe('createTerrainRuntime', () => {
       loadBlockColors: async () => new Map(),
       loadBlockFloors: async () => new Map(),
       loadWalls: async () => new Map(),
+      loadWallColors: async () => new Map(),
       saveWalls: async () => { throw new Error('connection lost'); },
       loadDecor: async () => [],
       saveDecor: async () => { throw new Error('connection lost'); },
@@ -246,6 +247,45 @@ describe('createTerrainRuntime walls', () => {
     expect(isPositionWalkable(runtime.snapshot(), onBody.x, onBody.y)).toBe(true);
     expect(isPositionWalkable(runtime.snapshot(), 68 * TILE, 22 * TILE - 11)).toBe(false);
     expect(listener).toHaveBeenCalledTimes(2);
+  });
+
+  it('paints a plaster wall in a color, repaints it in another and drops the color when the wall changes or goes', async () => {
+    const store = createMemoryTerrain();
+    const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store });
+    await runtime.load();
+    const listener = vi.fn();
+    runtime.subscribe(listener);
+
+    await runtime.setWalls([{ index: FREE, piece: 'wall-plaster', color: '#112233' }, { index: FREE + 1, piece: 'wall-plaster' }], 'admin-1', NONE);
+    expect([...runtime.wallColors()]).toEqual([[FREE, '#112233']]);
+    expect([...(await store.loadWallColors())]).toEqual([[FREE, '#112233']]);
+
+    // A color change alone is a repaint: saved, and told to every subscriber.
+    await runtime.setWalls([{ index: FREE, piece: 'wall-plaster', color: '#445566' }], 'admin-1', NONE);
+    expect([...runtime.wallColors()]).toEqual([[FREE, '#445566']]);
+    expect([...(await store.loadWallColors())]).toEqual([[FREE, '#445566']]);
+    expect(listener).toHaveBeenCalledTimes(2);
+    // The same color again changes nothing.
+    await runtime.setWalls([{ index: FREE, piece: 'wall-plaster', color: '#445566' }], 'admin-1', NONE);
+    expect(listener).toHaveBeenCalledTimes(2);
+
+    await runtime.setWalls([{ index: FREE, piece: 'wall-plaster' }], 'admin-1', NONE);
+    expect([...runtime.wallColors()]).toEqual([]);
+    await runtime.setWalls([{ index: FREE + 1, piece: 'wall-plaster', color: '#778899' }], 'admin-1', NONE);
+    await runtime.setWalls([{ index: FREE + 1, piece: null }], 'admin-1', NONE);
+    expect([...runtime.wallColors()]).toEqual([]);
+    expect([...(await store.loadWallColors())]).toEqual([]);
+  });
+
+  it('loads the stored wall colors, ignoring one on a wall that takes none or was left out', async () => {
+    const store = createMemoryTerrain([], [[FREE, 'wall-plaster'], [FREE + 1, 'wall-brick']]);
+    await store.saveWalls([{ index: FREE, piece: 'wall-plaster', color: '#123456' }], null);
+    // A color stored on a brick wall (a hand-edited row) draws nothing.
+    store.loadWallColors = async () => new Map([[FREE, '#123456'], [FREE + 1, '#654321'], [FREE + 2, '#abcdef']]);
+    const runtime = createTerrainRuntime({ layout: BASE_LAYOUT, store });
+    await runtime.load();
+
+    expect([...runtime.wallColors()]).toEqual([[FREE, '#123456']]);
   });
 
   it('keeps the live walls when blocks change, and the live blocks when walls change', async () => {
@@ -1101,6 +1141,19 @@ describe('createTerrainRuntime doors and windows in tile walls (#223, #233, S6-S
     expect(runtime.snapshot().openings).toEqual([{ axis: 'horizontal', tx: 66, ty: 22, span: 2, inset: 10 }]);
   });
 
+  it('lets a wall a door needs go, with the tiles the door spans, once the door has left: the order the eraser sends them in', async () => {
+    const runtime = runtimeWith(createMemoryTerrain([], WALL));
+    await runtime.load();
+    await runtime.setDecor([{ index: at(66, 22), item: DOOR }], null);
+
+    await runtime.setDecor([{ index: at(66, 22), item: null }], null);
+    await runtime.setWalls([65, 66, 67].map((tx) => ({ index: at(tx, 22), piece: null })), null, NONE);
+
+    for (const tx of [65, 66, 67]) expect(runtime.walls()[at(tx, 22)]).toBeNull();
+    expect(runtime.walls()[at(68, 22)]).not.toBeNull();
+    expect(runtime.snapshot().openings).toEqual([]);
+  });
+
   it('repaints the walls a door stands in and keeps the door open, but refuses a new wall in its doorway', async () => {
     const store = createMemoryTerrain([], WALL);
     const runtime = runtimeWith(store);
@@ -1185,6 +1238,35 @@ describe('createTerrainRuntime carry', () => {
     expect(listener).toHaveBeenCalledOnce();
     // The write sees the layer the move leaves, before it is saved.
     expect(write).toHaveBeenCalledExactlyOnceWith({ width: W, walls: runtime.walls(), decor: runtime.decor() });
+  });
+
+  it('carries the color of a plaster wall with it', async () => {
+    const PLASTER = at(69, 22);
+    const store = createMemoryTerrain([], WALL, [CHAIR, DOOR, OUTSIDE]);
+    await store.saveWalls([{ index: PLASTER, piece: 'wall-plaster', color: '#123456' }], null);
+    const runtime = runtimeWith(store);
+    await runtime.load();
+
+    await expect(runtime.carry(async () => UP, 'admin-1', NONE, async () => 'moved')).resolves.toBe('moved');
+
+    expect([...runtime.wallColors()]).toEqual([[PLASTER - 8 * W, '#123456']]);
+    expect([...(await store.loadWallColors())]).toEqual([[PLASTER - 8 * W, '#123456']]);
+  });
+
+  it('leaves a carried wall without a color in its default art where it lands on a colored wall', async () => {
+    // (65, 14) is where the carried corner (65, 22) lands: a plaster wall there, outside the room, in a color.
+    const LANDING = at(65, 14);
+    const CORNER = at(65, 22);
+    const store = createMemoryTerrain([], [...WALL.filter(([index]) => index !== CORNER), [CORNER, 'wall-plaster'], [LANDING, 'wall-plaster']], [CHAIR, DOOR, OUTSIDE]);
+    await store.saveWalls([{ index: LANDING, piece: 'wall-plaster', color: '#abcdef' }], null);
+    const runtime = runtimeWith(store);
+    await runtime.load();
+
+    await expect(runtime.carry(async () => UP, 'admin-1', NONE, async () => 'moved')).resolves.toBe('moved');
+
+    expect(runtime.walls()[LANDING]).toBe('wall-plaster');
+    expect(runtime.wallColors().has(LANDING)).toBe(false);
+    expect((await store.loadWallColors()).has(LANDING)).toBe(false);
   });
 
   it('puts the desk or room back when saving its contents fails, keeping the layer as it was', async () => {

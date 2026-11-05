@@ -135,13 +135,12 @@ describe('materialCatalogFrom: sofas', () => {
 });
 
 describe('materialCatalogFrom: walls', () => {
-  it('offers every wall piece of the pack, never colorable, next to the manifest', () => {
-    expect(catalog().wall.map((option) => [option.id, option.kind, option.name])).toEqual([
-      ['wall-brick', 'wall', 'Ladrillo'],
-      ['wall-stone', 'wall', 'Piedra'],
-      ['wall-plaster', 'wall', 'Yeso'],
+  it('offers every wall piece of the pack next to the manifest, only plaster colorable', () => {
+    expect(catalog().wall.map((option) => [option.id, option.kind, option.name, option.colorable, option.defaultColor])).toEqual([
+      ['wall-brick', 'wall', 'Ladrillo', false, null],
+      ['wall-stone', 'wall', 'Piedra', false, null],
+      ['wall-plaster', 'wall', 'Yeso', true, '#8e9bb2'],
     ]);
-    expect(catalog().wall.every((option) => !option.colorable && option.defaultColor === null)).toBe(true);
     expect(catalog().wall[0]!.sheetUrl).toBe('assets/pack/wall/brick.png');
   });
 });

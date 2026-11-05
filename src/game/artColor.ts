@@ -190,18 +190,24 @@ function paintFromHit(hit: RampHit, curve: readonly Vec[]): Vec {
  * them in `toHex`. Each pixel is located on the source ramp (a tone, a mix of
  * two neighboring tones, or either one mixed toward the outline ink) and moved
  * to the same place on the target ramp, keeping its alpha. Pixels that are not
- * paint of that ramp, and transparent ones, are copied unchanged.
+ * paint of that ramp, those of `keep` (hex colors), and transparent ones, are
+ * copied unchanged.
  *
  * Returns a new array: callers cache the result per material and color, so
  * this runs once per combination and never per frame.
  */
-export function recolorPixels(data: Uint8ClampedArray | Uint8Array, fromHex: string, toHex: string): Uint8ClampedArray {
+export function recolorPixels(data: Uint8ClampedArray | Uint8Array, fromHex: string, toHex: string, keep: readonly string[] = []): Uint8ClampedArray {
   const out = new Uint8ClampedArray(data);
   if (fromHex.toLowerCase() === toHex.toLowerCase()) return out;
   const from = rampCurve(makeRamp(fromHex));
   const to = rampCurve(makeRamp(toHex));
   // A sheet has at most MAX_COLORS_PER_IMAGE distinct values, so each is solved once.
   const solved = new Map<number, Vec | null>();
+  // Colors kept as they are, though they may sit near the ramp: a wall's dark top band lies close to its outline tone.
+  for (const hex of keep) {
+    const { r, g, b } = hexToRgba(hex);
+    solved.set((r << 16) | (g << 8) | b, null);
+  }
   for (let i = 0; i < out.length; i += 4) {
     if ((out[i + 3] ?? 0) === 0) continue;
     const r = out[i] ?? 0;

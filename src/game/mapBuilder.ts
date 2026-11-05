@@ -35,7 +35,7 @@ import { chairGround, type MapSeat, type PlacedChair } from './seating';
 import { terrainColorTileData, terrainMaterialBand, terrainRecolor } from './terrainColorTiles';
 import type { TerrainFloors } from './terrainFloors';
 import { terrainFloorTileData } from './terrainFloorTiles';
-import { TERRAIN_FLAT_COLORS, decalTileData, fallbackTerrainData, hedgeSprites, propFrame, wallSprites } from './terrainRender';
+import { TERRAIN_FLAT_COLORS, decalTileData, fallbackTerrainData, hedgeSprites, propFrame, wallShadowPixels, wallShadowTiles, wallSprites, type WallShadowTile } from './terrainRender';
 
 /**
  * Chair of the base map's rooms. The manifest names no default chair (step 3
@@ -49,6 +49,8 @@ const DECAL_DEPTH = 0.3;
 /** Uploaded floors (S13) lie over the terrain layers (up to `TERRAIN_LAYER_COUNT * 0.01`) and under the decals. */
 const TERRAIN_FLOOR_DEPTH = 0.2;
 const GROUND_PROP_DEPTH = 0.5;
+/** Wall shadows lie on the floor: over its decals, under bridges and everything that stands. */
+const WALL_SHADOW_DEPTH = 0.4;
 
 /** Generated when the pack is missing: one flat 32px tile per terrain material, in `LAYOUT_MATERIALS` order. */
 export const FALLBACK_TERRAIN_KEY = 'terrain-fallback';
@@ -277,12 +279,36 @@ export function renderTerrainFloors(scene: Phaser.Scene): TerrainFloorLayers {
 
 /** Name of every object `placeWalls` draws, so tests and tools can find the walls on the map. */
 export const WALL_OBJECT_NAME = 'map:wall';
+/** The name of every wall shadow `placeWalls` lays on the floor. */
+export const WALL_SHADOW_OBJECT_NAME = 'map:wall-shadow';
+
+/**
+ * The texture of a wall shadow tile, painted once per set of casters
+ * (`WallShadowTile.key`): black at each pixel's shadow opacity. `null` when
+ * this browser cannot paint a canvas; the walls are drawn all the same.
+ */
+function wallShadowTexture(scene: Phaser.Scene, shadow: WallShadowTile): string | null {
+  const key = `wall-shadow:${shadow.key}`;
+  if (scene.textures.exists(key)) return key;
+  const canvas = document.createElement('canvas');
+  canvas.width = TILE;
+  canvas.height = TILE;
+  const context = canvas.getContext('2d');
+  if (context === null) return null;
+  const pixels = context.createImageData(TILE, TILE);
+  wallShadowPixels(shadow.casters).forEach((alpha, index) => {
+    pixels.data[index * 4 + 3] = Math.round(alpha * 255);
+  });
+  context.putImageData(pixels, 0, 0);
+  return scene.textures.addCanvas(key, canvas) === null ? null : key;
+}
 
 /**
  * The walls of a wall grid (the layout's, or the live painted ones), from the
  * pack or as grey placeholders over the same joints and bodies: a wall's
- * footprint on its grid lines, never a whole tile. Returns what it drew, so
- * the scene can destroy it and draw the walls again after an edit.
+ * footprint on its grid lines, never a whole tile, with the shadow they cast
+ * on the floor (`wallShadowTiles`) when drawn from the pack. Returns what it drew, so the scene can
+ * destroy it and draw the walls again after an edit.
  */
 export function placeWalls(
   scene: Phaser.Scene,
@@ -291,7 +317,7 @@ export function placeWalls(
 ): Phaser.GameObjects.GameObject[] {
   const drawn: Phaser.GameObjects.GameObject[] = [];
   for (const sprite of wallSprites(grid)) {
-    const sheet = packSheet(art, sprite.piece, isAny);
+    const sheet = packSheet(art, sprite.piece, isAny, sprite.color ?? null);
     const depth = worldAssetDepth(sprite.depthY);
     // The wall beside a narrower door shows only its columns there, the base over a vertical door its top rows (`WallSprite.crop`).
     const { x, w, h = WALL.frame.height } = sprite.crop ?? { x: 0, w: WALL.frame.width };
@@ -303,6 +329,13 @@ export function placeWalls(
         : placeholder(scene, sprite.x + x, sprite.y, w, h, PLACEHOLDER_COLOR, depth)
       ).setName(WALL_OBJECT_NAME),
     );
+  }
+  // The grey placeholders drawn without the pack cast none.
+  const shadows = art?.manifest == null ? [] : wallShadowTiles(grid);
+  for (const shadow of shadows) {
+    const key = wallShadowTexture(scene, shadow);
+    if (key === null) continue;
+    drawn.push(scene.add.image(shadow.tx * TILE, shadow.ty * TILE, key).setOrigin(0, 0).setDepth(WALL_SHADOW_DEPTH).setName(WALL_SHADOW_OBJECT_NAME));
   }
   return drawn;
 }

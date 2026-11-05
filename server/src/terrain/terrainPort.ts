@@ -58,7 +58,15 @@ export interface TerrainStore {
    * current map no longer has are the runtime's to ignore.
    */
   loadWalls(): Promise<ReadonlyMap<number, WallPieceId>>;
-  /** Places (`piece`) or removes (`null`) walls; all rows succeed or none do. */
+  /**
+   * The color of each stored wall that has one, by tile. A row stored before
+   * wall colors has none and draws its default art.
+   */
+  loadWallColors(): Promise<ReadonlyMap<number, string>>;
+  /**
+   * Places (`piece`) or removes (`null`) walls; all rows succeed or none do.
+   * Each placed row takes its edit's `color`, and loses the one it had without one.
+   */
   saveWalls(edits: readonly WallEdit[], actorId: string | null): Promise<void>;
   /** Decor items sorted by anchor tile. Tiles the current map no longer has are the runtime's to ignore. */
   loadDecor(): Promise<readonly DecorItem[]>;

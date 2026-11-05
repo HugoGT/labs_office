@@ -125,9 +125,41 @@ export function doorOnWall(grid: Pick<WallGrid, 'width' | 'height' | 'walls'>, i
  * door's tiles on each side, where its leaf swings, keep it.
  */
 export function doorOwnWallTiles(item: DoorPlacement, width: number): Set<number> {
+  return new Set(rectTiles(doorOwnRect(item, width), width));
+}
+
+/** The rectangle of `doorOwnWallTiles`: what the eraser takes a door by, and outlines. */
+export function doorOwnRect(item: DoorPlacement, width: number): DecorTileRect {
   const rect = decorFootprint(item, { kind: 'door', footprint: { w: doorSpanOf(item.piece), h: 1 } }, width);
-  const own = doorAxis(item) === 'horizontal' ? rect : { ...rect, x: rect.x + 1, w: 1 };
-  return new Set(rectTiles(own, width));
+  return doorAxis(item) === 'horizontal' ? rect : { ...rect, x: rect.x + 1, w: 1 };
+}
+
+/**
+ * What erasing the wall on `post` takes with it: the anchors of the doors and
+ * windows that need it (`doorPosts`, and a vertical door's face below it,
+ * `doorOnWall`) and the wall tiles to remove, `post` first, then the ones each
+ * of those doors spans. Those tiles may hold the next door in the run, so it
+ * goes on until no door is left without its wall. Nothing without a wall on `post`.
+ */
+export function wallEraseOf(items: readonly DecorItem[], grid: Pick<WallGrid, 'width' | 'height' | 'walls'>, post: number): { doors: number[]; posts: number[] } {
+  if (grid.walls[post] == null) return { doors: [], posts: [] };
+  const walls = [...grid.walls];
+  const posts: number[] = [];
+  const take = (index: number): void => {
+    if (walls[index] == null) return;
+    walls[index] = null;
+    posts.push(index);
+  };
+  take(post);
+  const taken = new Set<DecorItem>();
+  const leaving = (door: DecorItem): boolean =>
+    !taken.has(door) && (doorPosts(door, grid.width).some((index) => posts.includes(index)) || (doorOnWall(grid, door) && !doorOnWall({ ...grid, walls }, door)));
+  const doors = items.filter((item) => isDoorPiece(item.piece));
+  for (let door = doors.find(leaving); door !== undefined; door = doors.find(leaving)) {
+    taken.add(door);
+    doorTiles(door, grid.width).forEach(take);
+  }
+  return { doors: [...taken].map((door) => door.index), posts };
 }
 
 /**

@@ -38,6 +38,7 @@ import {
   wallColliderRects,
   wallFootprintRects,
   wallPostTiles,
+  wallPostUnder,
   wallStretches,
   wallTileFrames,
   wallOpeningHiddenTiles,
@@ -52,6 +53,9 @@ import {
   isColorableTerrainMaterial,
   isTerrainColor,
   withTerrainColors,
+  COLORABLE_WALL_PIECES,
+  isColorableWallPiece,
+  withWallColors,
   type LayoutMaterial,
   type OfficeLayout,
 } from './officeLayout';
@@ -816,7 +820,7 @@ describe('terrain walls', () => {
     expect(wallStretches({ width, height, walls })).toEqual([{ tx: 2, top: 0, bottom: 4, base: 3, piece: 'wall-plaster' }]);
   });
 
-  it('frames each tile of a stretch: cap above the bottom three, End frames only where the run ends on the right', () => {
+  it('frames each tile of a stretch: cap above the bottom three, Start and End frames where the run starts and ends, Both on a lone column', () => {
     const width = 6;
     const height = 7;
     const walls = new Array<string | null>(width * height).fill(null);
@@ -828,18 +832,18 @@ describe('terrain walls', () => {
     const frames = wallTileFrames({ width, height, walls }).map(({ tx, ty, frame, depthY }) => [tx, ty, frame, depthY]);
 
     expect(frames).toEqual([
-      [1, 4, 'crown', 7 * 32],
-      [1, 5, 'face', 7 * 32],
-      [1, 6, 'base', 7 * 32],
+      [1, 4, 'crownStart', 7 * 32],
+      [1, 5, 'faceStart', 7 * 32],
+      [1, 6, 'baseStart', 7 * 32],
       [2, 4, 'crownEnd', 7 * 32],
       [2, 5, 'faceEnd', 7 * 32],
       [2, 6, 'baseEnd', 7 * 32],
       [4, 1, 'cap', 7 * 32],
       [4, 2, 'cap', 7 * 32],
       [4, 3, 'cap', 7 * 32],
-      [4, 4, 'crownEnd', 7 * 32],
-      [4, 5, 'faceEnd', 7 * 32],
-      [4, 6, 'baseEnd', 7 * 32],
+      [4, 4, 'crownBoth', 7 * 32],
+      [4, 5, 'faceBoth', 7 * 32],
+      [4, 6, 'baseBoth', 7 * 32],
     ]);
   });
 
@@ -896,6 +900,17 @@ describe('terrain walls', () => {
     expect(wallPostTiles(grid, 4 * 6 + 2)).toEqual([3 * 6 + 2, 4 * 6 + 2]);
   });
 
+  it('names the wall the eraser takes from a tile: the one standing on it, else the one above, else below, and none off the map', () => {
+    const grid = { width: 6, height: 5 };
+    const on = (...walls: number[]) => (index: number): boolean => walls.includes(index);
+    expect(wallPostUnder(grid, 15, on(9, 15, 21))).toBe(15);
+    expect(wallPostUnder(grid, 15, on(9, 21))).toBe(9);
+    expect(wallPostUnder(grid, 15, on(21))).toBe(21);
+    expect(wallPostUnder(grid, 15, on(16))).toBeNull();
+    expect(wallPostUnder(grid, 3, on(-3))).toBeNull();
+    expect(wallPostUnder(grid, 27, on(33))).toBeNull();
+  });
+
   it('finds the tile under a world point', () => {
     expect(tileAtWorldPoint(BASE_LAYOUT, 0, 0)).toBe(0);
     expect(tileAtWorldPoint(BASE_LAYOUT, 3 * 32 + 31, 2 * 32)).toBe(at(3, 2));
@@ -943,9 +958,9 @@ describe('wall openings: doors in tile walls (#223, S9, S10)', () => {
     expect(framesAt(frames, 3)).toEqual([[1, 'crown', 4 * T]]);
     // The wall left of the door ends its face against it; the crowns above the door stay one run.
     expect(framesAt(frames, 1)).toEqual([
-      [1, 'crown', 4 * T],
-      [2, 'faceEnd', 4 * T],
-      [3, 'baseEnd', 4 * T],
+      [1, 'crownStart', 4 * T],
+      [2, 'faceBoth', 4 * T],
+      [3, 'baseBoth', 4 * T],
     ]);
   });
 
@@ -962,9 +977,9 @@ describe('wall openings: doors in tile walls (#223, S9, S10)', () => {
     ]);
     // The wall left of the door runs on into the kept strip: no end joint against it.
     expect(framesAt(frames, 1)).toEqual([
-      [1, 'crown', 4 * T],
-      [2, 'face', 4 * T],
-      [3, 'base', 4 * T],
+      [1, 'crownStart', 4 * T],
+      [2, 'faceStart', 4 * T],
+      [3, 'baseStart', 4 * T],
     ]);
     // Collisions stay by tile: the client blocks the strips with the door's own stops.
     expect(wallFootprintRects({ ...grid(), openings: [narrow] })).toEqual(wallFootprintRects({ ...grid(), openings: [horizontal] }));
@@ -987,9 +1002,9 @@ describe('wall openings: doors in tile walls (#223, S9, S10)', () => {
       [2, 'faceEnd', 4 * T],
       [3, 'baseEnd', 4 * T],
       [6, 'cap', 10 * T],
-      [7, 'crownEnd', 10 * T],
-      [8, 'faceEnd', 10 * T],
-      [9, 'baseEnd', 10 * T],
+      [7, 'crownBoth', 10 * T],
+      [8, 'faceBoth', 10 * T],
+      [9, 'baseBoth', 10 * T],
     ]);
   });
 
@@ -1004,10 +1019,10 @@ describe('wall openings: doors in tile walls (#223, S9, S10)', () => {
       [1, 'cap', 6 * T],
       [2, 'cap', 6 * T],
       [3, 'crownEnd', 6 * T],
-      [4, 'faceEnd', 6 * T],
-      [5, 'baseEnd', 6 * T],
-      [8, 'faceEnd', 10 * T],
-      [9, 'baseEnd', 10 * T],
+      [4, 'faceBoth', 6 * T],
+      [5, 'baseBoth', 6 * T],
+      [8, 'faceBoth', 10 * T],
+      [9, 'baseBoth', 10 * T],
     ]);
     // A horizontal door keeps the run above it as it was: its top tile is still the crown.
     expect(framesAt(wallTileFrames({ ...grid(), openings: [horizontal] }), 2)).toEqual([[1, 'crown', 4 * T]]);
@@ -1018,5 +1033,64 @@ describe('wall openings: doors in tile walls (#223, S9, S10)', () => {
     expect(wallTileFrames({ ...plain, openings: [] })).toEqual(wallTileFrames(plain));
     expect(wallFootprintRects({ ...plain, openings: [] })).toEqual(wallFootprintRects(plain));
     expect(wallFootprintRects(plain).filter((rect) => rect.x === 6 * T)).toEqual([{ x: 6 * T, y: T, w: T, h: 9 * T }]);
+  });
+});
+
+describe('wall colors', () => {
+  it('names exactly the wall pieces whose art pack wall is colorable: plaster', () => {
+    const pack = JSON.parse(exportedManifest) as { pieces: { id: string; kind: string; colorable?: boolean }[] };
+    const colorable = pack.pieces.filter((piece) => piece.kind === 'wall' && piece.colorable === true).map((piece) => piece.id);
+    expect(colorable).toEqual(['wall-plaster']);
+    expect([...COLORABLE_WALL_PIECES]).toEqual(colorable);
+    for (const piece of WALL_PIECES) expect(isColorableWallPiece(piece)).toBe(colorable.includes(piece));
+  });
+
+  it('keeps the color an edit paints a colorable wall in, and drops it on any other edit of that post', () => {
+    const before = new Map([[3, '#112233'], [9, '#445566']]);
+    const after = withWallColors(before, [
+      { index: 5, piece: 'wall-plaster', color: '#abcdef' },
+      // Another piece, no color or the eraser: the post loses its color.
+      { index: 3, piece: 'wall-brick', color: '#000000' },
+      { index: 9, piece: null },
+      { index: 7, piece: 'wall-plaster' },
+    ]);
+    expect([...after].sort(([a], [b]) => a - b)).toEqual([[5, '#abcdef']]);
+    // The colors it was given stay as they were.
+    expect([...before]).toEqual([[3, '#112233'], [9, '#445566']]);
+  });
+
+  it('tells two runs of plaster in different colors apart: each closes its own edges and carries its color', () => {
+    const width = 6;
+    const height = 4;
+    const walls = new Array<string | null>(width * height).fill(null);
+    for (const tx of [1, 2, 3]) walls[2 * width + tx] = 'wall-plaster';
+    const colors = new Map([[2 * width + 1, '#aa0000'], [2 * width + 2, '#aa0000']]);
+    const frames = wallTileFrames({ width, height, walls, colors })
+      .filter(({ ty }) => ty === 2)
+      .map(({ tx, frame, color }) => [tx, frame, color]);
+    expect(frames).toEqual([
+      [1, 'faceStart', '#aa0000'],
+      [2, 'faceEnd', '#aa0000'],
+      [3, 'faceBoth', undefined],
+    ]);
+  });
+});
+
+describe('wall run edges', () => {
+  it('closes the left edge of the first wall of a run (Start), the right of the last (End), and both of a lone wall (Both)', () => {
+    const width = 8;
+    const height = 4;
+    const walls = new Array<string | null>(width * height).fill(null);
+    for (const tx of [1, 2, 3]) walls[2 * width + tx] = 'wall-stone';
+    walls[2 * width + 6] = 'wall-stone';
+    const faces = wallTileFrames({ width, height, walls })
+      .filter(({ ty }) => ty === 2)
+      .map(({ tx, frame }) => [tx, frame]);
+    expect(faces).toEqual([
+      [1, 'faceStart'],
+      [2, 'face'],
+      [3, 'faceEnd'],
+      [6, 'faceBoth'],
+    ]);
   });
 });

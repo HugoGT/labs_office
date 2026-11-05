@@ -18,13 +18,13 @@ import { tileAreaRect, type TileRect } from './terrainGrid';
  */
 export type TerrainBrush =
   | { readonly kind: 'floor'; readonly material: LayoutMaterial; readonly color?: string; readonly floor?: string }
-  | { readonly kind: 'wall'; readonly piece: WallPieceId | null };
+  | { readonly kind: 'wall'; readonly piece: WallPieceId | null; readonly color?: string };
 
 /** Whether two brushes paint the same thing (brushes are compared by value, not identity). */
 export function sameBrush(a: TerrainBrush | null | undefined, b: TerrainBrush | null | undefined): boolean {
   if (a == null || b == null) return (a ?? null) === (b ?? null);
   if (a.kind === 'floor') return b.kind === 'floor' && a.material === b.material && a.color === b.color && a.floor === b.floor;
-  return b.kind === 'wall' && a.piece === b.piece;
+  return b.kind === 'wall' && a.piece === b.piece && a.color === b.color;
 }
 
 /**
@@ -48,9 +48,9 @@ export interface TerrainEditCommand {
   previewWalls?: readonly WallEdit[];
   /** The outlines of every room and desk, drawn over the map like "Editar espacios" does (#216). A guide only. */
   outlines?: readonly TileRect[];
-  /** With the wall eraser: the posts a click would take a wall or a door from, which the box outlines in red (#241). */
+  /** With the eraser: the tiles walls stand on; the box takes the wall under the pointer, whole and in red (#241). */
   erasable?: readonly number[];
-  /** With the wall eraser: the footprint of every decor piece it takes by a tile under it, outlined whole in red over the post box. */
+  /** With the eraser: the tiles of every piece, door and window it takes by a tile under it, outlined whole in red, over any wall. */
   erasableDecor?: readonly TileRect[];
   /**
    * The browser's color picker of the picked floor's palette tile is open: the right rail stays on screen then (the
