@@ -119,8 +119,11 @@ jobs:
 
       # La capa `browser` corre contra Chromium real: Phaser no se puede ni
       # importar bajo jsdom, asi que sin este navegador esa capa no existe.
+      # Sin `--with-deps`: el runner ya trae las librerias de Chromium y ese
+      # flag solo agregaba fuentes CJK/tailandesas por apt, que con un mirror
+      # lento tardaba hasta 10 minutos por shard (38.9 kB/s).
       - name: Install Chromium for the browser test layer
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm exec playwright install chromium
 
       # Tres capas: `unit` (jsdom), `server` (Node, levanta un Colyseus real en
       # un puerto efimero) y `browser` (Chromium). `test:all` corre las tres.
@@ -162,9 +165,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # The E2E layers below drive two real Chromium clients.
+      # The E2E layers below drive two real Chromium clients. No `--with-deps`,
+      # as in the `tests` job: the runner already has Chromium's libraries.
       - name: Install Chromium for the E2E layers
-        run: pnpm exec playwright install --with-deps chromium
+        run: pnpm exec playwright install chromium
 
       - name: Typecheck
         run: pnpm typecheck
