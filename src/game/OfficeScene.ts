@@ -119,6 +119,7 @@ import {
   type OfficeConnection,
   type OfficeConnectionState,
 } from './officeRoomClient';
+import { decideRejoin } from './reconnectPolicy';
 import { createRemoteAvatarRegistry, type RemoteAvatarRegistry, type RemotePlayerSnapshot } from './remoteAvatars';
 import { createPhaserAvatarSink, type RemoteAvatarContainer } from './remoteAvatarSink';
 import { detectSpace, nearbyKey } from './proximity';
@@ -614,6 +615,8 @@ export class OfficeScene extends Phaser.Scene {
    * el HUD, y un humano nervioso pulsa el boton mas de una vez.
    */
   private reconnecting = false;
+  /** The next fresh join after a server restart (#276), while it waits. */
+  private rejoinTimer?: ReturnType<typeof setTimeout>;
   private connectionSettled = false;
   private entranceDenied = false;
   private initialSpaces = false;
@@ -909,26 +912,9 @@ export class OfficeScene extends Phaser.Scene {
       // sesiones para una persona son DOS avatares suyos en la oficina de los
       // demas -- la misma clase de fantasma que esta issue viene a quitar.
       if (this.reconnecting) return;
-      this.reconnecting = true;
-      // Se anuncia ANTES del `await` del join, no despues: entrar tarda lo que
-      // tarde la red, y durante ese rato el HUD seguiria pintando "Sin
-      // servidor" con su boton al lado, o sea, sin acuse de recibo de un clic
-      // que si hizo algo. Ademas es lo que retira el boton de en medio, que es
-      // la otra mitad de la guarda de arriba.
-      this.emitPresence('reconnecting');
-      // La conexion vieja se suelta sin esperarla: puede estar colgada contra
-      // un socket muerto, y bloquear el reintento en ella seria hacer que el
-      // boton no respondiese justo cuando la red esta mal.
-      void this.connection?.leave();
-      this.connection = undefined;
-      // Los avatares de la sesion anterior no sobreviven a la nueva, por la
-      // misma razon que en un resync: el join reparte los suyos y mezclarlos
-      // dejaria fantasmas que ningun `onRemove` va a retirar.
-      this.remotes?.clear();
-      this.roster?.clear();
-      void this.connectToOffice().finally(() => {
-        this.reconnecting = false;
-      });
+      // A click beats a rejoin still waiting for its turn (#276).
+      this.cancelRejoin();
+      void this.rejoinOffice();
     });
 
     // D4: unico bloque muerto en produccion de este archivo -- deja tanto el
@@ -1009,12 +995,75 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   /**
+   * Fresh join, dropping the old session (#52). No reutiliza la sesion caida
+   * -- de eso se encarga el envoltorio mientras le quedan intentos -- sino que
+   * entra de cero, que es lo unico que queda cuando el servidor ya solto el
+   * asiento. Resolves whether the office is connected again. `quiet` keeps a
+   * failure from announcing "Sin servidor", for a caller that will try again.
+   */
+  private async rejoinOffice(quiet = false): Promise<boolean> {
+    this.reconnecting = true;
+    // Se anuncia ANTES del `await` del join, no despues: entrar tarda lo que
+    // tarde la red, y durante ese rato el HUD seguiria pintando "Sin
+    // servidor" con su boton al lado, o sea, sin acuse de recibo de un clic
+    // que si hizo algo. Ademas es lo que retira el boton de en medio, que es
+    // la otra mitad de la guarda de `reconnecting`.
+    this.emitPresence('reconnecting');
+    // La conexion vieja se suelta sin esperarla: puede estar colgada contra
+    // un socket muerto, y bloquear el reintento en ella seria hacer que el
+    // boton no respondiese justo cuando la red esta mal.
+    void this.connection?.leave();
+    this.connection = undefined;
+    // Los avatares de la sesion anterior no sobreviven a la nueva, por la
+    // misma razon que en un resync: el join reparte los suyos y mezclarlos
+    // dejaria fantasmas que ningun `onRemove` va a retirar.
+    this.remotes?.clear();
+    this.roster?.clear();
+    try {
+      return await this.connectToOffice(quiet);
+    } finally {
+      this.reconnecting = false;
+    }
+  }
+
+  /**
+   * The server restarted (#276): its rooms and reconnection tokens are gone,
+   * so only a fresh join brings the office back. Each client waits a random
+   * share of `REJOIN_JITTER_MS` on top of the step, so the whole office does
+   * not hit the new server at once; a join that finds no server yet spends a
+   * step, and only the last one falls back to the retry button.
+   */
+  private scheduleRejoin(attempt: number): void {
+    this.cancelRejoin();
+    const decision = decideRejoin({ attempt, random: Math.random() });
+    if (decision.kind === 'give-up') {
+      this.emitPresence('offline');
+      return;
+    }
+    this.emitPresence('reconnecting');
+    // A window timer, not `this.time`: Phaser's clock stops with the render
+    // loop in a hidden tab, and a restart must recover there too.
+    this.rejoinTimer = setTimeout(() => {
+      this.rejoinTimer = undefined;
+      if (!this.alive || this.reconnecting) return;
+      void this.rejoinOffice(true).then((connected) => {
+        if (!connected && this.alive && this.connectionState !== 'denied') this.scheduleRejoin(attempt + 1);
+      });
+    }, decision.delayMs);
+  }
+
+  private cancelRejoin(): void {
+    if (this.rejoinTimer !== undefined) clearTimeout(this.rejoinTimer);
+    this.rejoinTimer = undefined;
+  }
+
+  /**
    * Conecta con el servidor de avatares reales (PRD 6.2). Un fallo NO es
    * fatal: la oficina se queda en solitario, sin nadie mas, y se avisa
    * por el puente. Cualquier otra cosa dejaria la pantalla en negro cada vez
    * que el servidor no este levantado, que en desarrollo es la mitad del rato.
    */
-  private async connectToOffice(): Promise<void> {
+  private async connectToOffice(quiet = false): Promise<boolean> {
     const generation = ++this.joinGeneration;
     const current = () => this.alive && generation === this.joinGeneration;
     const {
@@ -1030,7 +1079,7 @@ export class OfficeScene extends Phaser.Scene {
       this.emitPresence('offline');
       // Sin sesion Colyseus nunca se intenta LiveKit (matriz de degradacion, PRD 6.3).
       this.emitVoice(null, [], this.currentSpaceId);
-      return;
+      return false;
     }
 
     const joinedStatus = this.status;
@@ -1121,6 +1170,7 @@ export class OfficeScene extends Phaser.Scene {
           onLocalAvatar: (avatarId) => { if (current()) this.adoptLocalAvatar(avatarId); },
           onLocalSeat: (seat) => { if (current()) this.onLocalSeat(seat); },
           onResync: () => { if (current()) this.resyncAfterReconnect(); },
+          onServerRestart: () => { if (current()) this.scheduleRejoin(0); },
         },
       });
 
@@ -1129,7 +1179,7 @@ export class OfficeScene extends Phaser.Scene {
       // ya destruido.
       if (!current()) {
         void connection.leave();
-        return;
+        return false;
       }
 
       this.connection = connection;
@@ -1159,8 +1209,9 @@ export class OfficeScene extends Phaser.Scene {
       // Recomputed, never `currentSpaceId` (#185): that one comes from the
       // last tick, at the spawn, and the restored position may be elsewhere.
       this.proximityTick();
+      return true;
     } catch (error) {
-      if (!current()) return;
+      if (!current()) return false;
       this.localPositionReady = !(error instanceof OfficeAccessDeniedError);
       if (!this.localAvatarKnown) this.adoptLocalAvatar(null);
       // #129: a refused account is not a missing server. "Sin servidor" with
@@ -1170,8 +1221,9 @@ export class OfficeScene extends Phaser.Scene {
         this.entranceDenied = true;
         this.emitPresence('denied', error.reason);
       }
-      else this.emitPresence('offline');
+      else if (!quiet) this.emitPresence('offline');
       this.emitVoice(null, [], this.currentSpaceId);
+      return false;
     }
   }
 

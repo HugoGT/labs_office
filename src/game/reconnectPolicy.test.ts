@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { SESSION_REPLACED_CLOSE_CODE, SESSION_REVOKED_CLOSE_CODE } from './officeProtocol';
+import { SERVER_RESTART_CLOSE_CODE, SESSION_REPLACED_CLOSE_CODE, SESSION_REVOKED_CLOSE_CODE } from './officeProtocol';
 import {
   CONSENTED_CLOSE_CODE,
   DEVMODE_RESTART_CLOSE_CODE,
   RECONNECT_DELAYS_MS,
+  REJOIN_DELAYS_MS,
+  REJOIN_JITTER_MS,
+  decideRejoin,
   decideReconnect,
 } from './reconnectPolicy';
 
@@ -86,6 +89,44 @@ describe('decideReconnect', () => {
     expect(decideReconnect({ closeCode: 1006, attempt: RECONNECT_DELAYS_MS.length + 7 })).toEqual({
       kind: 'give-up',
     });
+  });
+});
+
+describe('decideReconnect: server restart (#276)', () => {
+  it('a server that restarts asks for a fresh join, never the dead token', () => {
+    // The process takes its rooms with it, so `client.reconnect` could only
+    // fail; the scene joins again instead.
+    expect(decideReconnect({ closeCode: SERVER_RESTART_CLOSE_CODE, attempt: 0 })).toEqual({ kind: 'rejoin' });
+  });
+
+  it('asks for a rejoin at any attempt, not a give-up', () => {
+    expect(decideReconnect({ closeCode: SERVER_RESTART_CLOSE_CODE, attempt: 99 })).toEqual({ kind: 'rejoin' });
+  });
+});
+
+describe('decideRejoin (#276)', () => {
+  it('waits the step of the attempt plus a random share of the jitter', () => {
+    expect(decideRejoin({ attempt: 0, random: 0 })).toEqual({ kind: 'retry', delayMs: REJOIN_DELAYS_MS[0] });
+    expect(decideRejoin({ attempt: 1, random: 0.5 })).toEqual({
+      kind: 'retry',
+      delayMs: REJOIN_DELAYS_MS[1]! + Math.floor(REJOIN_JITTER_MS / 2),
+    });
+  });
+
+  it('spreads the clients over the whole jitter so 60 of them do not land at once', () => {
+    const delays = [0, 0.25, 0.5, 0.75, 0.999].map((random) => decideRejoin({ attempt: 0, random }));
+    const spread = delays.map((d) => (d.kind === 'retry' ? d.delayMs : -1));
+    expect(new Set(spread).size).toBe(spread.length);
+    expect(Math.max(...spread) - Math.min(...spread)).toBeGreaterThan(REJOIN_JITTER_MS * 0.9);
+    expect(Math.max(...spread)).toBeLessThan(REJOIN_DELAYS_MS[0]! + REJOIN_JITTER_MS);
+  });
+
+  it('gives up after the last step, so a server that never comes back ends in the retry button', () => {
+    expect(decideRejoin({ attempt: REJOIN_DELAYS_MS.length, random: 0 })).toEqual({ kind: 'give-up' });
+  });
+
+  it('the first step leaves the new server time to boot', () => {
+    expect(REJOIN_DELAYS_MS[0]).toBeGreaterThanOrEqual(1000);
   });
 });
 

@@ -49,7 +49,9 @@ jobs:
   deploy:
     name: Build, push and deploy
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Mostly the wait for an empty office (#276): up to 300 minutes, under
+    # the 6 hour cap of a hosted job. The deploy itself takes about 15.
+    timeout-minutes: 340
 
     # El filtro que convierte "la CI acabo" en "la CI acabo bien". Las tres
     # condiciones son necesarias y ninguna sobra:
@@ -120,33 +122,6 @@ jobs:
       - name: Set up gcloud
         uses: google-github-actions/setup-gcloud@v2
 
-      # Since the office-hours schedule (infra/gcp/README.md, "VM schedule")
-      # the VM is stopped at night and on weekends. Started here, before the
-      # image builds, so it boots while they run. The hold comes first: it
-      # keeps the nightly job (same concurrency group, so never during this
-      # run) from stopping a VM that was just woken for a deploy someone may
-      # want to look at. Booting runs the startup script, which runs
-      # office-deploy with the previous tag; the deploy step below waits for it.
-      - name: Wake the VM if it is stopped
-        run: |
-          status="$(gcloud compute instances describe "${INSTANCE}" --zone "${ZONE}" --format='value(status)')"
-          echo "VM status: ${status}"
-          if [ "${status}" = "STOPPING" ]; then
-            for _ in $(seq 1 30); do
-              sleep 10
-              status="$(gcloud compute instances describe "${INSTANCE}" --zone "${ZONE}" --format='value(status)')"
-              [ "${status}" = "STOPPING" ] || break
-            done
-          fi
-          if [ "${status}" = "TERMINATED" ]; then
-            hold="$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ)"
-            gcloud compute instances add-metadata "${INSTANCE}" --zone "${ZONE}" --metadata "office-hold-until=${hold}"
-            gcloud compute instances start "${INSTANCE}" --zone "${ZONE}"
-            echo "started, held until ${hold}"
-          elif [ "${status}" != "RUNNING" ]; then
-            echo "::warning::VM is ${status}; the deploy step will try anyway"
-          fi
-
       - name: Log in to Artifact Registry
         run: gcloud auth configure-docker "${REGISTRY}" --quiet
 
@@ -213,6 +188,52 @@ jobs:
           tags: ${{ env.REGISTRY }}/${{ vars.GCP_PROJECT_ID }}/${{ env.REPOSITORY }}/web:${{ env.DEPLOY_SHA }}
           cache-from: type=gha,scope=web
           cache-to: type=gha,scope=web,mode=max
+
+      # The deploy window (#276). Recreating the server container drops
+      # everyone in the office and can cut a meeting, so the automatic deploy
+      # waits until /health reports nobody inside (tools/ci/deployWindow.ts).
+      # Right before the VM is touched, after the builds, so nobody walks in
+      # between the check and the deploy. A manual `workflow_dispatch` skips
+      # it: that is the way to ship something urgent. A VM that does not
+      # answer (stopped for the night) counts as empty.
+      - name: Set up Node
+        if: github.event_name == 'workflow_run'
+        uses: actions/setup-node@v7
+        with:
+          node-version: 24
+
+      - name: Wait for an empty office
+        if: github.event_name == 'workflow_run'
+        run: node tools/ci/waitForEmptyOffice.ts
+
+      # Since the office-hours schedule (infra/gcp/README.md, "VM schedule")
+      # the VM is stopped at night and on weekends. Started here, after the
+      # wait for an empty office and not before the image builds: the 20:00
+      # stop can land during that wait, and a VM woken earlier would be down
+      # again by the time the deploy needs it. The hold comes first: it
+      # keeps the nightly job (same concurrency group, so never during this
+      # run) from stopping a VM that was just woken for a deploy someone may
+      # want to look at. Booting runs the startup script, which runs
+      # office-deploy with the previous tag; the deploy step below waits for it.
+      - name: Wake the VM if it is stopped
+        run: |
+          status="$(gcloud compute instances describe "${INSTANCE}" --zone "${ZONE}" --format='value(status)')"
+          echo "VM status: ${status}"
+          if [ "${status}" = "STOPPING" ]; then
+            for _ in $(seq 1 30); do
+              sleep 10
+              status="$(gcloud compute instances describe "${INSTANCE}" --zone "${ZONE}" --format='value(status)')"
+              [ "${status}" = "STOPPING" ] || break
+            done
+          fi
+          if [ "${status}" = "TERMINATED" ]; then
+            hold="$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ)"
+            gcloud compute instances add-metadata "${INSTANCE}" --zone "${ZONE}" --metadata "office-hold-until=${hold}"
+            gcloud compute instances start "${INSTANCE}" --zone "${ZONE}"
+            echo "started, held until ${hold}"
+          elif [ "${status}" != "RUNNING" ]; then
+            echo "::warning::VM is ${status}; the deploy step will try anyway"
+          fi
 
       # El tag viaja como argumento hasta la VM; el fichero compose de alli lee
       # IMAGE_TAG de su .env y nadie lo edita a mano por SSH. Asi lo que corre

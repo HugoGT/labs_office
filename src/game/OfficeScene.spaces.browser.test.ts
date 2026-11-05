@@ -751,6 +751,83 @@ describe('OfficeScene: reconexion (issue #52)', () => {
 });
 
 /**
+ * A deploy restarts the server (#276): the session cannot be recovered with
+ * its token, so the scene joins again by itself, after a random wait, instead
+ * of leaving everyone on "Sin servidor" until they click.
+ */
+describe('OfficeScene: rejoin after a server restart (#276)', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('joins again on its own, dropping the old session and its avatars, without ever offering the button', async () => {
+    const bridge = createOfficeBridge();
+    const presence: OfficeEventMap['presence'][] = [];
+    const connector = fakeConnector();
+    const { scene } = await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    connector.handlers()!.onAdd(remoteSnapshot({ sessionId: 'de-antes-del-reinicio' }));
+    bridge.on('presence', (p) => presence.push(p));
+    // After the avatar: Phaser's canvas pool draws ids from Math.random.
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+
+    connector.handlers()!.onConnectionState!('reconnecting');
+    connector.handlers()!.onServerRestart!();
+
+    await vi.waitFor(() => expect(connector.connectCount()).toBe(2), LOOP_WAIT);
+    expect(connector.hasLeft()).toBe(true);
+    expect(findRemoteAvatars(scene)).toHaveLength(0);
+    await vi.waitFor(() => expect(presence.at(-1)?.state).toBe('connected'), LOOP_WAIT);
+    expect(presence.map((p) => p.state)).not.toContain('offline');
+  });
+
+  it('waits a random share of the jitter before joining, so the office does not arrive at once', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0.999);
+    const connector = fakeConnector();
+    await bootOfficeScene(createOfficeBridge(), { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+
+    connector.handlers()!.onServerRestart!();
+
+    // REJOIN_DELAYS_MS[0] + almost all of REJOIN_JITTER_MS: nearly 5 s.
+    await new Promise((resolve) => setTimeout(resolve, 2500));
+    expect(connector.connectCount()).toBe(1);
+  });
+
+  it('a join that still finds no server is tried again, not handed to the button', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const bridge = createOfficeBridge();
+    const presence: OfficeEventMap['presence'][] = [];
+    const connector = fakeConnector();
+    let joins = 0;
+    const connect: typeof connector.connect = (options) =>
+      ++joins === 2 ? Promise.reject(new Error('server still booting')) : connector.connect(options);
+    await bootOfficeScene(bridge, { endpoint: 'ws://fake', connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+    bridge.on('presence', (p) => presence.push(p));
+
+    connector.handlers()!.onServerRestart!();
+
+    await vi.waitFor(() => expect(joins).toBe(3), LOOP_WAIT);
+    await vi.waitFor(() => expect(presence.at(-1)?.state).toBe('connected'), LOOP_WAIT);
+    expect(presence.map((p) => p.state)).not.toContain('offline');
+  });
+
+  it('a game destroyed while waiting never joins again', async () => {
+    vi.spyOn(Math, 'random').mockReturnValue(0);
+    const connector = fakeConnector();
+    await bootOfficeScene(createOfficeBridge(), { endpoint: 'ws://fake', connect: connector.connect });
+    await vi.waitFor(() => expect(connector.handlers()).toBeDefined(), LOOP_WAIT);
+
+    connector.handlers()!.onServerRestart!();
+    destroyOfficeGames();
+
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    expect(connector.connectCount()).toBe(1);
+  });
+});
+
+/**
  * Modo edicion de layout (#74, PR3b): la escena solo sabe SI se esta
  * editando (para suspender claim/release) y delega el resto -- overlays,
  * ghost, pick/place -- en `LayoutEditLayer`, ya probado por su cuenta en

@@ -82,6 +82,14 @@ export const SESSION_REPLACED_CLOSE_CODE = 4100;
 export const SESSION_REVOKED_CLOSE_CODE = 4101;
 
 /**
+ * Close code of every session when the server shuts down on purpose, as a
+ * deploy does (#276). Colyseus' default is 4000, the consented leave, which
+ * the client never retries. This one tells it to join again on its own: the
+ * process is going away with its rooms, so the reconnection token dies too.
+ */
+export const SERVER_RESTART_CLOSE_CODE = 4102;
+
+/**
  * Code of a refused join (#129): `OfficeRoom.onAuth` throws a `ServerError`
  * with it, and colyseus.js 0.16 hands the client a `ServerError` carrying the
  * same `code` and `message`. The client tells it apart from a transport

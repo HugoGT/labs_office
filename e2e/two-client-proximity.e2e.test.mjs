@@ -13,6 +13,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  getOwnSessionId,
   openSidebar,
   searchSidebar,
   sidebarRosterNames,
@@ -143,6 +144,31 @@ test('S6: with no LiveKit reachable, both HUDs report audio unavailable and pres
   // while the S2 state (both online, mutually chipped) still holds.
   await waitForAudioUnavailable(pageA);
   await waitForAudioUnavailable(pageB);
+  await waitForOnlineCount(pageA, 1);
+  await waitForOnlineCount(pageB, 1);
+  await waitForPeerTileCount(pageA, 1);
+  await waitForPeerTileCount(pageB, 1);
+  assert.equal(pageErrorsA.length, 0, `pageA had unhandled errors: ${pageErrorsA.join(', ')}`);
+  assert.equal(pageErrorsB.length, 0, `pageB had unhandled errors: ${pageErrorsB.join(', ')}`);
+});
+
+test('S11: a server restart brings both clients back on their own, without a click (#276)', async () => {
+  const before = [await getOwnSessionId(pageA), await getOwnSessionId(pageB)];
+  assert.ok(before[0] && before[1], 'both clients have a session before the restart');
+
+  await harness.restartServer();
+
+  // A fresh join is a new session: the old one died with the process.
+  for (const [page, old] of [[pageA, before[0]], [pageB, before[1]]]) {
+    await page.waitForFunction(
+      (previous) => {
+        const id = window.__officeE2E?.lastVoice()?.selfSessionId;
+        return Boolean(id) && id !== previous;
+      },
+      old,
+      { timeout: 20000 },
+    );
+  }
   await waitForOnlineCount(pageA, 1);
   await waitForOnlineCount(pageB, 1);
   await waitForPeerTileCount(pageA, 1);

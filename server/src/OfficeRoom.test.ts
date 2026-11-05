@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, TILE, WORLD_H, WORLD_W } from '../../src/game/mapData.ts';
 import { detectSpace } from '../../src/game/proximity.ts';
 import {
+  SERVER_RESTART_CLOSE_CODE,
   SESSION_REPLACED_CLOSE_CODE,
   SESSION_REVOKED_CLOSE_CODE,
 } from '../../src/game/officeProtocol.ts';
@@ -2801,4 +2802,32 @@ describe('OfficeRoom: locked spaces', () => {
 
     expect(visitor.state.players.get(visitor.sessionId)?.seat).toBe('');
   }, 20_000);
+});
+
+/**
+ * A deploy recreates the server container (#276). Colyseus' default
+ * `onBeforeShutdown` closes with 4000, which every client reads as a leave it
+ * asked for, so nobody came back on their own.
+ */
+describe('OfficeRoom: server restart (#276)', () => {
+  it('closes every client with the restart code, not the consented one', async () => {
+    const ana = await join('Ana');
+    const beto = await join('Beto');
+    await waitFor(() => ana.state.players.size === 2);
+    const closed = [ana, beto].map((room) => new Promise<number>((resolve) => room.onLeave(resolve)));
+
+    await server.shutdown();
+
+    expect(await Promise.all(closed)).toEqual([SERVER_RESTART_CLOSE_CODE, SERVER_RESTART_CLOSE_CODE]);
+  });
+
+  it('releases the sessions at once instead of holding a reconnection window', async () => {
+    const ana = await join('Ana');
+    await waitFor(() => ana.state.players.size === 1);
+    const id = ana.sessionId;
+
+    await server.shutdown();
+
+    expect(server.sessions.has(id)).toBe(false);
+  });
 });
