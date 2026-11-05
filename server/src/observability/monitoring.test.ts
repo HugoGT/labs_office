@@ -57,6 +57,12 @@ describe('monitoring dashboard (#275)', () => {
     expect(queriesOf(/CPU por contenedor/).join()).toMatch(/sum by \(command\)[\s\S]*processes_cpu_time\{[^}]*instance_id="1234567890"/);
   });
 
+  it('shows the audio cut of crossing a door, p50 and p95 (#286)', () => {
+    const queries = queriesOf(/puerta/i).join();
+    expect(queries).toMatch(/histogram_quantile\(0\.5, sum by \(le\) \(rate\(office_media_switch_seconds_bucket\[\w+\]\)\)\)/);
+    expect(queries).toMatch(/histogram_quantile\(0\.95, sum by \(le\) \(rate\(office_media_switch_seconds_bucket\[\w+\]\)\)\)/);
+  });
+
   it('shows the disconnections clients reported, by reason', () => {
     expect(queriesOf(/desconexiones/i).join()).toContain('office_media_disconnections_total');
   });

@@ -135,7 +135,7 @@ export function accessDeniedReasonOf(raw: unknown): AccessDeniedReason {
  * `media` room message. Never who: the room counts these by kind and reason
  * and keeps neither the session nor the account that sent them.
  */
-export const MEDIA_EVENT_KINDS = ['connected', 'reconnected', 'disconnected'] as const;
+export const MEDIA_EVENT_KINDS = ['connected', 'reconnected', 'switched', 'disconnected'] as const;
 
 export type MediaEventKind = (typeof MEDIA_EVENT_KINDS)[number];
 
@@ -170,7 +170,12 @@ export type MediaDisconnectReason = (typeof MEDIA_DISCONNECT_REASONS)[number];
 export const MAX_MEDIA_EVENT_DURATION_MS = 5 * 60 * 1000;
 
 export type MediaEventMessage =
-  | { event: 'connected' | 'reconnected'; durationMs: number }
+  /**
+   * `switched` (#286): a move between LiveKit rooms (a door) took this long,
+   * from leaving the old room until the new one connected and the microphone
+   * that was on publishes again: the time nobody heard each other.
+   */
+  | { event: 'connected' | 'reconnected' | 'switched'; durationMs: number }
   | { event: 'disconnected'; reason: MediaDisconnectReason };
 
 /** The `media` message as the room accepts it, or `null` to drop it whole. */
@@ -180,7 +185,7 @@ export function mediaEventOf(raw: unknown): MediaEventMessage | null {
   if (event === 'disconnected') {
     return { event, reason: MEDIA_DISCONNECT_REASONS.find((known) => known === reason) ?? 'UNKNOWN_REASON' };
   }
-  if (event !== 'connected' && event !== 'reconnected') return null;
+  if (event !== 'connected' && event !== 'reconnected' && event !== 'switched') return null;
   const duration = typeof durationMs === 'number' && Number.isFinite(durationMs) && durationMs > 0 ? durationMs : 0;
   return { event, durationMs: Math.min(Math.round(duration), MAX_MEDIA_EVENT_DURATION_MS) };
 }

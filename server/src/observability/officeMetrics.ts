@@ -52,14 +52,33 @@ function header(name: string, type: string, help: string): string {
   return `# HELP ${name} ${help}\n# TYPE ${name} ${type}\n`;
 }
 
+/**
+ * Upper bounds, in seconds, of the room switch histogram (#286). A door
+ * should cost well under a second; past 10 s it is an outage, not a door.
+ */
+export const SWITCH_SECONDS_BUCKETS = [0.1, 0.25, 0.5, 1, 2, 5, 10] as const;
+
 export function createOfficeMetrics(): OfficeMetrics {
   const connectSeconds = new Map<string, { sum: number; count: number }>();
   const disconnections = new Map<string, number>();
+  // A histogram and not the summary above: the issue asks for p50 and p95,
+  // which a sum and a count cannot give.
+  const switchBuckets = SWITCH_SECONDS_BUCKETS.map(() => 0);
+  const switches = { sum: 0, count: 0 };
 
   return {
     recordMediaEvent(event) {
       if (event.event === 'disconnected') {
         disconnections.set(event.reason, (disconnections.get(event.reason) ?? 0) + 1);
+        return;
+      }
+      if (event.event === 'switched') {
+        const seconds = event.durationMs / 1000;
+        SWITCH_SECONDS_BUCKETS.forEach((bound, i) => {
+          if (seconds <= bound) switchBuckets[i] += 1;
+        });
+        switches.sum += seconds;
+        switches.count += 1;
         return;
       }
       const entry = connectSeconds.get(event.event) ?? { sum: 0, count: 0 };
@@ -83,6 +102,18 @@ export function createOfficeMetrics(): OfficeMetrics {
         text += sample('office_media_connect_seconds_sum', { event }, sum);
         text += sample('office_media_connect_seconds_count', { event }, count);
       }
+
+      text += header(
+        'office_media_switch_seconds',
+        'histogram',
+        'Audio cut clients reported when moving between LiveKit rooms (a door).',
+      );
+      SWITCH_SECONDS_BUCKETS.forEach((bound, i) => {
+        text += sample('office_media_switch_seconds_bucket', { le: String(bound) }, switchBuckets[i]);
+      });
+      text += sample('office_media_switch_seconds_bucket', { le: '+Inf' }, switches.count);
+      text += sample('office_media_switch_seconds_sum', {}, Math.round(switches.sum * 1000) / 1000);
+      text += sample('office_media_switch_seconds_count', {}, switches.count);
 
       text += header(
         'office_media_disconnections_total',

@@ -156,6 +156,11 @@ describe('mediaEventOf (#275)', () => {
     expect(mediaEventOf({ event: 'reconnected', durationMs: 2400 })).toEqual({ event: 'reconnected', durationMs: 2400 });
   });
 
+  it('keeps a room switch through a door with how long the audio was cut (#286)', () => {
+    expect(mediaEventOf({ event: 'switched', durationMs: 431.2 })).toEqual({ event: 'switched', durationMs: 431 });
+    expect(mediaEventOf({ event: 'switched', durationMs: -1 })).toEqual({ event: 'switched', durationMs: 0 });
+  });
+
   it('keeps a disconnection with a known LiveKit reason', () => {
     expect(mediaEventOf({ event: 'disconnected', reason: 'SIGNAL_CLOSE' })).toEqual({
       event: 'disconnected',
@@ -171,7 +176,7 @@ describe('mediaEventOf (#275)', () => {
     expect(mediaEventOf({ event: 'disconnected' })).toEqual({ event: 'disconnected', reason: 'UNKNOWN_REASON' });
   });
 
-  it('drops anything that is not one of the three events', () => {
+  it('drops anything that is not one of the known events', () => {
     expect(mediaEventOf(null)).toBeNull();
     expect(mediaEventOf('connected')).toBeNull();
     expect(mediaEventOf({ event: 'joined' })).toBeNull();

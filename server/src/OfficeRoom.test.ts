@@ -2852,6 +2852,14 @@ describe('OfficeRoom: media reports (#275)', () => {
     expect(server.metricsText()).toContain('office_media_connect_seconds_count{event="connected"} 1\n');
   });
 
+  it('keeps a room switch in the door histogram (#286)', async () => {
+    const ana = await join('Ana');
+    ana.send('media', { event: 'switched', durationMs: 300 });
+
+    await waitFor(() => server.metricsText().includes('office_media_switch_seconds_count 1\n'));
+    expect(server.metricsText()).toContain('office_media_switch_seconds_bucket{le="0.5"} 1\n');
+  });
+
   it('drops a report that is not one, and never keeps who sent it', async () => {
     const ana = await join('Ana');
     ana.send('media', { event: 'joined', name: 'Ana' });
