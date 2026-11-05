@@ -407,6 +407,7 @@ export function OfficeShell({
     camOn,
     audioAvailable,
     audioBlocked,
+    audioReconnecting,
     speakers,
     toggleMic,
     toggleCam,
@@ -880,6 +881,7 @@ export function OfficeShell({
         micOn={micOn}
         camOn={camOn}
         audioAvailable={audioAvailable}
+        audioReconnecting={audioReconnecting}
         recording={recording}
         room={place === null ? null : placeLabel(place)}
         presence={presence}
