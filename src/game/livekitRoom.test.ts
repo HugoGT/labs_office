@@ -1,7 +1,14 @@
 import { AudioPresets, ConnectionQuality, DisconnectReason, Room, RoomEvent } from 'livekit-client';
 import { describe, expect, it, vi } from 'vitest';
 import type { AttachableTrack } from './attachableTrack';
-import { connectLivekitRoom, createOfficeRoom, disconnectReaction } from './livekitRoom';
+import {
+  connectLivekitRoom,
+  createOfficeRoom,
+  createSharedMicrophone,
+  disconnectReaction,
+  releaseSharedMicrophone,
+  type SharedMicrophone,
+} from './livekitRoom';
 import { MEDIA_DISCONNECT_REASONS } from './officeProtocol';
 
 /**
@@ -1841,5 +1848,292 @@ describe('connectLivekitRoom: picking devices and surviving their loss (#284)', 
     expect(onDevicesChanged).not.toHaveBeenCalled();
     expect(onDeviceLost).not.toHaveBeenCalled();
     expect(room.switchActiveDevice).not.toHaveBeenCalled();
+  });
+});
+
+describe('one microphone capture across rooms (#286)', () => {
+  /** A local microphone track: live until stopped, like a `MediaStreamTrack`. */
+  function fakeMicTrack() {
+    const track = {
+      kind: 'audio',
+      source: 'microphone',
+      isMuted: false,
+      mediaStreamTrack: { readyState: 'live' as MediaStreamTrackState },
+      stop: vi.fn(() => {
+        track.mediaStreamTrack.readyState = 'ended';
+      }),
+      setDeviceId: vi.fn(async () => true),
+    };
+    return track;
+  }
+  type MicTrack = ReturnType<typeof fakeMicTrack>;
+
+  /**
+   * A room whose microphone behaves like livekit-client's: the first enable
+   * captures and publishes a track, later ones only unmute it; unpublishing
+   * stops the track unless told not to, and so does disconnecting.
+   */
+  function micRoom() {
+    const room = fakeRoom();
+    const publications = room.localParticipant.trackPublications;
+    const captured: MicTrack[] = [];
+    const microphone = () => Array.from(publications.values()).find((publication) => publication.source === 'microphone');
+    const publish = (track: MicTrack) => {
+      publications.set(`mic-${publications.size}`, fakePublication('audio', { source: 'microphone', track, isMuted: track.isMuted }));
+    };
+    const unpublish = (track: unknown, stop = true) => {
+      for (const [sid, publication] of publications) {
+        if (publication.track !== track) continue;
+        publications.delete(sid);
+        if (stop) (track as MicTrack).stop();
+      }
+    };
+    Object.assign(room.localParticipant, {
+      setMicrophoneEnabled: vi.fn(async (enabled: boolean) => {
+        const publication = microphone();
+        if (publication) {
+          publication.isMuted = !enabled;
+          (publication.track as MicTrack).isMuted = !enabled;
+          return;
+        }
+        if (!enabled) return;
+        const track = fakeMicTrack();
+        captured.push(track);
+        publish(track);
+      }),
+      publishTrack: vi.fn(async (track: MicTrack) => publish(track)),
+      unpublishTrack: vi.fn(async (track: unknown, stop?: boolean) => unpublish(track, stop)),
+    });
+    room.disconnect = vi.fn(async (stopTracks = true) => {
+      for (const publication of Array.from(publications.values())) unpublish(publication.track, stopTracks);
+    });
+    return { room, captured, microphone };
+  }
+
+  function connectWith(room: ReturnType<typeof fakeRoom>, microphone: SharedMicrophone) {
+    return connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      microphone,
+    });
+  }
+
+  it('the next room publishes the same capture: the microphone is never captured again at a door', async () => {
+    const shared = createSharedMicrophone();
+    const a = micRoom();
+    const b = micRoom();
+    const first = await connectWith(a.room, shared);
+    expect(await first.setMicrophoneEnabled(true)).toBe(true);
+    const [track] = a.captured;
+
+    await first.disconnect();
+    const second = await connectWith(b.room, shared);
+    expect(await second.setMicrophoneEnabled(true)).toBe(true);
+
+    expect(track.stop).not.toHaveBeenCalled();
+    expect(b.captured).toEqual([]);
+    expect(b.room.localParticipant.publishTrack).toHaveBeenCalledWith(track, { source: 'microphone' });
+    expect(b.microphone()?.track).toBe(track);
+    expect(a.microphone()).toBeUndefined();
+  });
+
+  it('a door while the microphone is still turning on keeps the capture for the next room', async () => {
+    const shared = createSharedMicrophone();
+    const a = micRoom();
+    const first = await connectWith(a.room, shared);
+
+    const on = first.setMicrophoneEnabled(true);
+    await first.disconnect();
+    await on;
+
+    expect(a.captured).toHaveLength(1);
+    expect(a.captured[0].stop).not.toHaveBeenCalled();
+    expect(a.microphone()).toBeUndefined();
+    const b = micRoom();
+    await (await connectWith(b.room, shared)).setMicrophoneEnabled(true);
+    expect(b.captured).toEqual([]);
+  });
+
+  it('a toggle queued behind a disconnect publishes nothing in the closed room', async () => {
+    const shared = createSharedMicrophone();
+    const a = micRoom();
+    const first = await connectWith(a.room, shared);
+
+    const closed = first.disconnect();
+    expect(await first.setMicrophoneEnabled(true)).toBe(false);
+    await closed;
+
+    expect(a.captured).toEqual([]);
+  });
+
+  it('a door leaves the room without unpublishing the microphone first, and still stops every other track', async () => {
+    const shared = createSharedMicrophone();
+    const a = micRoom();
+    const first = await connectWith(a.room, shared);
+    await first.setMicrophoneEnabled(true);
+    const camera = { kind: 'video', source: 'camera', stop: vi.fn(), detach: vi.fn() };
+    a.room.localParticipant.trackPublications.set('cam', fakePublication('video', { source: 'camera', track: camera }));
+
+    await first.disconnect();
+
+    expect(a.room.localParticipant.unpublishTrack).not.toHaveBeenCalled();
+    expect(a.room.disconnect).toHaveBeenCalledWith(false);
+    expect(camera.stop).toHaveBeenCalled();
+    expect(a.captured[0].stop).not.toHaveBeenCalled();
+    expect(shared.handOff).toBeNull();
+  });
+
+  it('a microphone muted in the old room is published in the new one only when turned on, and then unmuted', async () => {
+    const shared = createSharedMicrophone();
+    const a = micRoom();
+    const b = micRoom();
+    const first = await connectWith(a.room, shared);
+    await first.setMicrophoneEnabled(true);
+    await first.setMicrophoneEnabled(false);
+    await first.disconnect();
+
+    const second = await connectWith(b.room, shared);
+    expect(b.room.localParticipant.publishTrack).not.toHaveBeenCalled();
+
+    await second.setMicrophoneEnabled(true);
+    expect(b.microphone()?.track).toBe(a.captured[0]);
+    expect(b.microphone()?.isMuted).toBe(false);
+  });
+
+  it('a capture that already ended (a room LiveKit dropped stops it) is captured again, never published dead', async () => {
+    const shared = createSharedMicrophone();
+    const a = micRoom();
+    const b = micRoom();
+    const first = await connectWith(a.room, shared);
+    await first.setMicrophoneEnabled(true);
+    a.captured[0].stop();
+
+    const second = await connectWith(b.room, shared);
+    await second.setMicrophoneEnabled(true);
+
+    expect(b.room.localParticipant.publishTrack).not.toHaveBeenCalled();
+    expect(b.captured).toHaveLength(1);
+    expect(b.microphone()?.track).toBe(b.captured[0]);
+  });
+
+  it('releasing it stops the capture, so the system microphone indicator goes off', async () => {
+    const shared = createSharedMicrophone();
+    const a = micRoom();
+    const connection = await connectWith(a.room, shared);
+    await connection.setMicrophoneEnabled(true);
+    await connection.disconnect();
+
+    await releaseSharedMicrophone(shared);
+
+    expect(a.captured[0].stop).toHaveBeenCalled();
+    // Released: the next room captures a fresh one.
+    const b = micRoom();
+    await (await connectWith(b.room, shared)).setMicrophoneEnabled(true);
+    expect(b.captured).toHaveLength(1);
+  });
+
+  it('releasing it from the live room unpublishes and stops it ("No molestar"), and the room stays up', async () => {
+    const shared = createSharedMicrophone();
+    const a = micRoom();
+    const connection = await connectWith(a.room, shared);
+    await connection.setMicrophoneEnabled(true);
+
+    await connection.releaseMicrophone();
+
+    expect(a.microphone()).toBeUndefined();
+    expect(a.captured[0].stop).toHaveBeenCalled();
+    expect(a.room.disconnect).not.toHaveBeenCalled();
+    // Turned on again later: a new capture.
+    await connection.setMicrophoneEnabled(true);
+    expect(a.captured).toHaveLength(2);
+  });
+
+  it('a release waits for a microphone toggle in flight, so nothing is left captured behind it', async () => {
+    const shared = createSharedMicrophone();
+    const a = micRoom();
+    const connection = await connectWith(a.room, shared);
+
+    const on = connection.setMicrophoneEnabled(true);
+    const release = connection.releaseMicrophone();
+    await Promise.all([on, release]);
+
+    expect(a.captured).toHaveLength(1);
+    expect(a.captured[0].stop).toHaveBeenCalled();
+    expect(a.microphone()).toBeUndefined();
+  });
+
+  it('a microphone picked while it is published nowhere goes to the kept capture, which the next room publishes', async () => {
+    const shared = createSharedMicrophone();
+    const a = micRoom();
+    const first = await connectWith(a.room, shared);
+    await first.setMicrophoneEnabled(true);
+    await first.setMicrophoneEnabled(false);
+    await first.disconnect();
+    const b = micRoom();
+    const second = await connectWith(b.room, shared);
+
+    expect(await second.switchDevice('audioinput', 'usb-mic')).toBe(true);
+
+    expect(a.captured[0].setDeviceId).toHaveBeenCalledWith({ exact: 'usb-mic' });
+  });
+
+  it('without a shared microphone, disconnecting stops it as before', async () => {
+    const a = micRoom();
+    const connection = await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => a.room as unknown as Room,
+    });
+    await connection.setMicrophoneEnabled(true);
+
+    await connection.disconnect();
+
+    expect(a.captured[0].stop).toHaveBeenCalled();
+  });
+});
+
+describe('the kept microphone follows the picked device (#286, #284)', () => {
+  function keptTrack() {
+    return {
+      kind: 'audio',
+      mediaStreamTrack: { readyState: 'live' as MediaStreamTrackState },
+      stop: vi.fn(),
+      setDeviceId: vi.fn(async () => true),
+    };
+  }
+
+  function connectWith(microphone: SharedMicrophone, audioinput: string | null) {
+    return connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => fakeRoom() as unknown as Room,
+      microphone,
+      preferredDevices: { audioinput, audiooutput: null, videoinput: null },
+      listDevices: async () => [],
+      deviceEvents: null,
+    });
+  }
+
+  it('a door with the same microphone picked does not restart the capture', async () => {
+    const shared = createSharedMicrophone();
+    await connectWith(shared, 'usb-mic');
+    const track = keptTrack();
+    shared.track = track as unknown as SharedMicrophone['track'];
+
+    await connectWith(shared, 'usb-mic');
+
+    expect(track.setDeviceId).not.toHaveBeenCalled();
+  });
+
+  it('a microphone picked between two rooms moves the kept capture before the next room publishes it', async () => {
+    const shared = createSharedMicrophone();
+    await connectWith(shared, 'usb-mic');
+    const track = keptTrack();
+    shared.track = track as unknown as SharedMicrophone['track'];
+
+    await connectWith(shared, 'headset');
+
+    expect(track.setDeviceId).toHaveBeenCalledWith('headset');
   });
 });

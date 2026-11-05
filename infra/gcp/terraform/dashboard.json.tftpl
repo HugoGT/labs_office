@@ -244,6 +244,35 @@
             }
           }
         }
+      },
+      {
+        "xPos": 0,
+        "yPos": 80,
+        "width": 24,
+        "height": 16,
+        "widget": {
+          "title": "Corte de audio al cruzar una puerta, p50 y p95 (s)",
+          "xyChart": {
+            "dataSets": [
+              {
+                "timeSeriesQuery": {
+                  "prometheusQuery": "label_replace(histogram_quantile(0.5, sum by (le) (rate(office_media_switch_seconds_bucket[1h]))), \"percentil\", \"p50\", \"\", \"\")"
+                },
+                "plotType": "LINE"
+              },
+              {
+                "timeSeriesQuery": {
+                  "prometheusQuery": "label_replace(histogram_quantile(0.95, sum by (le) (rate(office_media_switch_seconds_bucket[1h]))), \"percentil\", \"p95\", \"\", \"\")"
+                },
+                "plotType": "LINE"
+              }
+            ],
+            "yAxis": {
+              "label": "segundos",
+              "scale": "LINEAR"
+            }
+          }
+        }
       }
     ]
   }

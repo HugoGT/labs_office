@@ -58,6 +58,40 @@ failure, blur), `src/game/livekitRoom.test.ts`,
 `src/hooks/useProximityAudio.test.ts` and the microphone switch scenario of
 `e2e/two-client-audio.e2e.test.mjs`.
 
+## Crossing a door (issue #286)
+
+Each space is its own LiveKit room (recording and the single share per space
+depend on it, #287), so a door still changes room. What it no longer does is
+capture the microphone again:
+
+- `useProximityAudio` owns one `SharedMicrophone` per visit
+  (`src/game/livekitRoom.ts`). The room left lets go of the track without
+  stopping it (`room.disconnect(false)`, every other track stopped by hand) and
+  the next room publishes the same track, then unmutes it. Only one room
+  publishes it at a time: a sender belongs to one peer connection.
+- Muting only mutes, as before. Leaving the office and entering "No molestar"
+  stop the capture (`releaseMicrophone`, `releaseSharedMicrophone`), so the
+  system microphone indicator goes off.
+- A capture LiveKit already stopped (a room lost for good) is captured again
+  instead of being published dead. A microphone picked while the capture is
+  published nowhere is applied to it before the next room publishes it.
+- The server still decides which room a token is for; nothing changed there.
+
+Measurement: each door reports `{ event: 'switched', durationMs }` (from
+leaving the old room until the new one is connected and the microphone that
+was on publishes again). The server keeps it in the
+`office_media_switch_seconds` histogram and the dashboard panel "Corte de
+audio al cruzar una puerta" shows its p50 and p95. Locally, with Chromium's
+fake microphone (a capture that costs nothing), both versions measured about
+150 ms p50 and 160 to 240 ms p95 over 30 doors each, so the gain on real
+hardware, where a capture costs more, has to be read on the deployed VM.
+
+Tests: `src/game/livekitRoom.browser.test.ts` (real LiveKit: same live track
+published and heard in the next room, nothing captured again, released on
+leaving and in "No molestar"), `src/game/livekitRoom.test.ts` and
+`src/hooks/useProximityAudio.test.ts` (fast doors leave one live room and one
+publishing room).
+
 ## Expected effect (estimate, not measured)
 
 - Audio: with about 3 people talking at once, `speech` saves
@@ -86,3 +120,7 @@ Run each step once before and once after deploying this profile, and fill the
 4. Recordings: start and stop a recording of a space with a share and audio
    from the dashboard and play the file from the bucket. Egress subscribes like
    any client, so `speech` and `contentHint` reach it unchanged.
+5. Door cut (#286): read p50 and p95 of the "Corte de audio al cruzar una
+   puerta" panel over a working day with only the measurement deployed
+   (commit `feat(audio): report the audio cut of each door crossed`), then
+   over a day with the shared microphone.

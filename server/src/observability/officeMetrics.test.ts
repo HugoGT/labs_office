@@ -47,6 +47,30 @@ describe('createOfficeMetrics', () => {
     expect(text).toContain('office_media_connect_seconds_count{event="reconnected"} 1\n');
   });
 
+  it('keeps room switches in a histogram, so the dashboard can show their p50 and p95 (#286)', () => {
+    const metrics = createOfficeMetrics();
+    metrics.recordMediaEvent({ event: 'switched', durationMs: 80 });
+    metrics.recordMediaEvent({ event: 'switched', durationMs: 400 });
+    metrics.recordMediaEvent({ event: 'switched', durationMs: 7000 });
+    metrics.recordMediaEvent({ event: 'switched', durationMs: 60_000 });
+    const text = metrics.render(empty);
+    expect(text).toContain('# TYPE office_media_switch_seconds histogram\n');
+    expect(text).toContain('office_media_switch_seconds_bucket{le="0.1"} 1\n');
+    expect(text).toContain('office_media_switch_seconds_bucket{le="0.5"} 2\n');
+    expect(text).toContain('office_media_switch_seconds_bucket{le="10"} 3\n');
+    expect(text).toContain('office_media_switch_seconds_bucket{le="+Inf"} 4\n');
+    expect(text).toContain('office_media_switch_seconds_sum 67.48\n');
+    expect(text).toContain('office_media_switch_seconds_count 4\n');
+    // Not mixed into the connect average: a switch is not a connection from scratch.
+    expect(text).not.toContain('office_media_connect_seconds_sum{event="switched"}');
+  });
+
+  it('renders the switch histogram empty before any switch, so its series exist from the start', () => {
+    const text = createOfficeMetrics().render(empty);
+    expect(text).toContain('office_media_switch_seconds_bucket{le="+Inf"} 0\n');
+    expect(text).toContain('office_media_switch_seconds_count 0\n');
+  });
+
   it('counts disconnections by their reason', () => {
     const metrics = createOfficeMetrics();
     metrics.recordMediaEvent({ event: 'disconnected', reason: 'SIGNAL_CLOSE' });

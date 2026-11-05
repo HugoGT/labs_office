@@ -21,6 +21,7 @@ import {
   Room,
   RoomEvent,
   Track,
+  type LocalAudioTrack,
   type LocalTrack,
   type LocalTrackPublication,
   type LocalVideoTrack,
@@ -89,6 +90,11 @@ export interface LivekitRoomConnection {
   setDesiredVideoPeers(sessionIds: readonly string[]): void;
   /** Devuelve el estado real: `false` si el dispositivo se deniega. */
   setMicrophoneEnabled(enabled: boolean): Promise<boolean>;
+  /**
+   * Unpublishes the microphone and stops its capture (#286), so the system's
+   * microphone indicator goes off: "No molestar". Muting keeps the capture.
+   */
+  releaseMicrophone(): Promise<void>;
   setCameraEnabled(enabled: boolean): Promise<boolean>;
   /**
    * The one place that changes the microphone, speaker or camera in use
@@ -231,6 +237,48 @@ export interface ConnectLivekitRoomOptions {
   onDeviceLost?: (kind: DeviceKind) => void;
   /** A device could not be turned on or switched to, and why (#284). */
   onDeviceFailed?: (kind: DeviceKind, failure: MediaFailure) => void;
+  /**
+   * The microphone capture to share with the rooms before and after this one
+   * (#286). Without it the microphone is captured per room, as before.
+   */
+  microphone?: SharedMicrophone;
+}
+
+/**
+ * The own microphone capture, kept across LiveKit rooms (#286). Each door
+ * changes room; capturing the microphone again there costs time and makes
+ * some headsets switch modes. Instead the room left unpublishes the track
+ * without stopping it and the next one publishes the same track. Only one
+ * room publishes it at a time: a sender belongs to one peer connection.
+ * Whoever owns it stops it with `releaseSharedMicrophone` when leaving the
+ * office or entering "No molestar".
+ */
+export interface SharedMicrophone {
+  /** The capture, or `null` before the first one and once released. */
+  track: LocalAudioTrack | null;
+  /** Unpublishes `track`, without stopping it, from the room publishing it; `null` when none does. */
+  handOff: (() => Promise<void>) | null;
+  /** The microphone last asked for in any room: a door with the same pick restarts nothing. */
+  deviceId: string | null;
+}
+
+export function createSharedMicrophone(): SharedMicrophone {
+  return { track: null, handOff: null, deviceId: null };
+}
+
+/** Stops the shared capture, after taking it out of the room publishing it. */
+export async function releaseSharedMicrophone(microphone: SharedMicrophone): Promise<void> {
+  const handOff = microphone.handOff;
+  microphone.handOff = null;
+  await handOff?.();
+  microphone.track?.stop();
+  microphone.track = null;
+}
+
+/** A capture LiveKit stopped (a room lost for good stops its tracks) cannot be published again. */
+function liveMicrophone(microphone: SharedMicrophone | undefined): LocalAudioTrack | null {
+  const track = microphone?.track ?? null;
+  return track && track.mediaStreamTrack.readyState !== 'ended' ? track : null;
 }
 
 /**
@@ -361,6 +409,7 @@ export async function connectLivekitRoom({
   onDevicesChanged,
   onDeviceLost,
   onDeviceFailed,
+  microphone,
 }: ConnectLivekitRoomOptions): Promise<LivekitRoomConnection> {
   const room = createRoom();
   const sink = createRemoteAudioSink(audioContainer);
@@ -428,7 +477,9 @@ export async function connectLivekitRoom({
       try {
         // Same publication, new capture (`sender.replaceTrack`): nobody
         // resubscribes (#288). A muted track only keeps the pick for its unmute.
-        return await room.switchActiveDevice(kind, deviceId, exact);
+        const switched = await room.switchActiveDevice(kind, deviceId, exact);
+        if (kind === 'audioinput') await moveKeptMicrophone(deviceId, exact);
+        return switched;
       } catch (err) {
         // livekit-client 2.22.3 stops the old capture before opening the new
         // one (`LocalTrack.restart`) and only rolls back its options, so a
@@ -444,6 +495,54 @@ export async function connectLivekitRoom({
     if (kind === 'audioinput') return serializeMicrophone(task);
     if (kind === 'videoinput') return serializeCamera(task);
     return task();
+  }
+
+  /**
+   * The room only moves the tracks it publishes: a kept capture published
+   * nowhere (#286) is moved here, or the next room would publish the old
+   * device. Only when the pick changed, since `setDeviceId` restarts the
+   * capture even for the same device.
+   */
+  async function moveKeptMicrophone(deviceId: string, exact: boolean): Promise<void> {
+    if (!microphone) return;
+    const kept = liveMicrophone(microphone);
+    if (kept && microphonePublication()?.track !== kept && microphone.deviceId !== deviceId) {
+      await kept.setDeviceId(exact ? { exact: deviceId } : deviceId);
+    }
+    microphone.deviceId = deviceId;
+  }
+
+  function microphonePublication(): TrackPublication | undefined {
+    return publicationsOf(room.localParticipant, Track.Source.Microphone)[0];
+  }
+
+  /** Takes the shared capture out of this room without stopping it (#286). */
+  async function handOffMicrophone(): Promise<void> {
+    if (microphone?.handOff === handOffMicrophone) microphone.handOff = null;
+    // Only the shared one: any other capture is this room's to stop.
+    const track = microphonePublication()?.track as LocalTrack | undefined;
+    if (track && track === microphone?.track) {
+      await room.localParticipant.unpublishTrack(track, false).catch(() => undefined);
+    }
+  }
+
+  /**
+   * Publishes the shared capture when there is a live one (#286), else
+   * captures as before; either way livekit-client then unmutes it.
+   */
+  async function enableMicrophone(): Promise<void> {
+    const kept = liveMicrophone(microphone);
+    if (microphone && kept && microphonePublication()?.track !== kept) {
+      const previous = microphone.handOff;
+      if (previous && previous !== handOffMicrophone) await previous();
+      await room.localParticipant.publishTrack(kept, { source: Track.Source.Microphone });
+    }
+    await room.localParticipant.setMicrophoneEnabled(true);
+    const track = microphonePublication()?.track as LocalAudioTrack | undefined;
+    if (!microphone || !track) return;
+    if (microphone.track !== track) microphone.track?.stop();
+    microphone.track = track;
+    microphone.handOff = handOffMicrophone;
   }
 
   /**
@@ -823,10 +922,14 @@ export async function connectLivekitRoom({
       reconcileKind(Track.Kind.Video);
     },
     setMicrophoneEnabled(enabled) {
+      // Asked after `disconnect`: a closed room publishes nothing. One asked
+      // before still runs, and `disconnect` hands its capture on after it.
+      if (closing) return Promise.resolve(false);
       return serializeMicrophone(async () => {
         ownMicrophoneCalls += 1;
         try {
-          await room.localParticipant.setMicrophoneEnabled(enabled);
+          if (enabled) await enableMicrophone();
+          else await room.localParticipant.setMicrophoneEnabled(false);
           // The permission just granted gives the devices their names.
           if (enabled) void refreshDevices();
           return enabled;
@@ -838,6 +941,14 @@ export async function connectLivekitRoom({
         } finally {
           ownMicrophoneCalls -= 1;
         }
+      });
+    },
+    releaseMicrophone() {
+      return serializeMicrophone(async () => {
+        if (microphone) await releaseSharedMicrophone(microphone);
+        // A capture of its own, without a shared one (or a leftover).
+        const track = microphonePublication()?.track as LocalTrack | undefined;
+        if (track) await room.localParticipant.unpublishTrack(track, true).catch(() => undefined);
       });
     },
     setCameraEnabled(enabled) {
@@ -933,7 +1044,34 @@ export async function connectLivekitRoom({
       closing = true;
       deviceEvents?.removeEventListener('devicechange', handleDeviceChange);
       sink.clear();
-      await room.disconnect();
+      // After a toggle in flight (#286): the capture it publishes may be the
+      // shared one, which goes on in the next room.
+      const kept = microphone
+        ? await serializeMicrophone(async () => (microphone.handOff === handOffMicrophone ? microphone.track : null))
+        : null;
+      if (!microphone || !kept) {
+        await room.disconnect();
+        return;
+      }
+      // Left without stopping its tracks: unpublishing the microphone first
+      // would cost a renegotiation at every door. Every other track is
+      // stopped here instead, as `disconnect()` would have.
+      const others = Array.from(room.localParticipant.trackPublications.values())
+        .map((publication) => publication.track as LocalTrack | undefined)
+        .filter((track): track is LocalTrack => track !== undefined && track !== kept);
+      const leaving = room.disconnect(false);
+      // Until the room let go of its sender, no other room may publish it.
+      const handOff = () => leaving;
+      microphone.handOff = handOff;
+      try {
+        await leaving;
+      } finally {
+        if (microphone.handOff === handOff) microphone.handOff = null;
+        for (const track of others) {
+          track.detach();
+          track.stop();
+        }
+      }
     },
   };
 }

@@ -1255,7 +1255,7 @@ Everything is GCP-native: no Prometheus or Grafana of our own.
 | Client reports | Each browser sends `connected` and `reconnected` with their duration and `disconnected` with the LiveKit reason, as the `media` room message. The server keeps counts by reason only: no session, account or name |
 | Connection quality | Shown to each user in the bottom bar, from LiveKit's `ConnectionQualityChanged` |
 | Scraping | `ops-agent.yaml`, metadata `office-ops-agent-config`, installed and configured by `office-deploy` on every deploy and boot. Never fatal: without it only the metrics are missing |
-| Dashboard | `google_monitoring_dashboard.office`: players per room, tracks, SFU Mbps, VM CPU, CPU per container, disk, recordings, disconnections by reason, connect time |
+| Dashboard | `google_monitoring_dashboard.office`: players per room, tracks, SFU Mbps, VM CPU, CPU per container, disk, recordings, disconnections by reason, connect time, audio cut at a door p50/p95 (`office_media_switch_seconds`, #286) |
 | Alerts | `terraform/monitoring.tf`: CPU above 85 % for 10 min; LiveKit uptime check failing 5 min while the VM runs (AND with the VM uptime, so the nightly stop is silent); disk above 85 % while a recording runs; a failed start of the VM in the audit log (#278, see *No capacity in the zone*) |
 | Who is notified | `alert_email` in `terraform.tfvars`. Empty: incidents only show in the console |
 

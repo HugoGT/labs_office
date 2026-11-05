@@ -11,8 +11,15 @@ import { Room, RoomEvent, Track, type LocalTrackPublication, type TrackProcessor
 
 const commands = (vitestBrowser as unknown as { commands: BrowserCommands }).commands;
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { LIVEKIT_ROOM_NAME } from './officeProtocol';
-import { connectLivekitRoom, type BlurProcessor, type ConnectLivekitRoomOptions, type LivekitRoomConnection } from './livekitRoom';
+import { LIVEKIT_ROOM_NAME, livekitRoomFor } from './officeProtocol';
+import {
+  connectLivekitRoom,
+  createSharedMicrophone,
+  releaseSharedMicrophone,
+  type BlurProcessor,
+  type ConnectLivekitRoomOptions,
+  type LivekitRoomConnection,
+} from './livekitRoom';
 
 /**
  * Necesita un LiveKit real levantado (`docker compose up -d redis livekit` en
@@ -369,5 +376,68 @@ describe.skipIf(!import.meta.env.VITE_LIVEKIT_E2E)('switching a device mid call 
     expect(processor.restarted.at(-1)?.getSettings().deviceId).toBe(target);
     // What leaves this machine is the processed track, never the raw camera.
     expect(before.track?.sender?.track).toBe(processor.processedTrack);
+  });
+});
+
+describe.skipIf(!import.meta.env.VITE_LIVEKIT_E2E)('crossing a door keeps the microphone capture (#286)', () => {
+  async function join(identity: string, roomName: string, options: Partial<ConnectLivekitRoomOptions> = {}) {
+    const token = await commands.mintLivekitToken(identity, roomName);
+    const room = new Room();
+    const connection = await connectLivekitRoom({ url: LIVEKIT_WS_URL, token, createRoom: () => room, ...options });
+    rooms.push(connection);
+    return { connection, room };
+  }
+
+  it('the next room publishes the same live capture, a listener there hears it, and nothing captured again', async () => {
+    const stamp = Date.now();
+    const space = livekitRoomFor(`door-${stamp}`);
+    const listener = new Room();
+    rawRooms.push(listener);
+    await listener.connect(LIVEKIT_WS_URL, await commands.mintLivekitToken(`listener-${stamp}`, space));
+    const heard = new Promise<MediaStreamTrack>((resolve) => {
+      listener.on(RoomEvent.TrackSubscribed, (track) => {
+        if (track.kind === Track.Kind.Audio) resolve(track.mediaStreamTrack);
+      });
+    });
+    const microphone = createSharedMicrophone();
+    const identity = `walker-${stamp}`;
+
+    const floor = await join(identity, LIVEKIT_ROOM_NAME, { microphone });
+    expect(await floor.connection.setMicrophoneEnabled(true)).toBe(true);
+    const captured = ownPublication(floor.room, 'audioinput').track!;
+    const getUserMedia = vi.spyOn(navigator.mediaDevices, 'getUserMedia');
+    try {
+      await floor.connection.disconnect();
+      const inside = await join(identity, space, { microphone });
+      expect(await inside.connection.setMicrophoneEnabled(true)).toBe(true);
+
+      expect(getUserMedia).not.toHaveBeenCalled();
+      const published = ownPublication(inside.room, 'audioinput');
+      expect(published.track).toBe(captured);
+      expect(published.isMuted).toBe(false);
+      expect(captured.mediaStreamTrack.readyState).toBe('live');
+      expect(captured.sender?.track).toBe(captured.mediaStreamTrack);
+      await expect(heard).resolves.toBeDefined();
+
+      // Leaving the office stops it: the system indicator goes off.
+      await inside.connection.disconnect();
+      await releaseSharedMicrophone(microphone);
+      expect(captured.mediaStreamTrack.readyState).toBe('ended');
+    } finally {
+      getUserMedia.mockRestore();
+    }
+  });
+
+  it('"No molestar" stops the capture and keeps the room', async () => {
+    const microphone = createSharedMicrophone();
+    const { connection, room } = await join(`dnd-${Date.now()}`, LIVEKIT_ROOM_NAME, { microphone });
+    expect(await connection.setMicrophoneEnabled(true)).toBe(true);
+    const captured = ownPublication(room, 'audioinput').track!;
+
+    await connection.releaseMicrophone();
+
+    expect(captured.mediaStreamTrack.readyState).toBe('ended');
+    expect(room.localParticipant.getTrackPublication(Track.Source.Microphone)).toBeUndefined();
+    expect(room.state).toBe('connected');
   });
 });
