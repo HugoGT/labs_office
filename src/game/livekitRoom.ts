@@ -15,6 +15,7 @@
  */
 
 import {
+  type AudioCaptureOptions,
   AudioPresets,
   ConnectionQuality,
   DisconnectReason,
@@ -377,8 +378,26 @@ export function createOfficeRoom(): Room {
     adaptiveStream: true,
     dynacast: true,
     publishDefaults: { audioPreset: AudioPresets.speech },
+    audioCaptureDefaults: OFFICE_AUDIO_CAPTURE,
   });
 }
+
+/**
+ * The browser's own voice processing, asked for explicitly (#285). These are
+ * livekit-client's defaults today; pinning them keeps an SDK upgrade from
+ * changing what every microphone sounds like. The evaluation found no
+ * measurement yet that justifies a custom noise processor: the decision and
+ * what would reopen it are in `docs/media-profile.md`. The capture keeps these
+ * constraints through device switches and doors: livekit-client restarts it
+ * with the constraints it was captured with, and the shared microphone (#286)
+ * is that same capture.
+ */
+export const OFFICE_AUDIO_CAPTURE: Readonly<AudioCaptureOptions> = Object.freeze({
+  echoCancellation: true,
+  noiseSuppression: true,
+  autoGainControl: true,
+  voiceIsolation: true,
+});
 
 export async function connectLivekitRoom({
   url,

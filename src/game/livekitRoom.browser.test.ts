@@ -14,6 +14,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LIVEKIT_ROOM_NAME, livekitRoomFor } from './officeProtocol';
 import {
   connectLivekitRoom,
+  createOfficeRoom,
   createSharedMicrophone,
   releaseSharedMicrophone,
   type BlurProcessor,
@@ -439,5 +440,50 @@ describe.skipIf(!import.meta.env.VITE_LIVEKIT_E2E)('crossing a door keeps the mi
     expect(captured.mediaStreamTrack.readyState).toBe('ended');
     expect(room.localParticipant.getTrackPublication(Track.Source.Microphone)).toBeUndefined();
     expect(room.state).toBe('connected');
+  });
+});
+
+describe.skipIf(!import.meta.env.VITE_LIVEKIT_E2E)('the browser voice processing reaches the shared microphone (#285)', () => {
+  async function join(identity: string, roomName: string, microphone: ReturnType<typeof createSharedMicrophone>) {
+    const token = await commands.mintLivekitToken(identity, roomName);
+    const room = createOfficeRoom();
+    const connection = await connectLivekitRoom({ url: LIVEKIT_WS_URL, token, createRoom: () => room, microphone });
+    rooms.push(connection);
+    return { connection, room };
+  }
+
+  function processing(track: MediaStreamTrack) {
+    const { echoCancellation, noiseSuppression, autoGainControl } = track.getSettings();
+    return { echoCancellation, noiseSuppression, autoGainControl };
+  }
+
+  const ON = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+
+  it('is on at capture, after a device switch and in the room behind a door', async () => {
+    const stamp = Date.now();
+    const microphone = createSharedMicrophone();
+    const identity = `voice-${stamp}`;
+
+    const floor = await join(identity, LIVEKIT_ROOM_NAME, microphone);
+    expect(await floor.connection.setMicrophoneEnabled(true)).toBe(true);
+    const captured = ownPublication(floor.room, 'audioinput').track!;
+    expect(processing(captured.mediaStreamTrack)).toEqual(ON);
+
+    // A switch restarts the capture: the new one must ask for the same processing.
+    const target = await otherDevice('audioinput', capturedDevice(floor.room, 'audioinput'));
+    expect(await floor.connection.switchDevice('audioinput', target)).toBe(true);
+    expect(processing(captured.mediaStreamTrack)).toEqual(ON);
+
+    await floor.connection.disconnect();
+    const inside = await join(identity, livekitRoomFor(`voice-${stamp}`), microphone);
+    expect(await inside.connection.setMicrophoneEnabled(true)).toBe(true);
+
+    const published = ownPublication(inside.room, 'audioinput').track!;
+    expect(published).toBe(captured);
+    expect(processing(published.mediaStreamTrack)).toEqual(ON);
+    expect(published.sender?.track).toBe(published.mediaStreamTrack);
+
+    await inside.connection.disconnect();
+    await releaseSharedMicrophone(microphone);
   });
 });
