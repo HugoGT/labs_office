@@ -35,6 +35,29 @@ Discarded for now:
 - Lower screen share bitrate: it is about 125 Mbps of the estimated egress,
   but cutting it trades away legibility, the first acceptance criterion.
 
+## Switching devices mid call (issue #288)
+
+A microphone or camera picked during a call keeps its publication: every
+switch goes through `switchDevice` in `src/game/livekitRoom.ts`, which calls
+`room.switchActiveDevice`. livekit-client restarts the capture and hands the
+new track to the same sender (`replaceTrack`), so subscribers keep receiving
+without resubscribing. Never unpublish and publish again to change a device:
+each subscriber would drop the track and subscribe to a new one.
+
+- Muted track: the pick waits for the next unmute; no capture opens.
+- Failed switch: livekit-client stops the old capture before opening the new
+  one, so `switchDevice` switches back to the previous device and reports the
+  failure. `useProximityAudio` then undoes the pick (shown, remembered and
+  carried to the next room).
+- Blurred camera: livekit-client restarts the processor on the new capture.
+- The pick lives in `useProximityAudio`, not in the room, so a door or a room
+  rebuild applies it again on connect.
+
+Tests: `src/game/livekitRoom.browser.test.ts` (real LiveKit: same sid, muted,
+failure, blur), `src/game/livekitRoom.test.ts`,
+`src/hooks/useProximityAudio.test.ts` and the microphone switch scenario of
+`e2e/two-client-audio.e2e.test.mjs`.
+
 ## Expected effect (estimate, not measured)
 
 - Audio: with about 3 people talking at once, `speech` saves
