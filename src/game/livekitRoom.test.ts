@@ -1,4 +1,4 @@
-import { ConnectionQuality, DisconnectReason, Room, RoomEvent } from 'livekit-client';
+import { AudioPresets, ConnectionQuality, DisconnectReason, Room, RoomEvent } from 'livekit-client';
 import { describe, expect, it, vi } from 'vitest';
 import type { AttachableTrack } from './attachableTrack';
 import { connectLivekitRoom, createOfficeRoom, disconnectReaction } from './livekitRoom';
@@ -105,6 +105,12 @@ describe('createOfficeRoom: bandwidth for a full space', () => {
     // SFU forwards every camera at its top simulcast layer to every viewer.
     expect(room.options.adaptiveStream).toBeTruthy();
     expect(room.options.dynacast).toBe(true);
+  });
+
+  it('publishes the microphone with the speech preset: half the bitrate of music, sturdier on a bad network (#281)', () => {
+    const room = createOfficeRoom();
+
+    expect(room.options.publishDefaults?.audioPreset).toEqual(AudioPresets.speech);
   });
 });
 
@@ -584,9 +590,38 @@ describe('setScreenShareEnabled (#20)', () => {
 
     await expect(connection.setScreenShareEnabled(true)).resolves.toBe(true);
 
-    expect(room.localParticipant.createScreenTracks).toHaveBeenCalledWith({ audio: true });
+    expect(room.localParticipant.createScreenTracks).toHaveBeenCalledWith(expect.objectContaining({ audio: true }));
     expect(room.localParticipant.publishTrack).toHaveBeenCalledWith(video, { name: 'screen_share#5' });
-    expect(room.localParticipant.publishTrack).toHaveBeenCalledWith(audio, { name: 'screen_share#5' });
+    expect(room.localParticipant.publishTrack).toHaveBeenCalledWith(
+      audio,
+      expect.objectContaining({ name: 'screen_share#5' }),
+    );
+  });
+
+  it('hints the capture as detail so the encoder keeps text sharp over frame rate (#281)', async () => {
+    const room = fakeRoom();
+    room.localParticipant.createScreenTracks.mockResolvedValueOnce([fakeLocalTrack('screen_share')]);
+    const connection = await connect(room, document.createElement('div'));
+
+    await connection.setScreenShareEnabled(true);
+
+    expect(room.localParticipant.createScreenTracks).toHaveBeenCalledWith({ audio: true, contentHint: 'detail' });
+  });
+
+  it('keeps the shared audio at the music preset: speech would muddy a shared video (#281)', async () => {
+    const room = fakeRoom();
+    const video = fakeLocalTrack('screen_share');
+    const audio = fakeLocalTrack('screen_share_audio');
+    room.localParticipant.createScreenTracks.mockResolvedValueOnce([video, audio]);
+    const connection = await connect(room, document.createElement('div'));
+
+    await connection.setScreenShareEnabled(true);
+
+    expect(room.localParticipant.publishTrack).toHaveBeenCalledWith(audio, {
+      name: 'screen_share#1',
+      audioPreset: AudioPresets.music,
+    });
+    expect(room.localParticipant.publishTrack).toHaveBeenCalledWith(video, { name: 'screen_share#1' });
   });
 
   it('sharing without audio publishes only the video: a valid state, not an error', async () => {

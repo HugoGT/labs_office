@@ -15,6 +15,7 @@
  */
 
 import {
+  AudioPresets,
   ConnectionQuality,
   DisconnectReason,
   Room,
@@ -260,8 +261,18 @@ function currentlySubscribed(room: Room, kind: TrackKind): string[] {
  * in a full space. Needs videos attached through `track.attach()`, which
  * `VideoTile` does.
  */
+/**
+ * The microphone uses the speech preset (24 kbps instead of the SDK's 48 kbps
+ * music default, #281): voice loses nothing audible and leaves more headroom
+ * on a bad network. Shared screen audio overrides it back to music, see
+ * `setScreenShareEnabled`. Every value and its reason: `docs/media-profile.md`.
+ */
 export function createOfficeRoom(): Room {
-  return new Room({ adaptiveStream: true, dynacast: true });
+  return new Room({
+    adaptiveStream: true,
+    dynacast: true,
+    publishDefaults: { audioPreset: AudioPresets.speech },
+  });
 }
 
 export async function connectLivekitRoom({
@@ -701,7 +712,9 @@ export async function connectLivekitRoom({
       try {
         // `audio: true` only OFFERS the checkbox: without it the capture is
         // video alone, which is a normal share and not a failure.
-        tracks = await room.localParticipant.createScreenTracks({ audio: true });
+        // `detail` (#281): the usual share is a document, so the encoder
+        // keeps resolution and drops frame rate under pressure.
+        tracks = await room.localParticipant.createScreenTracks({ audio: true, contentHint: 'detail' });
       } catch {
         return false;
       }
@@ -711,7 +724,15 @@ export async function connectLivekitRoom({
       // outranked by this one, which is the later one.
       const name = screenShareTrackName(nextScreenShareClaim(screenShareClaims()));
       try {
-        await Promise.all(tracks.map((track) => room.localParticipant.publishTrack(track, { name })));
+        // A shared video's soundtrack is not speech: keep the music preset.
+        await Promise.all(
+          tracks.map((track) =>
+            room.localParticipant.publishTrack(
+              track,
+              track.kind === Track.Kind.Audio ? { name, audioPreset: AudioPresets.music } : { name },
+            ),
+          ),
+        );
         return true;
       } catch {
         for (const track of tracks) track.stop();

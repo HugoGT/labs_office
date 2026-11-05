@@ -31,6 +31,18 @@ rtc:
   # en localhost no hay nada que descubrir.
   use_external_ip: true
 
+  # Publication and congestion profile (#281, docs/media-profile.md). With
+  # allow_pause the SFU pauses a subscriber's video when even its lowest layer
+  # no longer fits, instead of letting it starve that subscriber's audio.
+  congestion_control:
+    enabled: true
+    allow_pause: true
+
+# Safety brake per room (#281), above the expected peak of 60 people in the
+# whole office, so it only ever stops a runaway, never a real meeting.
+room:
+  max_participants: 80
+
 # Control channel with Egress (issue #5): LiveKit hands recording requests to
 # Egress through Redis, and without this section every start fails. Redis is
 # published on the VM loopback only (docker-compose.yml), never outside it.
