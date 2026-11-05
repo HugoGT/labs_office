@@ -10,14 +10,14 @@ import styles from './TerrainPalette.module.css';
 import { ColorableTile } from './ColorableTile';
 
 /**
- * The palettes of the terrain editor. Floors: one entry per terrain
- * material, each with a thumbnail cut from its pack floor, then the void as
- * an eraser; carpet also carries a color input (#222), like the painted
- * desk's tile in the decor palette. Walls: one picture-only tile per wall
- * piece, cut from its pack sheet and named by its tooltip, like the decor
- * palette's, then the wall eraser. Presentational: the editor owns which
- * entry is picked (one across every palette) and what a click on the map
- * does with it.
+ * The palette of the terrain editor, and the wall pieces of the decor one.
+ * Floors: one entry per terrain material, each with a thumbnail cut from its
+ * pack floor, then the void as an eraser; carpet also carries a color input
+ * (#222), like the painted desk's tile in the decor palette. Walls: one
+ * picture-only tile per wall piece, cut from its pack sheet and named by its
+ * tooltip, which join the doors and windows in the decor palette's «Paredes»,
+ * and the eraser. Presentational: the editor owns which entry is picked (one
+ * across every palette) and what a click on the map does with it.
  *
  * An approved uploaded floor (S13) is an entry too, after the built-in floors
  * and before the eraser: it paints wood with that piece over it, so it has
@@ -134,7 +134,7 @@ export const WALL_PIECE_LABELS: Readonly<Record<WallPieceId, string>> = {
   'wall-plaster': 'Yeso',
 };
 
-/** The wall eraser says only this, in its text, its tooltip and its accessible name (#223). */
+/** The eraser says only this, in its text, its tooltip and its accessible name (#223). */
 export const WALL_ERASER_LABEL = 'Borrador';
 
 /** The sign before the eraser's word (Unicode has no eraser emoji): decorative, the word names the button. */
@@ -163,7 +163,7 @@ export interface WallPaletteProps {
 export function WallPalette({ value, onPick, walls, disabled = false, preview }: WallPaletteProps) {
   const pressed = (piece: WallPieceId): boolean => value?.kind === 'wall' && value.piece === piece;
   return (
-    <div className={styles.palette} role="group" aria-label="Paredes">
+    <>
       {WALL_PIECES.map((piece) => {
         const option = walls?.find((candidate) => candidate.id === piece);
         const label = WALL_PIECE_LABELS[piece];
@@ -187,7 +187,7 @@ export function WallPalette({ value, onPick, walls, disabled = false, preview }:
           </button>
         );
       })}
-    </div>
+    </>
   );
 }
 
@@ -200,8 +200,9 @@ export interface WallEraserProps {
 }
 
 /**
- * The wall eraser, one small button of its own (#223): it sits on its own
- * line above «Múltiple», not among the walls, with «⛔ Borrador» for all its words.
+ * The eraser, one small button of its own (#223): it sits on its own line
+ * above «Múltiple», not among the walls, with «⛔ Borrador» for all its words.
+ * It takes anything of "Decoración": pieces, doors, windows and walls.
  */
 export function WallEraser({ value, onPick, disabled = false }: WallEraserProps) {
   return (

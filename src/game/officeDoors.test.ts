@@ -7,6 +7,7 @@ import {
   DOOR_SWING_MS,
   decorPieceTurns,
   doorEndPosts,
+  doorOwnRect,
   doorsLeftOffWall,
   doorFarSide,
   doorHingeStops,
@@ -27,6 +28,7 @@ import {
   keptSwings,
   moveDoors,
   openDoorLeaves,
+  wallEraseOf,
   wallTilesAfter,
   withReplacedDoors,
 } from './officeDoors';
@@ -168,6 +170,52 @@ describe('officeDoors: doors and windows in tile walls (tile walls, S7-S10)', ()
     expect(wallTilesAfter(ground, [door(3, 3, 0)])).toBe(wallTiles);
     const closed = wallTilesAfter(ground, []);
     expect([at(3, 2), at(3, 3), at(3, 4)].map((tile) => closed[tile])).toEqual([true, true, true]);
+  });
+});
+
+describe('officeDoors: what erasing a wall takes with it', () => {
+  it('takes nothing else from a wall no door needs, and nothing at all from a tile without a wall', () => {
+    expect(wallEraseOf([door(3, 3)], grid, at(7, 3))).toEqual({ doors: [], posts: [at(7, 3)] });
+    expect(wallEraseOf([door(3, 3)], grid, at(7, 7))).toEqual({ doors: [], posts: [] });
+  });
+
+  it('takes the door or window a post at either end holds, and the wall tiles it spans: 2, or 3 for a double door', () => {
+    expect(wallEraseOf([door(3, 3)], grid, at(2, 3))).toEqual({ doors: [at(3, 3)], posts: [at(2, 3), at(3, 3), at(4, 3)] });
+    expect(wallEraseOf([windowAt(3, 3)], grid, at(5, 3))).toEqual({ doors: [at(3, 3)], posts: [at(5, 3), at(3, 3), at(4, 3)] });
+    expect(wallEraseOf([doubleDoor(3, 3)], grid, at(6, 3))).toEqual({ doors: [at(3, 3)], posts: [at(6, 3), at(3, 3), at(4, 3), at(5, 3)] });
+  });
+
+  it('takes both doors of a post they share, and leaves one whose posts all stay', () => {
+    expect(wallEraseOf([door(2, 3), door(5, 3)], grid, at(4, 3))).toEqual({ doors: [at(2, 3), at(5, 3)], posts: [at(4, 3), at(2, 3), at(3, 3), at(5, 3), at(6, 3)] });
+    expect(wallEraseOf([door(2, 3), door(5, 3)], grid, at(1, 3))).toEqual({ doors: [at(2, 3)], posts: [at(1, 3), at(2, 3), at(3, 3)] });
+  });
+
+  it('follows a door whose span held the post of the next one', () => {
+    expect(wallEraseOf([door(2, 3), door(4, 3)], grid, at(1, 3))).toEqual({ doors: [at(2, 3), at(4, 3)], posts: [at(1, 3), at(2, 3), at(3, 3), at(4, 3), at(5, 3)] });
+  });
+
+  it('takes a vertical door when the wall erased was the last of the face below it', () => {
+    const short = wallGrid([3, 4, 5, 6].map((ty) => [2, ty] as const));
+    expect(doorOnWall(short, door(2, 4, 90))).toBe(true);
+    expect(wallEraseOf([door(2, 4, 90)], short, at(2, 6))).toEqual({ doors: [at(2, 4)], posts: [at(2, 6), ...doorTiles(door(2, 4, 90), WIDTH)] });
+  });
+
+  it('takes a stored door already off its wall too: the room keeps every post it names', () => {
+    const broken = wallGrid([[2, 3]]);
+    expect(doorOnWall(broken, door(3, 3))).toBe(false);
+    expect(wallEraseOf([door(3, 3)], broken, at(2, 3))).toEqual({ doors: [at(3, 3)], posts: [at(2, 3)] });
+  });
+
+  it('never counts a chair', () => {
+    expect(wallEraseOf([{ index: at(2, 3), piece: 'chair-office', rotation: 0 }], grid, at(2, 3))).toEqual({ doors: [], posts: [at(2, 3)] });
+  });
+});
+
+describe('officeDoors: the tiles of a door the eraser takes it by', () => {
+  it('is the wall column of its span across a horizontal run, and only its own tiles in a vertical one', () => {
+    expect(doorOwnRect(door(3, 3), WIDTH)).toEqual({ x: 3, y: 2, w: 2, h: 3 });
+    expect(doorOwnRect(doubleDoor(3, 3), WIDTH)).toEqual({ x: 3, y: 2, w: 3, h: 3 });
+    expect(doorOwnRect(door(11, 4, 90), WIDTH)).toEqual({ x: 11, y: 4, w: 1, h: doorSpan(door(11, 4, 90)) });
   });
 });
 

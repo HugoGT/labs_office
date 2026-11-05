@@ -4,8 +4,10 @@
  * into a pick: with a floor the cell is a 9x9 block and the pick a
  * `terrainpick`, with a wall (or the wall eraser) it is the nearest grid
  * vertex (a wall post stands on the line between tiles) and a `wallpick`,
- * with the tile under the pointer. Over a decor piece the eraser would take,
- * the box outlines the whole piece instead of the post. Holding the primary button down and dragging keeps reporting
+ * with the tile under the pointer. A picked wall shows the three tiles it
+ * would cover. The eraser's box is one tile, and over what a click would take
+ * it outlines all of it in red: a piece, a door, a window or the three tiles of
+ * a wall. Holding the primary button down and dragging keeps reporting
  * every cell the stroke crosses, so a large area or a long wall is one
  * gesture instead of a click per cell. Same split as `LayoutEditLayer`: the
  * layer draws and reports pointer facts, React decides. Pending paints are
@@ -19,7 +21,7 @@ import { LAYOUT_GHOST_DEPTH } from './depthLayers';
 import { WALL } from './artContract';
 import { TILE } from './mapData';
 import type { OfficeBridge } from './officeBridge';
-import { BLOCK_TILES, type OfficeLayout } from './officeLayout';
+import { BLOCK_TILES, wallPostTiles, wallPostUnder, type OfficeLayout } from './officeLayout';
 import { ContextOutlines } from './spaceOutline';
 import type { TerrainGhost } from './TerrainGhost';
 import { cellOutlineCenter, cellsAlongStroke, postsAlongStroke, sameBrush, type StrokeGrid, type TerrainBrush, type TerrainEditCommand } from './terrainEditor';
@@ -41,10 +43,8 @@ export class TerrainEditLayer {
   /** Draws the picked floor over the block under the pointer; absent in a scene without a map to draw it on. */
   private readonly ghost: TerrainGhost | undefined;
   private hover: Phaser.GameObjects.Rectangle | null = null;
-  /** The cell the box outlines, or `null` while it is hidden. */
-  private hovered: number | null = null;
-  /** The decor piece the eraser box outlines whole instead of the post, or `null`. */
-  private hoveredDecor: TileRect | null = null;
+  /** What a click of the eraser would take, which its box outlines whole, or `null`. */
+  private hoveredTarget: TileRect | null = null;
   /** World point of the last pointer move, so a new command redraws the box under a still pointer. */
   private pointer: { x: number; y: number } | null = null;
   private erasable: ReadonlySet<number> = new Set();
@@ -134,15 +134,13 @@ export class TerrainEditLayer {
     if (command === null) {
       this.hover?.destroy();
       this.hover = null;
-      this.hovered = null;
-      this.hoveredDecor = null;
+      this.hoveredTarget = null;
       this.ghost?.hide();
       return;
     }
     if (command.brush === null) {
       this.hover?.setVisible(false);
-      this.hovered = null;
-      this.hoveredDecor = null;
+      this.hoveredTarget = null;
       this.ghost?.hide();
       return;
     }
@@ -164,9 +162,7 @@ export class TerrainEditLayer {
   /** Red while the eraser points at something it would take, the usual color otherwise. */
   private colorHover(): void {
     if (this.hover === null) return;
-    const brush = this.command?.brush;
-    const erases = brush?.kind === 'wall' && brush.piece === null && (this.hoveredDecor !== null || (this.hovered !== null && this.erasable.has(this.hovered)));
-    this.hover.setStrokeStyle(STROKE_WIDTH, erases ? HOVER_ERASE_COLOR : HOVER_STROKE_COLOR);
+    this.hover.setStrokeStyle(STROKE_WIDTH, this.hoveredTarget !== null ? HOVER_ERASE_COLOR : HOVER_STROKE_COLOR);
   }
 
   private updateHover(): void {
@@ -175,16 +171,15 @@ export class TerrainEditLayer {
     const [index] = cellsAlongStroke(grid, null, this.pointer);
     if (index === undefined) {
       this.hover?.setVisible(false);
-      this.hovered = null;
-      this.hoveredDecor = null;
+      this.hoveredTarget = null;
       this.ghost?.hide();
       return;
     }
-    this.hovered = index;
-    this.hoveredDecor = this.decorUnderPointer();
-    const rect = this.hoveredDecor;
-    // A wall covers the tile it is placed on plus the ones above and below: the box shows all of it.
-    const tall = this.command.brush.kind === 'wall' ? WALL.heightTiles : 1;
+    this.hoveredTarget = this.decorUnderPointer() ?? this.wallUnderPointer(index);
+    const rect = this.hoveredTarget;
+    // A wall covers the tile it is placed on plus the ones above and below: the box shows all of it. The eraser paints nothing.
+    const brush = this.command.brush;
+    const tall = brush.kind === 'wall' && brush.piece !== null ? WALL.heightTiles : 1;
     const width = rect === null ? grid.cellSize : (rect.x1 - rect.x0 + 1) * TILE;
     const height = rect === null ? grid.cellSize * tall : (rect.y1 - rect.y0 + 1) * TILE;
     this.hover ??= this.scene.add
@@ -214,6 +209,18 @@ export class TerrainEditLayer {
       if (best === null || areaOf(rect) < areaOf(best)) best = rect;
     }
     return best;
+  }
+
+  /** With the eraser, the three tiles of the wall a click on `tile` would take (`wallPostUnder`), or `null`. */
+  private wallUnderPointer(tile: number): TileRect | null {
+    const brush = this.command?.brush;
+    if (brush?.kind !== 'wall' || brush.piece !== null) return null;
+    const map = { width: this.wallTiles.columns, height: this.wallTiles.rows };
+    const post = wallPostUnder(map, tile, (index) => this.erasable.has(index));
+    if (post === null) return null;
+    const tiles = wallPostTiles(map, post);
+    const tx = post % map.width;
+    return { x0: tx, y0: Math.floor(tiles[0]! / map.width), x1: tx, y1: Math.floor(tiles.at(-1)! / map.width) };
   }
 }
 

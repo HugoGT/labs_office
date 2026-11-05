@@ -185,8 +185,9 @@ describe('WallPalette', () => {
   it('offers every wall by its Spanish name, as title and accessible name but no text, and no eraser, none pressed while a floor or nothing is picked', () => {
     const { rerender } = render(<WallPalette value={null} onPick={() => {}} walls={catalog.wall} preview={noPreview()} />);
 
-    const group = screen.getByRole('group', { name: 'Paredes' });
-    const buttons = Array.from(group.querySelectorAll('button'));
+    // Only the tiles: the palette they join names and lays out the group.
+    expect(screen.queryByRole('group')).not.toBeInTheDocument();
+    const buttons = screen.getAllByRole('button');
     expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual(WALL_NAMES);
     expect(buttons.map((button) => button.getAttribute('title'))).toEqual(WALL_NAMES);
     expect(buttons.map((button) => button.textContent)).toEqual(WALL_NAMES.map(() => ''));

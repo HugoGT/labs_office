@@ -38,6 +38,7 @@ import {
   wallColliderRects,
   wallFootprintRects,
   wallPostTiles,
+  wallPostUnder,
   wallStretches,
   wallTileFrames,
   wallOpeningHiddenTiles,
@@ -894,6 +895,17 @@ describe('terrain walls', () => {
     expect(wallPostTiles(grid, 2 * 6 + 3)).toEqual([1 * 6 + 3, 2 * 6 + 3, 3 * 6 + 3]);
     expect(wallPostTiles(grid, 3)).toEqual([3, 6 + 3]);
     expect(wallPostTiles(grid, 4 * 6 + 2)).toEqual([3 * 6 + 2, 4 * 6 + 2]);
+  });
+
+  it('names the wall the eraser takes from a tile: the one standing on it, else the one above, else below, and none off the map', () => {
+    const grid = { width: 6, height: 5 };
+    const on = (...walls: number[]) => (index: number): boolean => walls.includes(index);
+    expect(wallPostUnder(grid, 15, on(9, 15, 21))).toBe(15);
+    expect(wallPostUnder(grid, 15, on(9, 21))).toBe(9);
+    expect(wallPostUnder(grid, 15, on(21))).toBe(21);
+    expect(wallPostUnder(grid, 15, on(16))).toBeNull();
+    expect(wallPostUnder(grid, 3, on(-3))).toBeNull();
+    expect(wallPostUnder(grid, 27, on(33))).toBeNull();
   });
 
   it('finds the tile under a world point', () => {

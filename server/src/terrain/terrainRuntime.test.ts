@@ -1101,6 +1101,19 @@ describe('createTerrainRuntime doors and windows in tile walls (#223, #233, S6-S
     expect(runtime.snapshot().openings).toEqual([{ axis: 'horizontal', tx: 66, ty: 22, span: 2, inset: 10 }]);
   });
 
+  it('lets a wall a door needs go, with the tiles the door spans, once the door has left: the order the eraser sends them in', async () => {
+    const runtime = runtimeWith(createMemoryTerrain([], WALL));
+    await runtime.load();
+    await runtime.setDecor([{ index: at(66, 22), item: DOOR }], null);
+
+    await runtime.setDecor([{ index: at(66, 22), item: null }], null);
+    await runtime.setWalls([65, 66, 67].map((tx) => ({ index: at(tx, 22), piece: null })), null, NONE);
+
+    for (const tx of [65, 66, 67]) expect(runtime.walls()[at(tx, 22)]).toBeNull();
+    expect(runtime.walls()[at(68, 22)]).not.toBeNull();
+    expect(runtime.snapshot().openings).toEqual([]);
+  });
+
   it('repaints the walls a door stands in and keeps the door open, but refuses a new wall in its doorway', async () => {
     const store = createMemoryTerrain([], WALL);
     const runtime = runtimeWith(store);

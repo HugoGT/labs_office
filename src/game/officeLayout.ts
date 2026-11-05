@@ -782,6 +782,15 @@ export function wallPostTiles({ width, height }: Pick<OfficeLayout, 'width' | 'h
   return tiles;
 }
 
+/**
+ * The wall the eraser takes from `tile`, or `null`: a wall covers the tile it
+ * stands on and the ones above and below it, and the one standing on `tile`
+ * itself comes first. What a click takes and what the box outlines.
+ */
+export function wallPostUnder({ width, height }: Pick<OfficeLayout, 'width' | 'height'>, tile: number, standing: (index: number) => boolean): number | null {
+  return [tile, tile - width, tile + width].find((index) => index >= 0 && index < width * height && standing(index)) ?? null;
+}
+
 /** Every vertical stretch of wall tiles, column by column, top to bottom. */
 export function wallStretches({ width, height, walls }: WallGrid): WallStretch[] {
   const covered = new Array<boolean>(width * height).fill(false);

@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { chairPreviewFrames, previewFrame, sofaPreviewFrames, type MaterialCatalog, type MaterialOption } from '../game/artMaterials';
 import type { ArtPreviewCache } from '../game/artPreview';
 import { decorColorKey, decorSizeLabel, type DecorBrush } from '../game/decorEditor';
@@ -31,8 +32,9 @@ const GROUPS: readonly { kinds: readonly DecorCatalogKind[]; label: string }[] =
   { kinds: ['table', 'sofa'], label: 'Sala' },
   // Only the office scope offers them (`fitsDeskArea` leaves trees out).
   { kinds: ['tree'], label: 'Árboles' },
-  // #223: only the office scope offers them (the desk scope's `fitsDeskArea` leaves doors out). A window is a piece of the door kind.
-  { kinds: ['door'], label: 'Puertas y ventanas' },
+  // #223: only the office scope offers them (the desk scope's `fitsDeskArea` leaves doors out). A window is a piece of
+  // the door kind. Named for the walls they stand in: the walls themselves lead the group (`wallTiles`).
+  { kinds: ['door'], label: 'Paredes' },
 ];
 
 /** The kinds whose pieces that take a color come first, so the ones people paint are at hand. */
@@ -97,6 +99,8 @@ export interface DecorPaletteProps {
   onColorPicking?: (open: boolean) => void;
   disabled?: boolean;
   preview?: ArtPreviewCache;
+  /** The wall tiles, a tool of their own but the first entries of «Paredes»; absent, it lists the doors and windows alone. */
+  wallTiles?: ReactNode;
 }
 
 function Thumbnail({
@@ -133,7 +137,7 @@ function Thumbnail({
   );
 }
 
-export function DecorPalette({ value, catalog, offers = () => true, colors = {}, onPick, onColorChange, onColorPicking, disabled = false, preview }: DecorPaletteProps) {
+export function DecorPalette({ value, catalog, offers = () => true, colors = {}, onPick, onColorChange, onColorPicking, disabled = false, preview, wallTiles }: DecorPaletteProps) {
   const pressed = (id: string): boolean => value?.piece === id;
   return (
     <div className={styles.palettes}>
@@ -146,11 +150,13 @@ export function DecorPalette({ value, catalog, offers = () => true, colors = {},
             return pick !== null && offers(pick.info) ? [{ kind, option, pick }] : [];
           }),
         );
-        if (entries.length === 0) return null;
+        const leading = kinds.includes('door') ? wallTiles : undefined;
+        if (entries.length === 0 && leading === undefined) return null;
         return (
           <div key={label} className={styles.group}>
             <h4 className={styles.subtitle}>{label}</h4>
             <div className={styles.palette} role="group" aria-label={label}>
+              {leading}
               {entries.map(({ kind, option, pick }) => {
                 const colorable = pick.info.colorable === true && option.defaultColor !== null;
                 const color = colorable ? (colors[decorColorKey(option.id)] ?? option.defaultColor) : null;

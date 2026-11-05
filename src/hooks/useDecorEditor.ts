@@ -27,7 +27,7 @@ import {
   type DecorTileRect,
 } from '../game/officeDecor';
 import type { OfficeDecorPort } from '../game/officeDecorPort';
-import { decorPieceTurns, doorPosts, isDoorPiece, isWindowPiece, withReplacedDoors } from '../game/officeDoors';
+import { decorPieceTurns, doorOwnWallTiles, isDoorPiece, isWindowPiece, withReplacedDoors } from '../game/officeDoors';
 import { usePersistedColors } from './usePersistedColors';
 
 /**
@@ -147,13 +147,17 @@ export interface DecorEditor {
   /**
    * The wall eraser on a post, with the tile under the pointer: takes off the
    * chair, table, desk or plant on that tile (the top piece first, #121, then
-   * the smallest where they stack, inside the area), else the doors standing
-   * on the post (#232), and says
-   * whether any stands there, live or still on its way out. What it finds
-   * goes first and the post stays, like a door's, which is never erased
-   * under it so the wall stays closed.
+   * the smallest where they stack, inside the area), else the door or window
+   * on it (#232), and says whether any stands there, live or still on its way
+   * out. What it finds goes alone: the wall under a door stays, and closes.
    */
   erase(post: number, tile: number | null): boolean;
+  /**
+   * Takes off the doors and windows anchored on `anchors`, for the wall tool:
+   * the room refuses to remove a wall one still needs. Resolves once they have
+   * left, or with `false` when they could not.
+   */
+  takeDoors(anchors: readonly number[]): Promise<boolean>;
 }
 
 interface PendingEdit extends DecorEdit {
@@ -232,12 +236,21 @@ export function useDecorEditor({
   const drainingRef = useRef(false);
   const groupRef = useRef(0);
   const blockedRef = useRef(false);
+  /** The clicks `takeDoors` promised an answer about, by group. */
+  const waitingRef = useRef(new Map<number, (gone: boolean) => void>());
   const onExitRef = useRef(onExit);
   onExitRef.current = onExit;
 
   const setEdits = (next: readonly PendingEdit[]): void => {
     editsRef.current = next;
     setEditsState(next);
+    // Every way an edit stops waiting comes through here: saved it stays, marked sent; refused or dropped it is gone.
+    for (const [group, settle] of waitingRef.current) {
+      const own = next.filter((edit) => edit.group === group);
+      if (own.some((edit) => !edit.sent)) continue;
+      waitingRef.current.delete(group);
+      settle(own.length > 0);
+    }
   };
   const setBlockedBoth = (next: boolean): void => {
     blockedRef.current = next;
@@ -382,28 +395,38 @@ export function useDecorEditor({
     setBrush({ kind: 'piece', piece: item.piece, info, rotation: item.rotation, ...(item.color === undefined ? {} : { color: item.color }), from: item.index });
   }
 
-  function removeDoorsOn(post: number): boolean {
-    const on = (item: DecorItem): boolean => isDoorPiece(item.piece) && doorPosts(item, MAP_W).includes(post);
+  function removeDoorsOn(tile: number): boolean {
+    const on = (item: DecorItem): boolean => isDoorPiece(item.piece) && doorOwnWallTiles(item, MAP_W).has(tile);
     const leaving = layerAfter().filter(on);
     if (leaving.length > 0 && !blockedRef.current) {
       setSelected(null);
       queue(...leaving.map(({ index }): DecorEdit => ({ index, item: null })));
     }
-    // Until the room shows a door gone, its post is still the door's.
+    // Until the room shows a door gone, its tile is still the door's.
     return leaving.length > 0 || itemsRef.current.some(on);
   }
 
   function erase(post: number, tile: number | null): boolean {
-    if (tile === null) return removeDoorsOn(post);
+    const under = tile ?? post;
     const pieceOn = (items: readonly DecorItem[]): DecorItem | null =>
-      decorPickAt(items.filter((item) => !isDoorPiece(item.piece)), infoOf, MAP_W, tile, area);
+      decorPickAt(items.filter((item) => !isDoorPiece(item.piece)), infoOf, MAP_W, under, area);
     const leaving = pieceOn(layerAfter());
     if (leaving !== null) {
       remove(decorItemKey(leaving));
       return true;
     }
     // Until the room shows a piece gone, its tile is still the piece's.
-    return pieceOn(itemsRef.current) !== null || removeDoorsOn(post);
+    return pieceOn(itemsRef.current) !== null || removeDoorsOn(under);
+  }
+
+  function takeDoors(anchors: readonly number[]): Promise<boolean> {
+    if (blockedRef.current) return Promise.resolve(false);
+    setSelected(null);
+    // Queued even for a door already on its way out: the request waits for that one, so its answer means it has left.
+    return new Promise((settle) => {
+      waitingRef.current.set(groupRef.current + 1, settle);
+      queue(...anchors.map((index): DecorEdit => ({ index, item: null })));
+    });
   }
 
   /** Removes the item of `key`, and what stood on it (#121). */
@@ -591,6 +614,7 @@ export function useDecorEditor({
       setError(null);
     },
     erase,
+    takeDoors,
     unpick() {
       putDown();
     },
