@@ -141,3 +141,20 @@
   background: #000000b3;
   color: #e5e7eb;
 }
+
+/*
+ * "+N personas" (#280): the people left without a tile. It takes one tile
+ * slot, so the capacity rule counts it and the bar never grows past it.
+ */
+.overflow {
+  /* Explicit: the border must never push the slot past the tile size. */
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-control);
+  background: #1f2937;
+  border: 2px solid #2b3444;
+  color: #e5e7eb;
+  font-size: 18px;
+}

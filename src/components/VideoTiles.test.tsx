@@ -450,3 +450,92 @@ describe('VideoTiles: pack character portraits (art migration, step 6)', () => {
     expect(screen.getByAltText('Retrato de par-1')).toHaveAttribute('src', 'data:image/png;base64,PACK');
   });
 });
+
+/**
+ * A 50 person room (#280): the bar shows only what fits the layout, cameras
+ * and speakers first, and a "+N" counter for the rest. jsdom's window is
+ * 1024x768: 6 slots in the row, 4 in the side column (`videoTileCapacity`).
+ */
+describe('VideoTiles: crowded room (#280)', () => {
+  const CROWD = {
+    selfSessionId: 'yo',
+    selfName: 'HugoGT',
+    peers: Array.from({ length: 49 }, (_, index) => {
+      const sessionId = `p${String(index).padStart(2, '0')}`;
+      return { sessionId, name: sessionId };
+    }),
+    spaceId: 'sala-de-juntas-stub',
+  };
+  const cameraTracks = (ids: string[]) => new Map(ids.map((id) => [id, fakeVideoTrack()]));
+
+  it('row: cameras at the end of the list are visible, with a counter for the rest', () => {
+    const { bridge } = renderTiles({ videoTracks: cameraTracks(['p46', 'p47', 'p48']) });
+    act(() => bridge.emit('voice', CROWD));
+
+    const ids = tileIds().filter(Boolean);
+    expect(ids).toHaveLength(5);
+    expect(ids[0]).toBe('yo');
+    expect(ids).toEqual(expect.arrayContaining(['p46', 'p47', 'p48']));
+    expect(screen.getByTestId('video-tile-overflow')).toHaveTextContent('+45 personas');
+  });
+
+  it('column: with a share on the stage, fewer slots and the cameras still win them', () => {
+    const { bridge } = renderTiles({
+      videoTracks: cameraTracks(['p47', 'p48']),
+      screenShareTracks: new Map([['p00', fakeVideoTrack()]]),
+      activeScreenSharer: 'p00',
+    });
+    act(() => bridge.emit('voice', CROWD));
+
+    expect(screen.getByTestId('video-tile-bar')).toHaveAttribute('data-layout', 'column');
+    expect(tileIds().filter(Boolean)).toEqual(['yo', 'p47', 'p48']);
+    expect(screen.getByTestId('video-tile-overflow')).toHaveTextContent('+47 personas');
+  });
+
+  it('a speaker enters the visible tiles without remounting the others', () => {
+    const { bridge, rerender } = renderTiles({ videoTracks: cameraTracks(['p48']) });
+    act(() => bridge.emit('voice', CROWD));
+    const before = new Map(tileIds().filter(Boolean).map((id) => [id, document.querySelector(`[data-session-id="${id}"]`)]));
+    const cameraVideo = document.querySelector('[data-session-id="p48"] video');
+
+    rerender({ speakers: new Set(['p30']) });
+
+    const after = tileIds().filter(Boolean);
+    expect(after).toContain('p30');
+    expect(after).toHaveLength(5);
+    const kept = after.filter((id) => before.has(id));
+    expect(kept).toHaveLength(4);
+    for (const id of kept) expect(document.querySelector(`[data-session-id="${id}"]`)).toBe(before.get(id));
+    expect(document.querySelector('[data-session-id="p48"] video')).toBe(cameraVideo);
+  });
+
+  it('the counter appears only when somebody is left out', () => {
+    const { bridge } = renderTiles();
+    act(() => bridge.emit('voice', { ...CROWD, peers: CROWD.peers.slice(0, 6) }));
+
+    expect(tileIds().filter(Boolean)).toHaveLength(5);
+    expect(screen.getByTestId('video-tile-overflow')).toHaveTextContent('+2 personas');
+
+    act(() => bridge.emit('voice', { ...CROWD, peers: CROWD.peers.slice(0, 5) }));
+    expect(screen.queryByTestId('video-tile-overflow')).not.toBeInTheDocument();
+    expect(tileIds()).toHaveLength(6);
+  });
+
+  it('a wider window makes room for more tiles', () => {
+    const { bridge } = renderTiles();
+    act(() => bridge.emit('voice', CROWD));
+    expect(tileIds().filter(Boolean)).toHaveLength(5);
+
+    const width = window.innerWidth;
+    try {
+      act(() => {
+        Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1920 });
+        window.dispatchEvent(new Event('resize'));
+      });
+      expect(tileIds().filter(Boolean)).toHaveLength(13);
+      expect(screen.getByTestId('video-tile-overflow')).toHaveTextContent('+37 personas');
+    } finally {
+      Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
+    }
+  });
+});
