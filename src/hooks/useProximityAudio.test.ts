@@ -2439,3 +2439,91 @@ describe('useProximityAudio: microphone, speaker and camera picked per browser (
     expect(result.current.devices).toEqual(DEVICES);
   });
 });
+
+describe('useProximityAudio: crossing a door (#286)', () => {
+  /** A hook whose `connect` hands out `connections` in order, with a clock the test moves. */
+  function renderDoors(connections: LivekitRoomConnection[], status: PresenceStatus = 'g') {
+    const bridge = createOfficeBridge();
+    const sent: unknown[] = [];
+    bridge.onCommand('mediaEvent', (event) => sent.push(event));
+    const options: ConnectLivekitRoomOptions[] = [];
+    const connect = vi.fn(async (opts: ConnectLivekitRoomOptions) => {
+      options.push(opts);
+      const next = connections[options.length - 1];
+      if (!next) throw new Error('no connection left');
+      return next;
+    });
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+    const clock = { ms: 0 };
+    const rendered = renderHook(
+      ({ status: current }: { status: PresenceStatus }) =>
+        useProximityAudio(bridge, { config: CONFIG, status: current, connect, fetchToken, now: () => clock.ms }),
+      { initialProps: { status } },
+    );
+    const walkTo = async (spaceId: string | null) => {
+      await act(async () => {
+        bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId });
+      });
+    };
+    return { ...rendered, bridge, sent, options, connect, clock, walkTo };
+  }
+
+  it('reports how long the audio was cut, from leaving the old room until the open microphone publishes in the new one', async () => {
+    const publishing = deferred<boolean>();
+    const second = fakeConnection({
+      setMicrophoneEnabled: vi.fn((enabled: boolean) => (enabled ? publishing.promise : Promise.resolve(false))),
+    });
+    const { result, sent, clock, walkTo } = renderDoors([fakeConnection(), second]);
+    await walkTo(null);
+    await act(async () => result.current.toggleMic());
+
+    clock.ms = 1000;
+    await walkTo('s1');
+    expect(sent).not.toContainEqual(expect.objectContaining({ event: 'switched' }));
+
+    clock.ms = 1350;
+    await act(async () => publishing.resolve(true));
+
+    expect(sent).toContainEqual({ event: 'switched', durationMs: 350 });
+  });
+
+  it('with the microphone off the cut ends as soon as the new room connects', async () => {
+    const { sent, clock, walkTo } = renderDoors([fakeConnection(), fakeConnection()]);
+    await walkTo(null);
+
+    clock.ms = 500;
+    await walkTo('s1');
+
+    expect(sent).toEqual([{ event: 'switched', durationMs: 0 }]);
+  });
+
+  it('the first room of the visit is not a door, and neither is a room switch that was superseded', async () => {
+    const pending = deferred<LivekitRoomConnection>();
+    const late = fakeConnection();
+    const bridge = createOfficeBridge();
+    const sent: unknown[] = [];
+    bridge.onCommand('mediaEvent', (event) => sent.push(event));
+    const connect = vi
+      .fn<(opts: ConnectLivekitRoomOptions) => Promise<LivekitRoomConnection>>()
+      .mockResolvedValueOnce(fakeConnection())
+      .mockReturnValueOnce(pending.promise)
+      .mockResolvedValueOnce(fakeConnection());
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+    renderHook(() => useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }));
+    const walkTo = async (spaceId: string | null) => {
+      await act(async () => {
+        bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId });
+      });
+    };
+
+    await walkTo(null);
+    expect(sent).toEqual([]);
+
+    await walkTo('s1');
+    await walkTo('s2');
+    await act(async () => pending.resolve(late));
+
+    // One report for the door that ended in a room, none for the one dropped.
+    expect(sent.filter((event) => (event as { event: string }).event === 'switched')).toHaveLength(1);
+  });
+});

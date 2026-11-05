@@ -91,6 +91,8 @@ export interface UseProximityAudioOptions {
   audioOutputSupported?: boolean;
   /** A device failed or was unplugged (#284); the owner explains it. */
   onDeviceNotice?: (notice: DeviceNotice) => void;
+  /** Clock for the audio cut of a door (#286); injectable for tests. */
+  now?: () => number;
 }
 
 /**
@@ -197,6 +199,7 @@ export function useProximityAudio(
     deviceStore,
     audioOutputSupported,
     onDeviceNotice,
+    now = () => performance.now(),
   }: UseProximityAudioOptions,
 ): UseProximityAudioResult {
   const dnd = status === DO_NOT_DISTURB;
@@ -236,6 +239,16 @@ export function useProximityAudio(
   useEffect(() => {
     randomRef.current = random;
   }, [random]);
+  const nowRef = useRef(now);
+  useEffect(() => {
+    nowRef.current = now;
+  }, [now]);
+  /**
+   * When a live room was left for another one (#286), until the next room is
+   * up: the audio cut of a door. A later door before that keeps the start,
+   * since nobody heard anything since then either.
+   */
+  const switchStartedAtRef = useRef<number | null>(null);
   const [videoTracks, setVideoTracks] = useState<ReadonlyMap<string, AttachableTrack>>(new Map());
   const [speakers, setSpeakers] = useState<ReadonlySet<string>>(new Set());
   const [localVideoTrack, setLocalVideoTrack] = useState<AttachableTrack | null>(null);
@@ -317,20 +330,24 @@ export function useProximityAudio(
       }
     }
 
-    /** Reaplica el microfono/camara deseados tras CUALQUIER conexion nueva (#12): sin esto, una sala recien conectada arranca sin publicar nada aunque el usuario ya lo hubiera encendido en la sala anterior. */
-    function reapplyPublishIntent(connection: LivekitRoomConnection): void {
+    /**
+     * Reaplica el microfono/camara deseados tras CUALQUIER conexion nueva (#12): sin esto, una sala recien conectada arranca sin publicar nada aunque el usuario ya lo hubiera encendido en la sala anterior.
+     * Resolves once the microphone is settled: what ends the cut of a door (#286).
+     */
+    function reapplyPublishIntent(connection: LivekitRoomConnection): Promise<void> {
       // First, and even in "No molestar": it only records the filter, and
       // the connection runs camera calls in order, so the camera below
       // already goes on with it.
       void connection.setCameraFilter(cameraFilterRef.current);
-      if (dndRef.current) return;
+      if (dndRef.current) return Promise.resolve();
       // The button shows what this room really publishes (#277): a publish
       // that fails here would otherwise leave it lit with nobody hearing.
       // An answer is dropped when the room was replaced or the user changed
       // their mind meanwhile, since their click is newer than this attempt.
       const isCurrent = () => connectionRef.current === connection;
+      let microphone = Promise.resolve();
       if (micOnRef.current) {
-        void connection.setMicrophoneEnabled(true).then((enabled) => {
+        microphone = connection.setMicrophoneEnabled(true).then((enabled) => {
           if (isCurrent() && micOnRef.current) setMicOnIntent(enabled);
         });
       }
@@ -339,6 +356,15 @@ export function useProximityAudio(
           if (isCurrent() && camOnRef.current) setCamOnIntent(enabled);
         });
       }
+      return microphone;
+    }
+
+    /** The door that led to `generation`'s room is crossed: report its cut, once (#286). */
+    function reportSwitch(generation: number): void {
+      const startedAt = switchStartedAtRef.current;
+      if (startedAt === null || generationRef.current !== generation) return;
+      switchStartedAtRef.current = null;
+      bridge.emitCommand('mediaEvent', { event: 'switched', durationMs: nowRef.current() - startedAt });
     }
 
     /** After a device was lost (#284): only the kind it served, and only if it was on. */
@@ -388,6 +414,7 @@ export function useProximityAudio(
       const connection = connectionRef.current;
       connectionRef.current = null;
       targetRef.current = null;
+      switchStartedAtRef.current = null;
       // Antes del `await` de mas abajo (D1): si se pusiera despues, una
       // sesion nueva que ya escribio la suya mientras este disconnect todavia
       // estaba en vuelo se veria borrada por este reset tardio.
@@ -662,6 +689,11 @@ export function useProximityAudio(
       targetRef.current = target;
       const oldConnection = connectionRef.current;
       connectionRef.current = null;
+      // Only a live room left for another counts as a door: not the first
+      // room, nor rebuilding one LiveKit lost (#286).
+      if (oldConnection && !retryOnFailure && switchStartedAtRef.current === null) {
+        switchStartedAtRef.current = nowRef.current();
+      }
       // A new room starts without shares, and the own one is not republished:
       // capturing the screen again needs the browser picker, and only a click
       // can open it.
@@ -702,7 +734,7 @@ export function useProximityAudio(
           // Fallen back to the corridor (D5) is not a space: no sharing there.
           setInSpaceRoom(target.spaceId !== null && !acquired.corridor);
           applyRoomKind(acquired.response, acquired.corridor);
-          reapplyPublishIntent(connection);
+          void reapplyPublishIntent(connection).then(() => reportSwitch(generation));
           applyDesired(connection); // D1: lo ultimo conocido, no la instantanea capturada al arrancar.
 
           // Se pidio el espacio pero se conecto al corredor (reintentos rapidos agotados, D5): sigue intentando cada 5s.
