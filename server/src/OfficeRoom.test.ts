@@ -2831,3 +2831,43 @@ describe('OfficeRoom: server restart (#276)', () => {
     expect(server.sessions.has(id)).toBe(false);
   });
 });
+
+/**
+ * Clients report their own LiveKit connection (#275); the server keeps only
+ * counts, never who sent them.
+ */
+describe('OfficeRoom: media reports (#275)', () => {
+  it('counts a disconnection by its reason', async () => {
+    const ana = await join('Ana');
+    ana.send('media', { event: 'disconnected', reason: 'SIGNAL_CLOSE' });
+
+    await waitFor(() => server.metricsText().includes('office_media_disconnections_total{reason="SIGNAL_CLOSE"} 1\n'));
+  });
+
+  it('counts a connection with its duration', async () => {
+    const ana = await join('Ana');
+    ana.send('media', { event: 'connected', durationMs: 1500 });
+
+    await waitFor(() => server.metricsText().includes('office_media_connect_seconds_sum{event="connected"} 1.5\n'));
+    expect(server.metricsText()).toContain('office_media_connect_seconds_count{event="connected"} 1\n');
+  });
+
+  it('drops a report that is not one, and never keeps who sent it', async () => {
+    const ana = await join('Ana');
+    ana.send('media', { event: 'joined', name: 'Ana' });
+    ana.send('media', { event: 'disconnected', reason: 'JOIN_FAILURE' });
+
+    await waitFor(() => server.metricsText().includes('office_media_disconnections_total{reason="JOIN_FAILURE"} 1\n'));
+    expect(server.metricsText()).not.toContain('joined');
+    expect(server.metricsText()).not.toContain('Ana');
+    expect(server.metricsText()).not.toContain(ana.sessionId);
+  });
+
+  it('counts the players per LiveKit room', async () => {
+    const ana = await join('Ana');
+    await waitFor(() => server.metricsText().includes('office_room_players{room="office-livekit"} 1\n'));
+    await join('Beto');
+    await waitFor(() => server.metricsText().includes('office_room_players{room="office-livekit"} 2\n'));
+    expect(server.metricsText()).not.toContain(ana.sessionId);
+  });
+});

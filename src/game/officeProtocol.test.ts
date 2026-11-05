@@ -7,6 +7,8 @@ import {
   DO_NOT_DISTURB,
   FACINGS,
   LIVEKIT_ROOM_NAME,
+  MAX_MEDIA_EVENT_DURATION_MS,
+  MEDIA_DISCONNECT_REASONS,
   PRESENCE_STATUSES,
   RECORDING_RETENTION_DAYS,
   accessDeniedReasonOf,
@@ -14,6 +16,7 @@ import {
   facingFrom,
   isPresenceStatus,
   livekitRoomFor,
+  mediaEventOf,
   recordingAvailableUntil,
 } from './officeProtocol';
 
@@ -145,4 +148,53 @@ describe('accessDeniedReasonOf (#129)', () => {
       expect(accessDeniedReasonOf(raw)).toBe('unauthorized');
     },
   );
+});
+
+describe('mediaEventOf (#275)', () => {
+  it('keeps a connection or reconnection with its duration, rounded', () => {
+    expect(mediaEventOf({ event: 'connected', durationMs: 812.6 })).toEqual({ event: 'connected', durationMs: 813 });
+    expect(mediaEventOf({ event: 'reconnected', durationMs: 2400 })).toEqual({ event: 'reconnected', durationMs: 2400 });
+  });
+
+  it('keeps a disconnection with a known LiveKit reason', () => {
+    expect(mediaEventOf({ event: 'disconnected', reason: 'SIGNAL_CLOSE' })).toEqual({
+      event: 'disconnected',
+      reason: 'SIGNAL_CLOSE',
+    });
+  });
+
+  it('turns an unknown reason into UNKNOWN_REASON, so no label grows from client text', () => {
+    expect(mediaEventOf({ event: 'disconnected', reason: 'ana@example.com' })).toEqual({
+      event: 'disconnected',
+      reason: 'UNKNOWN_REASON',
+    });
+    expect(mediaEventOf({ event: 'disconnected' })).toEqual({ event: 'disconnected', reason: 'UNKNOWN_REASON' });
+  });
+
+  it('drops anything that is not one of the three events', () => {
+    expect(mediaEventOf(null)).toBeNull();
+    expect(mediaEventOf('connected')).toBeNull();
+    expect(mediaEventOf({ event: 'joined' })).toBeNull();
+  });
+
+  it('drops a duration that is not a sane non-negative number of milliseconds', () => {
+    expect(mediaEventOf({ event: 'connected' })).toEqual({ event: 'connected', durationMs: 0 });
+    expect(mediaEventOf({ event: 'connected', durationMs: -5 })).toEqual({ event: 'connected', durationMs: 0 });
+    expect(mediaEventOf({ event: 'connected', durationMs: Number.NaN })).toEqual({ event: 'connected', durationMs: 0 });
+    expect(mediaEventOf({ event: 'connected', durationMs: 10 * 60 * 60 * 1000 })).toEqual({
+      event: 'connected',
+      durationMs: MAX_MEDIA_EVENT_DURATION_MS,
+    });
+  });
+
+  it('never carries anything else the client sent', () => {
+    expect(mediaEventOf({ event: 'connected', durationMs: 5, uid: 'u1', name: 'Ana' })).toEqual({
+      event: 'connected',
+      durationMs: 5,
+    });
+  });
+
+  it('lists each reason once', () => {
+    expect(new Set(MEDIA_DISCONNECT_REASONS).size).toBe(MEDIA_DISCONNECT_REASONS.length);
+  });
 });

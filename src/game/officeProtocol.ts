@@ -130,6 +130,61 @@ export function accessDeniedReasonOf(raw: unknown): AccessDeniedReason {
   return ACCESS_DENIED_REASONS.find((reason) => reason === raw) ?? 'unauthorized';
 }
 
+/**
+ * What a client reports about its own LiveKit connection (#275), as the
+ * `media` room message. Never who: the room counts these by kind and reason
+ * and keeps neither the session nor the account that sent them.
+ */
+export const MEDIA_EVENT_KINDS = ['connected', 'reconnected', 'disconnected'] as const;
+
+export type MediaEventKind = (typeof MEDIA_EVENT_KINDS)[number];
+
+/**
+ * The names of livekit-client's `DisconnectReason` (pinned to it by
+ * `livekitRoom.test.ts`). A closed list because each one becomes a metric
+ * label: free client text would let anyone grow the series without bound.
+ */
+export const MEDIA_DISCONNECT_REASONS = [
+  'UNKNOWN_REASON',
+  'CLIENT_INITIATED',
+  'DUPLICATE_IDENTITY',
+  'SERVER_SHUTDOWN',
+  'PARTICIPANT_REMOVED',
+  'ROOM_DELETED',
+  'STATE_MISMATCH',
+  'JOIN_FAILURE',
+  'MIGRATION',
+  'SIGNAL_CLOSE',
+  'ROOM_CLOSED',
+  'USER_UNAVAILABLE',
+  'USER_REJECTED',
+  'SIP_TRUNK_FAILURE',
+  'CONNECTION_TIMEOUT',
+  'MEDIA_FAILURE',
+  'AGENT_ERROR',
+] as const;
+
+export type MediaDisconnectReason = (typeof MEDIA_DISCONNECT_REASONS)[number];
+
+/** A longer connect or reconnect is counted as this long: past it nobody is still waiting. */
+export const MAX_MEDIA_EVENT_DURATION_MS = 5 * 60 * 1000;
+
+export type MediaEventMessage =
+  | { event: 'connected' | 'reconnected'; durationMs: number }
+  | { event: 'disconnected'; reason: MediaDisconnectReason };
+
+/** The `media` message as the room accepts it, or `null` to drop it whole. */
+export function mediaEventOf(raw: unknown): MediaEventMessage | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const { event, reason, durationMs } = raw as Record<string, unknown>;
+  if (event === 'disconnected') {
+    return { event, reason: MEDIA_DISCONNECT_REASONS.find((known) => known === reason) ?? 'UNKNOWN_REASON' };
+  }
+  if (event !== 'connected' && event !== 'reconnected') return null;
+  const duration = typeof durationMs === 'number' && Number.isFinite(durationMs) && durationMs > 0 ? durationMs : 0;
+  return { event, durationMs: Math.min(Math.round(duration), MAX_MEDIA_EVENT_DURATION_MS) };
+}
+
 /** Cada cuanto publica el jugador local su posicion (ver `createMoveThrottle`). */
 export const MOVE_INTERVAL_MS = 100;
 

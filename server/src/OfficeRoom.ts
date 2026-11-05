@@ -42,8 +42,10 @@ import {
   SESSION_REPLACED_CLOSE_CODE,
   SESSION_REVOKED_CLOSE_CODE,
   isPresenceStatus,
+  mediaEventOf,
   recordingAvailableUntil,
   type AccessDeniedReason,
+  type MediaEventMessage,
 } from '../../src/game/officeProtocol.ts';
 import {
   BASE_LAYOUT,
@@ -339,6 +341,11 @@ export interface OfficeRoomOptions {
   /** Stops and files one recording (`finishRecording`), for that cleanup. */
   stopRecording?: (entry: ActiveRecording) => Promise<void>;
   /**
+   * Counts what a client reports about its own LiveKit connection (#275).
+   * Gets the validated event only, never the session or account behind it.
+   */
+  recordMediaEvent?: (event: MediaEventMessage) => void;
+  /**
    * Finished recordings (#58). The room tells the participants still
    * connected when one is uploaded, as a `recordingready` message.
    */
@@ -397,6 +404,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
   private reconnectionWindowSeconds = RECONNECTION_WINDOW_SECONDS;
   private recordings?: RecordingRegistry;
   private stopRecording?: (entry: ActiveRecording) => Promise<void>;
+  private recordMediaEvent?: (event: MediaEventMessage) => void;
   private unsubscribeRecordings?: () => void;
   private unsubscribeReady?: () => void;
   private unsubscribeDesksChanges?: () => void;
@@ -485,6 +493,7 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
       this.reconnectionWindowSeconds = options.reconnectionWindowSeconds;
     }
     this.stopRecording = options?.stopRecording;
+    this.recordMediaEvent = options?.recordMediaEvent;
     this.recordings = options?.recordings;
     this.unsubscribeDesksChanges = options?.subscribeDesksChanges?.(() => {
       this.broadcast('deskschanged');
@@ -609,6 +618,13 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
       if (space === null || this.lockedSpaceIds.get(space.id) !== client.sessionId) return;
       this.lockedSpaceIds.delete(space.id);
       this.state.lockedSpaces = encodeLockedSpaces(this.lockedSpaceIds);
+    });
+
+    // A client's own LiveKit connection (#275). Only counted: `mediaEventOf`
+    // keeps the event, a known reason and a bounded duration, nothing else.
+    this.onMessage('media', (_client: Client, message: unknown) => {
+      const event = mediaEventOf(message);
+      if (event) this.recordMediaEvent?.(event);
     });
 
     // El cliente no es de fiar tampoco aqui: `to`/`from` se comprueban como
