@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { AttachableTrack } from '../game/attachableTrack';
 import type { OfficeBridge, OfficeEventMap } from '../game/officeBridge';
 import { selectScreenShareStage } from '../game/screenShare';
+import { selectVideoTiles, videoTileCapacity } from '../game/videoTileSelection';
 import { VideoTile } from './VideoTile';
 import styles from './VideoTiles.module.css';
 
@@ -28,6 +29,15 @@ const INITIAL_VOICE: OfficeEventMap['voice'] = {
   spaceId: null,
 };
 
+function readViewport() {
+  return { width: window.innerWidth, height: window.innerHeight };
+}
+
+/** "+N personas" for the people left without a tile (#280). */
+function overflowLabel(hidden: number): string {
+  return hidden === 1 ? '+1 persona' : `+${hidden} personas`;
+}
+
 interface TileEntry {
   readonly sessionId: string;
   readonly name: string;
@@ -48,6 +58,10 @@ interface TileEntry {
  * `key={sessionId}` (D5) sigue siendo la invariante que importa: que un par
  * entre o salga reordena la fila, pero nunca remonta el tile de al lado -- un
  * remonte se llevaria por delante el `<video>` real que cuelga de el.
+ *
+ * Crowded rooms (#280): only the tiles that fit the layout are rendered,
+ * chosen by `selectVideoTiles` (cameras and speakers first, sticky slots),
+ * plus a "+N personas" counter for the rest.
  */
 export function VideoTiles({
   bridge,
@@ -61,6 +75,15 @@ export function VideoTiles({
   const [voice, setVoice] = useState<OfficeEventMap['voice']>(INITIAL_VOICE);
   const [portraits, setPortraits] = useState<Record<string, string> | null>(null);
   const [characterPortraits, setCharacterPortraits] = useState<Record<string, string> | null>(null);
+  const [viewport, setViewport] = useState(readViewport);
+  // Last committed selection: the next one starts from it so slots stay put (#280).
+  const visibleRef = useRef<readonly string[]>([]);
+
+  useEffect(() => {
+    const onResize = () => setViewport(readViewport());
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
 
   useEffect(() => {
     const unsubscribeVoice = bridge.on('voice', setVoice);
@@ -102,6 +125,24 @@ export function VideoTiles({
     // Screen share stays space-only: the open floor never shares (#20).
     remoteTracks: voice.spaceId !== null ? screenShareTracks : new Map(),
   });
+  const layout = stage ? 'column' : 'row';
+  // Cameras and speakers first, within what fits the layout (#280).
+  const selection = selectVideoTiles(
+    entries.map((entry) => ({
+      sessionId: entry.sessionId,
+      hasVideo: entry.track !== null,
+      speaking: speakers.has(entry.sessionId),
+      pinned: entry.sessionId === voice.selfSessionId,
+    })),
+    videoTileCapacity({ layout, viewportWidth: viewport.width, viewportHeight: viewport.height }),
+    visibleRef.current,
+  );
+  useEffect(() => {
+    visibleRef.current = selection.visible;
+  });
+  const entryById = new Map(entries.map((entry) => [entry.sessionId, entry]));
+  const visibleEntries = selection.visible.map((sessionId) => entryById.get(sessionId)!);
+
   const stageOwner = stage && entries.find((entry) => entry.sessionId === stage.sessionId);
   const stageLabel =
     stage?.sessionId === voice.selfSessionId
@@ -137,8 +178,8 @@ export function VideoTiles({
         </div>
       )}
       {entries.length > 0 && (
-        <div className={styles.bar} data-layout={stage ? 'column' : 'row'} data-testid="video-tile-bar">
-          {entries.map((entry) => (
+        <div className={styles.bar} data-layout={layout} data-testid="video-tile-bar">
+          {visibleEntries.map((entry) => (
             <div key={entry.sessionId} className={styles.tile} data-session-id={entry.sessionId}>
               <VideoTile
                 sessionId={entry.sessionId}
@@ -150,6 +191,11 @@ export function VideoTiles({
               />
             </div>
           ))}
+          {selection.hiddenCount > 0 && (
+            <div className={`${styles.tile} ${styles.overflow}`} data-testid="video-tile-overflow">
+              {overflowLabel(selection.hiddenCount)}
+            </div>
+          )}
         </div>
       )}
     </>
