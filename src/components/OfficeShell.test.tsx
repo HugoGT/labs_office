@@ -14,6 +14,7 @@ import { BUILT_IN_SPACES_VERSION } from '../game/mapData';
 import { fetchSpacesConfig } from '../game/spacesConfig';
 import { zoomView, type ZoomAction } from '../game/mapZoom';
 import { DEFAULT_NAME } from '../game/officeProtocol';
+import { NO_DEVICES } from '../game/mediaDevices';
 import { RecordingError, getRecordingUrl, startRecording, stopRecording } from '../game/recordingClient';
 import { ModerationError, muteMicrophones } from '../game/moderationClient';
 import { useOfficeAdminRole } from '../hooks/useOfficeAdminRole';
@@ -156,6 +157,10 @@ function proximityAudio(
     meetingRoom: false,
     canModerate: false,
     roomPeerIds: new Set(),
+    devices: NO_DEVICES,
+    selectedDevices: { audioinput: null, audiooutput: null, videoinput: null },
+    selectDevice: vi.fn(),
+    audioOutputSelectable: false,
     ...overrides,
   };
 }
@@ -1955,5 +1960,53 @@ describe('OfficeShell: meeting rooms (#282)', () => {
     await user.click(screen.getByRole('button', { name: /Personas/ }));
 
     expect(screen.queryByRole('button', { name: /Silenciar/ })).toBeNull();
+  });
+});
+
+describe('OfficeShell: devices (#284)', () => {
+  it('explains a device problem and keeps it up long enough to read what to do', () => {
+    vi.useFakeTimers();
+    try {
+      render(<OfficeShell />);
+      const { onDeviceNotice } = useProximityAudioMock.mock.calls.at(-1)![1];
+
+      act(() => onDeviceNotice?.({ kind: 'audioinput', problem: 'in-use' }));
+      expect(screen.getByText(/Otra aplicación está usando el micrófono/)).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(3200));
+      expect(screen.getByText(/Otra aplicación está usando el micrófono/)).toBeInTheDocument();
+      act(() => vi.advanceTimersByTime(8000));
+      expect(screen.queryByText(/Otra aplicación está usando el micrófono/)).not.toBeInTheDocument();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('a newer device problem replaces the one shown', () => {
+    render(<OfficeShell />);
+    const { onDeviceNotice } = useProximityAudioMock.mock.calls.at(-1)![1];
+
+    act(() => onDeviceNotice?.({ kind: 'videoinput', problem: 'permission-denied' }));
+    act(() => onDeviceNotice?.({ kind: 'audioinput', problem: 'lost' }));
+
+    expect(screen.queryByText(/permiso para usar la cámara/)).not.toBeInTheDocument();
+    expect(screen.getByText(/Se desconectó tu micrófono/)).toBeInTheDocument();
+  });
+
+  it('the bar picks devices through the hook', async () => {
+    const user = userEvent.setup();
+    const selectDevice = vi.fn();
+    useProximityAudioMock.mockReturnValue(
+      proximityAudio({
+        audioAvailable: true,
+        devices: { ...NO_DEVICES, audioinput: [{ deviceId: 'headset', label: 'Headset USB' }] },
+        selectDevice,
+      }),
+    );
+    render(<OfficeShell />);
+
+    await user.click(screen.getByRole('button', { name: 'Opciones de micrófono' }));
+    await user.click(screen.getByRole('menuitemradio', { name: 'Headset USB' }));
+
+    expect(selectDevice).toHaveBeenCalledExactlyOnceWith('audioinput', 'headset');
   });
 });

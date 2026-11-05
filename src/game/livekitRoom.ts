@@ -29,10 +29,24 @@ import {
   type RemoteTrack,
   type TrackProcessor,
   type TrackPublication,
+  supportsAudioOutputSelection,
 } from 'livekit-client';
 import type { AttachableTrack } from './attachableTrack';
 import { loadBackgroundBlur as loadRealBackgroundBlur } from './backgroundBlur';
 import { blurRadiusOf, isBlurFilter, type BlurFilter, type CameraFilter } from './cameraFilter';
+import {
+  DEVICE_KINDS,
+  deviceListsOf,
+  deviceLoss,
+  mediaFailureOf,
+  NO_DEVICES,
+  resolveDevice,
+  type DeviceInfoLike,
+  type DeviceKind,
+  type DeviceLists,
+  type DevicePreferences,
+  type MediaFailure,
+} from './mediaDevices';
 import { MEDIA_DISCONNECT_REASONS, type MediaDisconnectReason, type MediaEventMessage } from './officeProtocol';
 import { reconcileSubscriptions } from './proximityAudio';
 import { createRemoteAudioSink } from './remoteAudioSink';
@@ -76,6 +90,12 @@ export interface LivekitRoomConnection {
   /** Devuelve el estado real: `false` si el dispositivo se deniega. */
   setMicrophoneEnabled(enabled: boolean): Promise<boolean>;
   setCameraEnabled(enabled: boolean): Promise<boolean>;
+  /**
+   * The one place that changes the microphone, speaker or camera in use
+   * (#284), live tracks included. Resolves `false` when the device did not
+   * take, after reporting why through `onDeviceFailed`.
+   */
+  switchDevice(kind: DeviceKind, deviceId: string): Promise<boolean>;
   /**
    * Filter for the own camera, applied on this machine before publishing.
    * Picked with the camera off it waits for the next camera on; with the
@@ -194,6 +214,35 @@ export interface ConnectLivekitRoomOptions {
    * otherwise. Never called for this client's own `setMicrophoneEnabled`.
    */
   onMicrophoneMutedRemotely?: () => void;
+  /**
+   * Devices picked in this browser (#284), applied before connecting. The
+   * microphone and camera are a preference, not exact: one unplugged since
+   * falls back to the system's instead of failing.
+   */
+  preferredDevices?: DevicePreferences;
+  /** Injectable for tests; by default livekit-client's listing, which never prompts. */
+  listDevices?: () => Promise<readonly DeviceInfoLike[]>;
+  /** Where `devicechange` fires; injectable for tests, `null` where the browser has no media devices. */
+  deviceEvents?: Pick<EventTarget, 'addEventListener' | 'removeEventListener'> | null;
+  /** Devices by kind, right after connecting, on every device change, and once a permission names them. */
+  onDevicesChanged?: (devices: DeviceLists) => void;
+  /** The device in use was disconnected; the room already moved to the fallback (#284). */
+  onDeviceLost?: (kind: DeviceKind) => void;
+  /** A device could not be turned on or switched to, and why (#284). */
+  onDeviceFailed?: (kind: DeviceKind, failure: MediaFailure) => void;
+}
+
+/**
+ * Whether this browser can pick where remote audio plays (`setSinkId`):
+ * Firefox and Safari did not for a long time, and without it the speaker
+ * selector is not shown.
+ */
+export function audioOutputSelectionSupported(): boolean {
+  return supportsAudioOutputSelection();
+}
+
+function browserDeviceEvents(): Pick<EventTarget, 'addEventListener' | 'removeEventListener'> | null {
+  return typeof navigator === 'undefined' ? null : (navigator.mediaDevices ?? null);
 }
 
 /** livekit-client's `ConnectionQuality` values, as plain strings for the UI. */
@@ -305,6 +354,12 @@ export async function connectLivekitRoom({
   loadBackgroundBlur = loadRealBackgroundBlur,
   onCameraFilterFailed,
   onMicrophoneMutedRemotely,
+  preferredDevices,
+  listDevices = () => Room.getLocalDevices(undefined, false),
+  deviceEvents = browserDeviceEvents(),
+  onDevicesChanged,
+  onDeviceLost,
+  onDeviceFailed,
 }: ConnectLivekitRoomOptions): Promise<LivekitRoomConnection> {
   const room = createRoom();
   const sink = createRemoteAudioSink(audioContainer);
@@ -342,6 +397,68 @@ export async function connectLivekitRoom({
     const run = microphoneQueue.then(task, task);
     microphoneQueue = run.catch(() => undefined);
     return run;
+  }
+
+  /** Latest listing: a device can only be lost if it was in it. */
+  let listedDevices: DeviceLists = NO_DEVICES;
+
+  /** `null` when the browser would not list them: nothing is decided from that. */
+  async function refreshDevices(): Promise<DeviceLists | null> {
+    let devices: DeviceLists;
+    try {
+      devices = deviceListsOf(await listDevices());
+    } catch {
+      return null;
+    }
+    if (closing) return null;
+    listedDevices = devices;
+    onDevicesChanged?.(devices);
+    return devices;
+  }
+
+  /**
+   * Switches a device, in the queue of the track it changes: a switch and a
+   * toggle of the same microphone must not restart its track at once. The
+   * speaker has no local track, so nothing to wait for.
+   */
+  function switchDevice(kind: DeviceKind, deviceId: string, exact: boolean): Promise<boolean> {
+    const task = async () => {
+      try {
+        return await room.switchActiveDevice(kind, deviceId, exact);
+      } catch (err) {
+        onDeviceFailed?.(kind, mediaFailureOf(err));
+        return false;
+      }
+    };
+    if (kind === 'audioinput') return serializeMicrophone(task);
+    if (kind === 'videoinput') return serializeCamera(task);
+    return task();
+  }
+
+  /**
+   * On every `devicechange`. The device in use is read right away, before
+   * livekit-client's own handler of the same event (it lists devices first)
+   * can move it: that is the one that was unplugged, if any.
+   */
+  function handleDeviceChange(): void {
+    const before = new Map(DEVICE_KINDS.map((kind) => [kind, room.getActiveDevice(kind)]));
+    const previous = listedDevices;
+    void (async () => {
+      const devices = await refreshDevices();
+      if (devices === null) return;
+      for (const kind of DEVICE_KINDS) {
+        const { lost, switchTo } = deviceLoss(
+          before.get(kind),
+          room.getActiveDevice(kind),
+          previous[kind],
+          devices[kind],
+        );
+        if (!lost) continue;
+        if (switchTo !== null) await switchDevice(kind, switchTo, true);
+        if (closing) return;
+        onDeviceLost?.(kind);
+      }
+    })();
   }
 
   function cameraPublication(): TrackPublication | undefined {
@@ -632,8 +749,28 @@ export async function connectLivekitRoom({
     onConnectionQualityChanged?.(QUALITY_LEVELS[quality] ?? 'unknown');
   });
 
+  // Before connecting, so the first microphone or camera on already uses
+  // them. Without tracks yet, this only sets the capture defaults.
+  for (const kind of ['audioinput', 'videoinput'] as const) {
+    const deviceId = preferredDevices?.[kind];
+    if (deviceId) await switchDevice(kind, deviceId, false);
+  }
+  deviceEvents?.addEventListener('devicechange', handleDeviceChange);
+  // A speaker is set on each remote audio element: only one connected now
+  // is worth it, or every element would fail to play through it.
+  void refreshDevices().then((devices) => {
+    const speaker = preferredDevices?.audiooutput;
+    if (!devices || !speaker || resolveDevice(speaker, devices.audiooutput) !== speaker) return;
+    void switchDevice('audiooutput', speaker, true);
+  });
+
   const connectStartedAt = now();
-  await room.connect(url, token, { autoSubscribe: false });
+  try {
+    await room.connect(url, token, { autoSubscribe: false });
+  } catch (err) {
+    deviceEvents?.removeEventListener('devicechange', handleDeviceChange);
+    throw err;
+  }
   onMediaEvent?.({ event: 'connected', durationMs: now() - connectStartedAt });
   // Only fired once LiveKit's own resume/reconnect attempts are exhausted
   // (#84): a mere blip is `Reconnecting`/`Reconnected` and needs nothing
@@ -679,10 +816,13 @@ export async function connectLivekitRoom({
         ownMicrophoneCalls += 1;
         try {
           await room.localParticipant.setMicrophoneEnabled(enabled);
+          // The permission just granted gives the devices their names.
+          if (enabled) void refreshDevices();
           return enabled;
-        } catch {
+        } catch (err) {
           // Includes livekit-client 2.22.3 giving up after 15 s on a publish
           // started while the signal was reconnecting (it stops the track).
+          if (enabled) onDeviceFailed?.('audioinput', mediaFailureOf(err));
           return false;
         } finally {
           ownMicrophoneCalls -= 1;
@@ -694,6 +834,7 @@ export async function connectLivekitRoom({
         try {
           if (enabled && isBlurFilter(cameraFilter)) {
             await enableBlurredCamera(cameraFilter);
+            void refreshDevices();
             return true;
           }
           await room.localParticipant.setCameraEnabled(enabled);
@@ -702,11 +843,17 @@ export async function connectLivekitRoom({
           // never the other way round).
           const track = cameraPublication()?.track as LocalVideoTrack | undefined;
           if (enabled && track) await unblurTrack(track);
+          if (enabled) void refreshDevices();
           return enabled;
-        } catch {
+        } catch (err) {
+          // Only the camera: its failure never touches the microphone.
+          if (enabled) onDeviceFailed?.('videoinput', mediaFailureOf(err));
           return false;
         }
       });
+    },
+    switchDevice(kind, deviceId) {
+      return switchDevice(kind, deviceId, true);
     },
     setCameraFilter(filter) {
       return serializeCamera(async () => {
@@ -773,6 +920,7 @@ export async function connectLivekitRoom({
     },
     async disconnect() {
       closing = true;
+      deviceEvents?.removeEventListener('devicechange', handleDeviceChange);
       sink.clear();
       await room.disconnect();
     },

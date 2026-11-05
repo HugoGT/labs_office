@@ -52,6 +52,7 @@ import { placeLabel, placeOf } from './roomPlace';
 import { NoticeStack } from './NoticeStack';
 import { AudioUnblockPrompt } from './AudioUnblockPrompt';
 import { BottomBar } from './BottomBar';
+import { deviceNoticeMessage } from './deviceNotices';
 import { CallInvitationStack } from './CallInvitationStack';
 import { ContextMenu, type PeerMenuAction } from './ContextMenu';
 import { DeskBanner } from './DeskBanner';
@@ -68,6 +69,11 @@ import { ZoomControls } from './ZoomControls';
 
 /** Duracion del toast antes de auto-ocultarse (`app.js:525`, `ms || 3200`). */
 const TOAST_TIMEOUT_MS = 3200;
+/**
+ * A device problem says what to do about it (#284): longer to read than a
+ * passing toast, so it gets its own line and its own time.
+ */
+const DEVICE_NOTICE_MS = 8000;
 /** How long walking into a locked space is told. */
 const SPACE_LOCKED_TOAST_MS = 3000;
 
@@ -434,12 +440,17 @@ export function OfficeShell({
     cameraBlurAvailable,
     canModerate,
     roomPeerIds,
+    devices,
+    selectedDevices,
+    selectDevice,
+    audioOutputSelectable,
   } = useProximityAudio(bridge, {
     config: livekitConfig,
     status,
     session,
     // Called after render, once `setToastMessage` below exists.
     onMeetingNotice: (notice: MeetingNotice) => setToastMessage(MEETING_NOTICES[notice]),
+    onDeviceNotice: (notice) => setDeviceNotice(deviceNoticeMessage(notice)),
   });
 
   /**
@@ -480,6 +491,12 @@ export function OfficeShell({
   }, [bridge]);
 
   const [toastMessage, setToastMessage] = useState<ReactNode | null>(null);
+  const [deviceNotice, setDeviceNotice] = useState<string | null>(null);
+  useEffect(() => {
+    if (deviceNotice === null) return undefined;
+    const timer = setTimeout(() => setDeviceNotice(null), DEVICE_NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [deviceNotice]);
   // A room by its name, a desk by whoever claimed it (`roomPlace.ts`).
   const place = useMemo(() => placeOf(spaceId, room, spacesConfig?.spaces ?? [], desks ?? []), [spaceId, room, spacesConfig, desks]);
   const previousSpaceRef = useRef<string | null>(null);
@@ -935,6 +952,10 @@ export function OfficeShell({
         cameraFilter={cameraFilter}
         cameraBlurAvailable={cameraBlurAvailable}
         onChangeCameraFilter={setCameraFilter}
+        devices={devices}
+        selectedDevices={selectedDevices}
+        audioOutputSelectable={audioOutputSelectable}
+        onSelectDevice={selectDevice}
         hasDesk={myDesk !== null}
         onGoToDesk={() => bridge.emitCommand('walkToOwnDesk', undefined)}
         roomLocked={roomLock.locked}
@@ -957,6 +978,7 @@ export function OfficeShell({
       <NoticeStack>
         {/* Inside a locked space its notice stays up, under any passing toast. */}
         <Toast message={spaceLockedMessage ?? toastMessage ?? (roomLock.locked ? '🔒 El espacio está bloqueado' : null)} />
+        <Toast message={deviceNotice} />
         <AudioUnblockPrompt blocked={audioBlocked} onUnblock={unblockAudio} />
       </NoticeStack>
       <CallInvitationStack invitations={invitations} onAccept={accept} onDismiss={dismiss} />

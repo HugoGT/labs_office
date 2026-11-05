@@ -224,7 +224,42 @@ describe('HUD layout: camera filter caret', () => {
       expect(cam.top).toBeCloseTo(mic.top - 2, 1);
 
       await userEvent.click(caret);
-      const menu = box(screen.getByRole('menu', { name: 'Filtro de cámara' }));
+      const menu = box(screen.getByRole('menu', { name: 'Opciones de cámara' }));
+      expect(menu.bottom).toBeLessThanOrEqual(box(caret).top);
+      expect(menu.top).toBeGreaterThanOrEqual(0);
+      expect(menu.left).toBeGreaterThanOrEqual(0);
+      expect(menu.right).toBeLessThanOrEqual(width);
+      for (const item of screen.getAllByRole('menuitemradio')) expect(hitAtCenter(item)).toBe(item);
+      cleanup();
+    }
+  });
+});
+
+describe('HUD layout: microphone device caret (#284)', () => {
+  it('joins the microphone button, and its menu of long device names opens above it, on screen', async () => {
+    const longName = 'Predeterminado - Micrófono de matriz digital (Realtek(R) High Definition Audio)';
+    for (const width of [WIDE, NARROW, VERY_SMALL]) {
+      await page.viewport(width, 800);
+      renderBar({
+        devices: {
+          audioinput: [
+            { deviceId: 'default', label: longName },
+            { deviceId: 'headset', label: 'Headset USB' },
+          ],
+          audiooutput: [{ deviceId: 'default', label: longName }],
+          videoinput: [],
+        },
+        selectedDevices: { audioinput: 'default', audiooutput: 'default', videoinput: null },
+        audioOutputSelectable: true,
+      });
+      const mic = screen.getByRole('button', { name: /Mic/ });
+      const caret = screen.getByRole('button', { name: 'Opciones de micrófono' });
+
+      expect(box(caret).height).toBeCloseTo(box(mic).height, 0);
+      expect(box(caret).left).toBeCloseTo(box(mic).right, 0);
+
+      await userEvent.click(caret);
+      const menu = box(screen.getByRole('menu', { name: 'Opciones de micrófono' }));
       expect(menu.bottom).toBeLessThanOrEqual(box(caret).top);
       expect(menu.top).toBeGreaterThanOrEqual(0);
       expect(menu.left).toBeGreaterThanOrEqual(0);

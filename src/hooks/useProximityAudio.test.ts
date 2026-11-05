@@ -3,6 +3,8 @@ import { Room } from 'livekit-client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AttachableTrack } from '../game/attachableTrack';
 import type { CameraFilter } from '../game/cameraFilter';
+import type { DeviceStore } from '../game/deviceStore';
+import { NO_DEVICE_PREFERENCES, type DeviceKind, type DevicePreferences } from '../game/mediaDevices';
 import { createOfficeBridge } from '../game/officeBridge';
 import type { PresenceStatus } from '../game/officeProtocol';
 import type { LivekitConfig } from '../game/livekitEndpoint';
@@ -24,6 +26,7 @@ function fakeConnection(overrides: Partial<LivekitRoomConnection> = {}): Livekit
     setMicrophoneEnabled: vi.fn(async (enabled: boolean) => enabled),
     setCameraEnabled: vi.fn(async (enabled: boolean) => enabled),
     setCameraFilter: vi.fn(async (filter: CameraFilter) => filter),
+    switchDevice: vi.fn(async () => true),
     setScreenShareEnabled: vi.fn(async (enabled: boolean) => enabled),
     startAudio: vi.fn(async () => undefined),
     disconnect: vi.fn(async () => undefined),
@@ -2207,5 +2210,174 @@ describe('useProximityAudio: meeting rooms (#282)', () => {
 
     expect(result.current.canModerate).toBe(false);
     expect(result.current.meetingRoom).toBe(false);
+  });
+});
+
+describe('useProximityAudio: microphone, speaker and camera picked per browser (#284)', () => {
+  function memoryDeviceStore(initial: DevicePreferences = NO_DEVICE_PREFERENCES) {
+    let stored: DevicePreferences = initial;
+    return {
+      load: vi.fn(() => stored),
+      save: vi.fn((kind: DeviceKind, deviceId: string) => {
+        stored = { ...stored, [kind]: deviceId };
+      }),
+    } satisfies DeviceStore;
+  }
+
+  const DEVICES = {
+    audioinput: [
+      { deviceId: 'default', label: 'Predeterminado' },
+      { deviceId: 'headset', label: 'Headset USB' },
+    ],
+    audiooutput: [{ deviceId: 'default', label: 'Sistema' }, { deviceId: 'altavoces', label: 'Altavoces' }],
+    videoinput: [{ deviceId: 'cam1', label: 'Integrada' }],
+  };
+
+  function renderWithDevices({
+    store = memoryDeviceStore(),
+    audioOutputSupported = true,
+    connections = [fakeConnection()],
+  }: {
+    store?: ReturnType<typeof memoryDeviceStore>;
+    audioOutputSupported?: boolean;
+    connections?: LivekitRoomConnection[];
+  } = {}) {
+    const bridge = createOfficeBridge();
+    const options: ConnectLivekitRoomOptions[] = [];
+    const queue = [...connections];
+    const connect = vi.fn(async (opts: ConnectLivekitRoomOptions) => {
+      options.push(opts);
+      return queue.shift() ?? fakeConnection();
+    });
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+    const onDeviceNotice = vi.fn();
+    const rendered = renderHook(() =>
+      useProximityAudio(bridge, {
+        config: CONFIG,
+        status: 'g',
+        connect,
+        fetchToken,
+        deviceStore: store,
+        audioOutputSupported,
+        onDeviceNotice,
+      }),
+    );
+    const join = (spaceId: string | null) =>
+      act(async () => {
+        bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId });
+      });
+    return { ...rendered, store, options, join, onDeviceNotice };
+  }
+
+  it('every room starts with the devices this browser remembers', async () => {
+    const remembered = { audioinput: 'headset', audiooutput: 'altavoces', videoinput: null };
+    const { options, join } = renderWithDevices({ store: memoryDeviceStore(remembered) });
+
+    await join(null);
+    await join('sala');
+
+    expect(options.map((opts) => opts.preferredDevices)).toEqual([remembered, remembered]);
+  });
+
+  it('shows the devices the room lists, with the remembered one picked while it is connected', async () => {
+    const { result, options, join } = renderWithDevices({
+      store: memoryDeviceStore({ audioinput: 'headset', audiooutput: 'desenchufado', videoinput: null }),
+    });
+    await join(null);
+
+    await act(async () => options[0].onDevicesChanged?.(DEVICES));
+
+    expect(result.current.devices).toEqual(DEVICES);
+    expect(result.current.selectedDevices).toEqual({ audioinput: 'headset', audiooutput: 'default', videoinput: 'cam1' });
+  });
+
+  it('a pick is remembered, shown and switched in the live room', async () => {
+    const connection = fakeConnection();
+    const { result, store, options, join } = renderWithDevices({ connections: [connection] });
+    await join(null);
+    await act(async () => options[0].onDevicesChanged?.(DEVICES));
+
+    await act(async () => result.current.selectDevice('audioinput', 'headset'));
+
+    expect(store.save).toHaveBeenCalledWith('audioinput', 'headset');
+    expect(result.current.selectedDevices.audioinput).toBe('headset');
+    expect(connection.switchDevice).toHaveBeenCalledWith('audioinput', 'headset');
+  });
+
+  it('a pick between rooms waits for the next room', async () => {
+    const { result, options, join } = renderWithDevices();
+
+    await act(async () => result.current.selectDevice('videoinput', 'cam1'));
+    await join(null);
+
+    expect(options[0].preferredDevices?.videoinput).toBe('cam1');
+  });
+
+  it('a browser that cannot pick the speaker offers no speaker and ignores a pick of one', async () => {
+    const connection = fakeConnection();
+    const { result, store, join } = renderWithDevices({ audioOutputSupported: false, connections: [connection] });
+    await join(null);
+
+    await act(async () => result.current.selectDevice('audiooutput', 'altavoces'));
+
+    expect(result.current.audioOutputSelectable).toBe(false);
+    expect(store.save).not.toHaveBeenCalled();
+    expect(connection.switchDevice).not.toHaveBeenCalled();
+  });
+
+  it('a device that failed is told with its reason', async () => {
+    const { options, join, onDeviceNotice } = renderWithDevices();
+    await join(null);
+
+    await act(async () => options[0].onDeviceFailed?.('audioinput', 'permission-denied'));
+
+    expect(onDeviceNotice).toHaveBeenCalledExactlyOnceWith({ kind: 'audioinput', problem: 'permission-denied' });
+  });
+
+  it('a lost device is told, and what was on goes on again on the fallback without leaving the room', async () => {
+    const connection = fakeConnection();
+    const { result, options, join, onDeviceNotice } = renderWithDevices({ connections: [connection] });
+    await join(null);
+    await act(async () => result.current.toggleMic());
+    await act(async () => result.current.toggleCam());
+    vi.mocked(connection.setMicrophoneEnabled).mockClear();
+    vi.mocked(connection.setCameraEnabled).mockClear();
+
+    // livekit-client may have muted the camera whose device went away.
+    await act(async () => options[0].onDeviceLost?.('videoinput'));
+    await act(async () => options[0].onDeviceLost?.('audioinput'));
+
+    expect(onDeviceNotice).toHaveBeenCalledWith({ kind: 'videoinput', problem: 'lost' });
+    expect(onDeviceNotice).toHaveBeenCalledWith({ kind: 'audioinput', problem: 'lost' });
+    expect(connection.setCameraEnabled).toHaveBeenCalledExactlyOnceWith(true);
+    expect(connection.setMicrophoneEnabled).toHaveBeenCalledExactlyOnceWith(true);
+    expect(connection.disconnect).not.toHaveBeenCalled();
+    expect(result.current.micOn).toBe(true);
+    expect(result.current.camOn).toBe(true);
+  });
+
+  it('a lost device that was off stays off, and one that cannot come back turns its button off', async () => {
+    const connection = fakeConnection({ setCameraEnabled: vi.fn(async () => false) });
+    const { result, options, join } = renderWithDevices({ connections: [connection] });
+    await join(null);
+    await act(async () => result.current.toggleCam());
+    expect(result.current.camOn).toBe(false);
+    vi.mocked(connection.setCameraEnabled).mockClear();
+
+    await act(async () => options[0].onDeviceLost?.('videoinput'));
+    await act(async () => options[0].onDeviceLost?.('audioinput'));
+
+    expect(connection.setCameraEnabled).not.toHaveBeenCalled();
+    expect(connection.setMicrophoneEnabled).not.toHaveBeenCalled();
+  });
+
+  it('the devices outlive a room change: they belong to this machine, not to the room', async () => {
+    const { result, options, join } = renderWithDevices({ connections: [fakeConnection(), fakeConnection()] });
+    await join(null);
+    await act(async () => options[0].onDevicesChanged?.(DEVICES));
+
+    await join('sala');
+
+    expect(result.current.devices).toEqual(DEVICES);
   });
 });

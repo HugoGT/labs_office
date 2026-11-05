@@ -9,8 +9,10 @@ import {
   type CameraFilter,
 } from '../game/cameraFilter';
 import { browserCameraFilterStore, type CameraFilterStore } from '../game/cameraFilterStore';
+import { browserDeviceStore, type DeviceStore } from '../game/deviceStore';
 import type { LivekitConfig } from '../game/livekitEndpoint';
 import {
+  audioOutputSelectionSupported,
   connectLivekitRoom,
   type ConnectionQualityLevel,
   type ConnectLivekitRoomOptions,
@@ -22,6 +24,15 @@ import {
   type LivekitTokenRequest,
   type LivekitTokenResponse,
 } from '../game/livekitTokenClient';
+import {
+  DEVICE_KINDS,
+  NO_DEVICES,
+  resolveDevice,
+  type DeviceKind,
+  type DeviceLists,
+  type DeviceNotice,
+  type DevicePreferences,
+} from '../game/mediaDevices';
 import type { OfficeBridge } from '../game/officeBridge';
 import { DO_NOT_DISTURB, type PresenceStatus } from '../game/officeProtocol';
 import {
@@ -74,6 +85,12 @@ export interface UseProximityAudioOptions {
   random?: () => number;
   /** What the person should be told about a meeting room (#282); the owner shows it. */
   onMeetingNotice?: (notice: MeetingNotice) => void;
+  /** Where the picked devices are kept (#284); by default this browser's local storage. */
+  deviceStore?: DeviceStore;
+  /** Whether this browser can pick the speaker; by default livekit-client's check. */
+  audioOutputSupported?: boolean;
+  /** A device failed or was unplugged (#284); the owner explains it. */
+  onDeviceNotice?: (notice: DeviceNotice) => void;
 }
 
 /**
@@ -147,6 +164,14 @@ export interface UseProximityAudioResult {
   canModerate: boolean;
   /** Who this room's voice set holds right now (everyone else in a space), for the moderation controls. */
   roomPeerIds: ReadonlySet<string>;
+  /** This machine's devices by kind (#284); empty until the browser names them. */
+  devices: DeviceLists;
+  /** The device each kind uses: the picked one while connected, else the system's. */
+  selectedDevices: Readonly<Record<DeviceKind, string | null>>;
+  /** Picks a device: remembered in this browser and switched in the live room. */
+  selectDevice: (kind: DeviceKind, deviceId: string) => void;
+  /** This browser can pick the speaker; without it there is no speaker selector. */
+  audioOutputSelectable: boolean;
 }
 
 export interface ActiveScreenSharer {
@@ -169,6 +194,9 @@ export function useProximityAudio(
     blurSupported,
     random = Math.random,
     onMeetingNotice,
+    deviceStore,
+    audioOutputSupported,
+    onDeviceNotice,
   }: UseProximityAudioOptions,
 ): UseProximityAudioResult {
   const dnd = status === DO_NOT_DISTURB;
@@ -184,6 +212,17 @@ export function useProximityAudio(
   const cameraFilterRef = useRef(cameraFilter);
   /** Latest pick: an answer to an older one never overrides it. */
   const filterRequestRef = useRef(0);
+  const [devicesStore] = useState(() => deviceStore ?? browserDeviceStore());
+  const [audioOutputSelectable] = useState(() => audioOutputSupported ?? audioOutputSelectionSupported());
+  const [devicePreferences, setDevicePreferences] = useState<DevicePreferences>(() => devicesStore.load());
+  /** Fresh picks for a room connecting later, like `cameraFilterRef`. */
+  const devicePreferencesRef = useRef(devicePreferences);
+  const [devices, setDevices] = useState<DeviceLists>(NO_DEVICES);
+  /** By ref, like `onMeetingNotice`: a new callback each render must not rebuild the room. */
+  const onDeviceNoticeRef = useRef(onDeviceNotice);
+  useEffect(() => {
+    onDeviceNoticeRef.current = onDeviceNotice;
+  }, [onDeviceNotice]);
   const [micOn, setMicOn] = useState(false);
   const [camOn, setCamOn] = useState(false);
   const [audioAvailable, setAudioAvailable] = useState(false);
@@ -300,6 +339,22 @@ export function useProximityAudio(
       }
     }
 
+    /** After a device was lost (#284): only the kind it served, and only if it was on. */
+    function restorePublishing(connection: LivekitRoomConnection, kind: DeviceKind): void {
+      if (dndRef.current) return;
+      const isCurrent = () => connectionRef.current === connection;
+      if (kind === 'audioinput' && micOnRef.current) {
+        void connection.setMicrophoneEnabled(true).then((enabled) => {
+          if (isCurrent() && micOnRef.current) setMicOnIntent(enabled);
+        });
+      }
+      if (kind === 'videoinput' && camOnRef.current) {
+        void connection.setCameraEnabled(true).then((enabled) => {
+          if (isCurrent() && camOnRef.current) setCamOnIntent(enabled);
+        });
+      }
+    }
+
     /**
      * Entering a meeting room (#282) publishes nothing: whatever was on in the
      * previous room goes off before `reapplyPublishIntent`, once per target.
@@ -381,6 +436,23 @@ export function useProximityAudio(
       return {
         url: config?.url ?? tokenResponse.url,
         token: tokenResponse.token,
+        preferredDevices: devicePreferencesRef.current,
+        onDevicesChanged: (lists) => {
+          if (!isCurrent()) return;
+          setDevices(lists);
+        },
+        onDeviceFailed: (kind, failure) => {
+          if (!isCurrent()) return;
+          onDeviceNoticeRef.current?.({ kind, problem: failure });
+        },
+        onDeviceLost: (kind) => {
+          if (!isCurrent()) return;
+          onDeviceNoticeRef.current?.({ kind, problem: 'lost' });
+          // The room already moved to the fallback device; what was on goes
+          // on again there (livekit-client mutes a camera it cannot restart).
+          const connection = connectionRef.current;
+          if (connection) restorePublishing(connection, kind);
+        },
         onAudioPlaybackChanged: (canPlayback) => {
           if (!isCurrent()) return;
           setAudioBlocked(!canPlayback);
@@ -798,6 +870,23 @@ export function useProximityAudio(
     })();
   }, [camOn, dnd, audioAvailable, setCamOnIntent]);
 
+  const selectDevice = useCallback(
+    (kind: DeviceKind, deviceId: string) => {
+      if (kind === 'audiooutput' && !audioOutputSelectable) return;
+      const next = { ...devicePreferencesRef.current, [kind]: deviceId };
+      devicePreferencesRef.current = next;
+      setDevicePreferences(next);
+      devicesStore.save(kind, deviceId);
+      // Between rooms the next one applies it on connect.
+      void connectionRef.current?.switchDevice(kind, deviceId);
+    },
+    [audioOutputSelectable, devicesStore],
+  );
+
+  const selectedDevices = Object.fromEntries(
+    DEVICE_KINDS.map((kind) => [kind, resolveDevice(devicePreferences[kind], devices[kind])]),
+  ) as Record<DeviceKind, string | null>;
+
   const screenShareAvailable = audioAvailable && inSpaceRoom;
   const recordableMedia = screenShareAvailable && roomHasMedia;
   const screenShareOn = localScreenShareTrack !== null;
@@ -843,5 +932,9 @@ export function useProximityAudio(
     meetingRoom,
     canModerate,
     roomPeerIds,
+    devices,
+    selectedDevices,
+    selectDevice,
+    audioOutputSelectable,
   };
 }

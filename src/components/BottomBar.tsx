@@ -1,11 +1,13 @@
 import type { CameraFilter } from '../game/cameraFilter';
 import type { ConnectionQualityLevel } from '../game/livekitRoom';
+import { NO_DEVICES, type DeviceKind, type DeviceLists } from '../game/mediaDevices';
 import type { OfficeEventMap } from '../game/officeBridge';
 import { DO_NOT_DISTURB, PRESENCE_STATUSES, type PresenceStatus } from '../game/officeProtocol';
 import { STATUS_EMOJI, STATUS_LABEL, statusCssColor } from '../game/presence';
 import { useHeightCssVar } from '../hooks/useHeightCssVar';
 import styles from './BottomBar.module.css';
 import { CameraFilterMenu } from './CameraFilterMenu';
+import { MediaMenu, type MediaMenuSection } from './MediaMenu';
 
 export interface BottomBarProps {
   /**
@@ -74,6 +76,47 @@ export interface BottomBarProps {
   /** Lock the space the user stands in; the room decides. */
   onLockRoom: () => void;
   onUnlockRoom: () => void;
+  /** This machine's devices by kind (#284); empty until the browser names them. */
+  devices?: DeviceLists;
+  /** The device each kind uses right now. */
+  selectedDevices?: Readonly<Record<DeviceKind, string | null>>;
+  /** The browser can pick the speaker: without it there is no speaker selector. */
+  audioOutputSelectable?: boolean;
+  onSelectDevice?: (kind: DeviceKind, deviceId: string) => void;
+}
+
+const NO_SELECTION: Readonly<Record<DeviceKind, string | null>> = {
+  audioinput: null,
+  audiooutput: null,
+  videoinput: null,
+};
+
+/** Per kind: the section's name, what to call a device the browser left unnamed, and how to get them listed. */
+const DEVICE_SECTION: Record<DeviceKind, { label: string; unnamed: string; empty: string }> = {
+  audioinput: { label: 'Micrófono', unnamed: 'Micrófono', empty: 'Enciende el micrófono para ver tus micrófonos' },
+  // Browsers list speakers once the microphone has been allowed.
+  audiooutput: { label: 'Altavoz', unnamed: 'Altavoz', empty: 'Enciende el micrófono para ver tus altavoces' },
+  videoinput: { label: 'Cámara', unnamed: 'Cámara', empty: 'Enciende la cámara para ver tus cámaras' },
+};
+
+function deviceSection(
+  kind: DeviceKind,
+  devices: DeviceLists,
+  selected: Readonly<Record<DeviceKind, string | null>>,
+  onSelect: (kind: DeviceKind, deviceId: string) => void,
+): MediaMenuSection {
+  const { label, unnamed, empty } = DEVICE_SECTION[kind];
+  return {
+    label,
+    options: devices[kind].map((device, index) => {
+      const name = device.label || `${unnamed} ${index + 1}`;
+      // Long names are cut in the menu: the title keeps the whole of it.
+      return { value: device.deviceId, label: name, title: name };
+    }),
+    selected: selected[kind],
+    onSelect: (deviceId) => onSelect(kind, deviceId),
+    emptyLabel: empty,
+  };
 }
 
 /** Explica el `disabled` de mic/camara cuando no hay conexion viva a LiveKit. */
@@ -166,6 +209,10 @@ export function BottomBar({
   roomLockedByMe,
   onLockRoom,
   onUnlockRoom,
+  devices = NO_DEVICES,
+  selectedDevices = NO_SELECTION,
+  audioOutputSelectable = false,
+  onSelectDevice = () => undefined,
 }: BottomBarProps) {
   // Se deriva del estado en vez de recibirse como prop propia: dos fuentes
   // para el mismo hecho acabarian discrepando en algun render.
@@ -189,6 +236,10 @@ export function BottomBar({
   // Stopping never waits for media: a recording outlives a mic turned off.
   const locked = room !== null && roomLocked;
   const lockTitle = room === null ? ONLY_IN_SPACE_TITLE : !roomLocked ? LOCK_TITLE : roomLockedByMe ? UNLOCK_TITLE : LOCKED_TITLE;
+  const micSections = [
+    deviceSection('audioinput', devices, selectedDevices, onSelectDevice),
+    ...(audioOutputSelectable ? [deviceSection('audiooutput', devices, selectedDevices, onSelectDevice)] : []),
+  ];
   const recordTitle =
     room === null ? ONLY_IN_SPACE_TITLE : recording || recordableMedia ? undefined : NOTHING_TO_RECORD_TITLE;
 
@@ -216,17 +267,26 @@ export function BottomBar({
       <div className={styles.controls} role="toolbar" aria-label="Controles de llamada">
         {/* `disabled`+`title` mientras LiveKit no esta disponible, espejando el
             patron ya existente en el boton de grabar (`disabled={room === null}`). */}
-        <button
-          type="button"
-          className={styles.btn}
-          aria-pressed={micOn}
-          disabled={audioDisabled}
-          title={audioTitle}
-          onClick={onToggleMic}
-        >
-          {micOn ? '🎙️ Mic' : '🔇 Mic'}
-        </button>
-        {/* Split button: the caret's filter menu belongs to the camera. */}
+        {/* Split buttons: each caret's menu belongs to the button it joins (#284). */}
+        <span className={styles.split}>
+          <button
+            type="button"
+            className={`${styles.btn} ${styles.splitMain}`}
+            aria-pressed={micOn}
+            disabled={audioDisabled}
+            title={audioTitle}
+            onClick={onToggleMic}
+          >
+            {micOn ? '🎙️ Mic' : '🔇 Mic'}
+          </button>
+          <MediaMenu
+            label="Opciones de micrófono"
+            sections={micSections}
+            disabled={audioDisabled}
+            disabledTitle={audioTitle}
+            align="start"
+          />
+        </span>
         <span className={styles.split}>
           <button
             type="button"
@@ -251,6 +311,7 @@ export function BottomBar({
             disabled={audioDisabled}
             disabledTitle={audioTitle}
             onChange={onChangeCameraFilter}
+            cameras={deviceSection('videoinput', devices, selectedDevices, onSelectDevice)}
           />
         </span>
         <button
