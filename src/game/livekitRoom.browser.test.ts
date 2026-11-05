@@ -7,12 +7,12 @@
 // asi que se usa para tipar el cast.
 import * as vitestBrowser from 'vitest/browser';
 import type { BrowserCommands } from 'vitest/browser';
-import { Room, RoomEvent } from 'livekit-client';
+import { Room, RoomEvent, Track, type LocalTrackPublication, type TrackProcessor } from 'livekit-client';
 
 const commands = (vitestBrowser as unknown as { commands: BrowserCommands }).commands;
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { LIVEKIT_ROOM_NAME } from './officeProtocol';
-import { connectLivekitRoom, type LivekitRoomConnection } from './livekitRoom';
+import { connectLivekitRoom, type BlurProcessor, type ConnectLivekitRoomOptions, type LivekitRoomConnection } from './livekitRoom';
 
 /**
  * Necesita un LiveKit real levantado (`docker compose up -d redis livekit` en
@@ -47,7 +47,10 @@ async function connectPublisher(identity: string): Promise<Room> {
   return room;
 }
 
-async function connectWrapped(identity: string): Promise<{
+async function connectWrapped(
+  identity: string,
+  options: Partial<ConnectLivekitRoomOptions> = {},
+): Promise<{
   connection: LivekitRoomConnection;
   room: Room;
 }> {
@@ -57,6 +60,7 @@ async function connectWrapped(identity: string): Promise<{
     url: LIVEKIT_WS_URL,
     token,
     createRoom: () => room,
+    ...options,
   });
   rooms.push(connection);
   return { connection, room };
@@ -215,3 +219,155 @@ describe.skipIf(!import.meta.env.VITE_LIVEKIT_E2E)(
     });
   },
 );
+
+/** The own microphone or camera publication: the one other people are subscribed to. */
+function ownPublication(room: Room, kind: 'audioinput' | 'videoinput'): LocalTrackPublication {
+  const source = kind === 'audioinput' ? Track.Source.Microphone : Track.Source.Camera;
+  const publication = room.localParticipant.getTrackPublication(source);
+  if (!publication?.track) throw new Error(`no ${kind} publication`);
+  return publication;
+}
+
+/** The device the track really captures from, not the one asked for. */
+function capturedDevice(room: Room, kind: 'audioinput' | 'videoinput'): string | undefined {
+  return ownPublication(room, kind).track?.mediaStreamTrack.getSettings().deviceId;
+}
+
+/**
+ * Another fake device of the same kind. Chromium's fake media lists three
+ * microphones and, with `device-count=2` (`vite.config.ts`), two cameras.
+ */
+async function otherDevice(kind: 'audioinput' | 'videoinput', inUse: string | undefined): Promise<string> {
+  const devices = await navigator.mediaDevices.enumerateDevices();
+  const other = devices.find(
+    (device) => device.kind === kind && device.deviceId !== 'default' && device.deviceId !== inUse,
+  );
+  if (!other) throw new Error(`no second ${kind} to switch to`);
+  return other.deviceId;
+}
+
+/**
+ * Stands in for the background blur, which needs MediaPipe from a CDN: what
+ * is checked is that livekit-client keeps the processor across a switch and
+ * restarts it on the new capture, not what the processor draws.
+ */
+function passthroughProcessor(): BlurProcessor & { restarted: MediaStreamTrack[] } {
+  const processor: BlurProcessor & { restarted: MediaStreamTrack[] } = {
+    name: 'passthrough-blur',
+    restarted: [],
+    processedTrack: undefined,
+    async init({ track }) {
+      processor.processedTrack = track.clone();
+    },
+    async restart({ track }) {
+      processor.restarted.push(track);
+      processor.processedTrack?.stop();
+      processor.processedTrack = track.clone();
+    },
+    async destroy() {
+      processor.processedTrack?.stop();
+      processor.processedTrack = undefined;
+    },
+    async switchTo() {},
+  } satisfies TrackProcessor<Track.Kind.Video> & { restarted: MediaStreamTrack[]; switchTo: BlurProcessor['switchTo'] };
+  return processor;
+}
+
+describe.skipIf(!import.meta.env.VITE_LIVEKIT_E2E)('switching a device mid call keeps the publication (#288)', () => {
+  it.each(['audioinput', 'videoinput'] as const)(
+    'a live %s switch neither unpublishes nor publishes: same sid, new device',
+    async (kind) => {
+      const { connection, room } = await connectWrapped(`switch-${kind}-${Date.now()}`);
+      const enabled = kind === 'audioinput' ? connection.setMicrophoneEnabled(true) : connection.setCameraEnabled(true);
+      expect(await enabled).toBe(true);
+      const before = ownPublication(room, kind);
+      const sid = before.trackSid;
+      const target = await otherDevice(kind, capturedDevice(room, kind));
+      const unpublish = vi.spyOn(room.localParticipant, 'unpublishTrack');
+      const publish = vi.spyOn(room.localParticipant, 'publishTrack');
+      const republished = vi.fn();
+      room.on(RoomEvent.LocalTrackUnpublished, republished);
+      room.on(RoomEvent.LocalTrackPublished, republished);
+
+      expect(await connection.switchDevice(kind, target)).toBe(true);
+
+      expect(unpublish).not.toHaveBeenCalled();
+      expect(publish).not.toHaveBeenCalled();
+      expect(republished).not.toHaveBeenCalled();
+      expect(ownPublication(room, kind)).toBe(before);
+      expect(ownPublication(room, kind).trackSid).toBe(sid);
+      expect(capturedDevice(room, kind)).toBe(target);
+      // The sender went on with the new capture, without renegotiating.
+      expect(before.track?.sender?.track).toBe(before.track?.mediaStreamTrack);
+    },
+  );
+
+  it.each(['audioinput', 'videoinput'] as const)(
+    'a %s switch while muted opens no capture; the next unmute uses the new device',
+    async (kind) => {
+      const { connection, room } = await connectWrapped(`muted-${kind}-${Date.now()}`);
+      const toggle = (on: boolean) =>
+        kind === 'audioinput' ? connection.setMicrophoneEnabled(on) : connection.setCameraEnabled(on);
+      expect(await toggle(true)).toBe(true);
+      const target = await otherDevice(kind, capturedDevice(room, kind));
+      expect(await toggle(false)).toBe(false);
+      const getUserMedia = vi.spyOn(navigator.mediaDevices, 'getUserMedia');
+
+      try {
+        expect(await connection.switchDevice(kind, target)).toBe(true);
+
+        expect(getUserMedia).not.toHaveBeenCalled();
+        expect(ownPublication(room, kind).isMuted).toBe(true);
+        const track = ownPublication(room, kind).track?.mediaStreamTrack;
+        // A muted microphone keeps a silent track; a muted camera has none running.
+        expect(track?.readyState === 'ended' || track?.enabled === false).toBe(true);
+      } finally {
+        getUserMedia.mockRestore();
+      }
+
+      expect(await toggle(true)).toBe(true);
+      expect(capturedDevice(room, kind)).toBe(target);
+    },
+  );
+
+  it.each(['audioinput', 'videoinput'] as const)(
+    'a %s switch that fails leaves the call on the previous device and tells the caller',
+    async (kind) => {
+      const onDeviceFailed = vi.fn();
+      const { connection, room } = await connectWrapped(`failed-${kind}-${Date.now()}`, { onDeviceFailed });
+      const enabled = kind === 'audioinput' ? connection.setMicrophoneEnabled(true) : connection.setCameraEnabled(true);
+      expect(await enabled).toBe(true);
+      const before = ownPublication(room, kind);
+      const previous = capturedDevice(room, kind);
+
+      expect(await connection.switchDevice(kind, 'no-such-device')).toBe(false);
+
+      expect(onDeviceFailed).toHaveBeenCalledExactlyOnceWith(kind, expect.any(String));
+      expect(ownPublication(room, kind)).toBe(before);
+      expect(before.isMuted).toBe(false);
+      expect(before.track?.mediaStreamTrack.readyState).toBe('live');
+      expect(capturedDevice(room, kind)).toBe(previous);
+      expect(before.track?.sender?.track).toBe(before.track?.mediaStreamTrack);
+    },
+  );
+
+  it('a blurred camera stays blurred after a switch: the processor restarts on the new capture', async () => {
+    const processor = passthroughProcessor();
+    const { connection, room } = await connectWrapped(`blur-${Date.now()}`, {
+      loadBackgroundBlur: async () => ({ supported: () => true, createProcessor: () => processor }),
+    });
+    expect(await connection.setCameraFilter('blur-light')).toBe('blur-light');
+    expect(await connection.setCameraEnabled(true)).toBe(true);
+    const before = ownPublication(room, 'videoinput');
+    const sid = before.trackSid;
+    const target = await otherDevice('videoinput', capturedDevice(room, 'videoinput'));
+
+    expect(await connection.switchDevice('videoinput', target)).toBe(true);
+
+    expect(before.trackSid).toBe(sid);
+    expect(before.track?.getProcessor()).toBe(processor);
+    expect(processor.restarted.at(-1)?.getSettings().deviceId).toBe(target);
+    // What leaves this machine is the processed track, never the raw camera.
+    expect(before.track?.sender?.track).toBe(processor.processedTrack);
+  });
+});

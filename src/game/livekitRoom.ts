@@ -92,8 +92,9 @@ export interface LivekitRoomConnection {
   setCameraEnabled(enabled: boolean): Promise<boolean>;
   /**
    * The one place that changes the microphone, speaker or camera in use
-   * (#284), live tracks included. Resolves `false` when the device did not
-   * take, after reporting why through `onDeviceFailed`.
+   * (#284), live tracks included, under the same publication (#288).
+   * Resolves `false` when the device did not take, after going back to the
+   * previous one and reporting why through `onDeviceFailed`.
    */
   switchDevice(kind: DeviceKind, deviceId: string): Promise<boolean>;
   /**
@@ -423,9 +424,19 @@ export async function connectLivekitRoom({
    */
   function switchDevice(kind: DeviceKind, deviceId: string, exact: boolean): Promise<boolean> {
     const task = async () => {
+      const previous = room.getActiveDevice(kind);
       try {
+        // Same publication, new capture (`sender.replaceTrack`): nobody
+        // resubscribes (#288). A muted track only keeps the pick for its unmute.
         return await room.switchActiveDevice(kind, deviceId, exact);
       } catch (err) {
+        // livekit-client 2.22.3 stops the old capture before opening the new
+        // one (`LocalTrack.restart`) and only rolls back its options, so a
+        // live track would stay silent or black (#288). The speaker keeps
+        // the old one by itself.
+        if (kind !== 'audiooutput' && previous !== undefined && previous !== deviceId) {
+          await room.switchActiveDevice(kind, previous, true).catch(() => undefined);
+        }
         onDeviceFailed?.(kind, mediaFailureOf(err));
         return false;
       }
