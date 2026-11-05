@@ -6,6 +6,7 @@ import {
   createOfficeRoom,
   createSharedMicrophone,
   disconnectReaction,
+  OFFICE_AUDIO_CAPTURE,
   releaseSharedMicrophone,
   type SharedMicrophone,
 } from './livekitRoom';
@@ -125,6 +126,24 @@ describe('createOfficeRoom: bandwidth for a full space', () => {
     const room = createOfficeRoom();
 
     expect(room.options.publishDefaults?.audioPreset).toEqual(AudioPresets.speech);
+  });
+
+  it('asks the browser for its own voice processing explicitly, so an SDK upgrade cannot drop it (#285)', () => {
+    const room = createOfficeRoom();
+
+    expect(room.options.audioCaptureDefaults).toMatchObject({
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      voiceIsolation: true,
+    });
+    // Pinned by the office, not inherited: the constant is what the room uses.
+    expect(OFFICE_AUDIO_CAPTURE).toEqual({
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+      voiceIsolation: true,
+    });
   });
 });
 
