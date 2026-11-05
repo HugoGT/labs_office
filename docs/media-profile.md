@@ -17,6 +17,7 @@ outgoing side.
 | `adaptiveStream` | on (`pixelDensity` SDK default) | same | Each tile pulls the simulcast layer its size needs and nothing while hidden. | No (kept from before) |
 | `dynacast` | on | same | The publisher stops encoding layers nobody receives. | No (kept from before) |
 | Microphone `audioPreset` | `AudioPresets.speech`, 24 kbps | `music`, 48 kbps | Voice loses nothing audible at 24 kbps Opus; half the bitrate leaves headroom on a bad network. DTX and RED stay at SDK defaults (on). | Pending |
+| Microphone capture processing | browser `echoCancellation`, `noiseSuppression`, `autoGainControl`, `voiceIsolation` on, pinned in `OFFICE_AUDIO_CAPTURE` | same values, inherited from livekit-client defaults | Decision of #285, see "Noise suppression" below: no custom processor until a measurement asks for one. | No |
 | Shared screen audio `audioPreset` | `AudioPresets.music`, 48 kbps | same | A shared video's soundtrack is not speech; it is rare, so its cost is small. | No |
 | Screen share `contentHint` | `detail` | unset | The usual share is a document. `detail` tells the browser encoder to keep resolution and drop frame rate under pressure, so text stays legible. | Pending |
 | Camera | 720p, VP8, simulcast 180p/360p/720p (SDK defaults) | same | No measurement yet justifies changing it. | No |
@@ -91,6 +92,64 @@ published and heard in the next room, nothing captured again, released on
 leaving and in "No molestar"), `src/game/livekitRoom.test.ts` and
 `src/hooks/useProximityAudio.test.ts` (fast doors leave one live room and one
 publishing room).
+
+## Noise suppression (issue #285)
+
+Decision: keep the browser's own voice processing and add no custom noise
+processor for now. The office asks for it explicitly instead of inheriting it:
+`OFFICE_AUDIO_CAPTURE` in `src/game/livekitRoom.ts` sets `echoCancellation`,
+`noiseSuppression`, `autoGainControl` and `voiceIsolation` to `true` as the
+room's `audioCaptureDefaults`. These equal livekit-client 2.22's defaults
+(`src/room/defaults.ts`), so nobody hears a change today; the point is that a
+livekit-client upgrade cannot silently change what every microphone sounds
+like. There is no per-person control yet: nothing measured says anyone needs
+one.
+
+The values reach every capture the office makes, including the shared
+microphone of #286: livekit-client restarts a capture (a device switch, for one)
+with the constraints it was first captured with, and a
+door publishes that same capture. A real-LiveKit browser test checks the
+applied `getSettings()` at capture, after a switch and behind a door.
+
+What each browser does with these flags differs, and is the reason this is
+still open. They are hints (`ideal`), not requirements: a browser that does
+not know `voiceIsolation` ignores it and keeps the call going.
+
+### Options evaluated (from code and documentation, nothing measured)
+
+| Option | Cost to add | Self-hosted LiveKit | Verdict |
+|---|---|---|---|
+| Browser processing (WebRTC APM in Chromium, the OS or browser pipeline elsewhere) | None: already on, now pinned | Yes, it runs before LiveKit | Kept |
+| `@livekit/krisp-noise-filter` | One lazy dependency, `track.setProcessor` | Doubtful: its license is "SEE LICENSE IN https://livekit.io/legal/terms-of-service" and the 0.4.5 bundle is obfuscated (about 6 MB), so it cannot be reviewed; LiveKit's documentation presents its Krisp noise cancellation as a LiveKit Cloud feature (not re-checked for this decision). Confirm in writing with LiveKit before considering it | Discarded |
+| Open models in an AudioWorklet (RNNoise, DTLN, DeepFilterNet), as `adventure` does | A WASM model (order of hundreds of KB to a few MB, not measured), a worklet and an audio `TrackProcessor`; `@livekit/track-processors` only ships a gain processor for audio | Yes, all client side | Discarded for now: unknown CPU on the office laptops, more latency, and a second path to keep alive on every capture restart and door |
+
+Not reviewed: the internals, real cost and license of `adventure`'s
+`NoiseSuppressionController`; any code or model taken from it needs its
+license checked first.
+
+### What would reopen it
+
+A custom processor is worth adding only if a measurement shows both a problem
+and a fix that fits a normal laptop. Run on two laptops the office actually
+uses (one Windows with Chrome or Edge, one macOS with Chrome and Safari):
+
+1. Problem: record 30 s of a real office scene (keyboard, a nearby
+   conversation, a fan) as heard by a second participant, once per browser
+   with the current profile. Reopen only if the noise is still clearly
+   audible or speech is cut by the suppression.
+2. Alternative: the same scene with one open model (DeepFilterNet or RNNoise)
+   applied as a processor on the same capture, compared blind by two people.
+3. CPU: Chrome's task manager or `chrome://tracing` for the tab, with and
+   without the processor, over 5 minutes in a call. The bar: less than 5 % of
+   one core more on the slower laptop.
+4. Latency: the processor's frame size plus its lookahead, read from its
+   documentation, confirmed by a clap recorded on both sides. The bar: under
+   40 ms added.
+
+If it passes, the issue's last criterion applies: load it lazily like
+`backgroundBlur.ts`, offer it as an option in `MediaMenu`, and on any failure
+remove the processor and keep publishing the browser-processed capture,
+without unpublishing.
 
 ## Expected effect (estimate, not measured)
 
