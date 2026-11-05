@@ -1,4 +1,4 @@
-# Observability (#275): one dashboard and three alerts in Cloud Monitoring.
+# Observability (#275): one dashboard and four alerts in Cloud Monitoring.
 #
 # GCP-native on purpose, not a Prometheus and Grafana of our own: the Ops Agent
 # on the VM (../ops-agent.yaml, installed by office-deploy) already ships VM and
@@ -199,5 +199,42 @@ resource "google_monitoring_alert_policy" "disk_full_while_recording" {
   documentation {
     mime_type = "text/markdown"
     content   = "El disco de la VM esta por encima del 85 % y hay una grabacion en marcha: si se llena, la grabacion se pierde. Liberar espacio en la VM (`docker image prune -af`, `docker system df`) o parar la grabacion desde la oficina."
+  }
+}
+
+# ---------------------------------------------------------------------------
+# La VM no pudo arrancar
+# ---------------------------------------------------------------------------
+
+# #278: a stopped VM gives its cores back, and the 07:45 start (schedule or
+# office-vm.sh) fails with ZONE_RESOURCE_POOL_EXHAUSTED when us-central1-a has
+# no capacity left for the machine type, e2-standard-8 on Fridays being the
+# likelier. livekit_down stays silent then (the VM never reports uptime), so
+# this reads the failed start itself from the Admin Activity audit log, which
+# is always on and free. Log-based: one email per failure, at most one an hour.
+resource "google_monitoring_alert_policy" "vm_start_failed" {
+  display_name          = "${local.name}: la VM no pudo arrancar"
+  combiner              = "OR"
+  notification_channels = local.alert_channels
+  user_labels           = local.labels
+
+  conditions {
+    display_name = "Arranque de la VM rechazado"
+
+    condition_matched_log {
+      filter = "${local.office_instance_filter} AND log_id(\"cloudaudit.googleapis.com/activity\") AND severity >= ERROR AND protoPayload.methodName : \"instances.start\""
+    }
+  }
+
+  alert_strategy {
+    notification_rate_limit {
+      period = "3600s"
+    }
+    auto_close = "1800s"
+  }
+
+  documentation {
+    mime_type = "text/markdown"
+    content   = "La VM de la oficina no arranco: nadie puede entrar. Si el error es ZONE_RESOURCE_POOL_EXHAUSTED, la zona no tiene capacidad para el tipo de maquina. Plan en \"VM schedule\" > \"No capacity in the zone\" de infra/gcp/README.md: reintentar `infra/gcp/scripts/office-vm.sh start` y, si sigue fallando, `office-vm.sh start --size e2-standard-4`."
   }
 }

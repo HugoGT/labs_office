@@ -466,11 +466,32 @@ SQL is separate. Check the billing report, filtered by the `app` label.
 - **No "office closed" page.** Outside office hours `https://app.../` does not
   answer at all (connection refused or timeout), and so do LiveKit and TURN.
   Start the VM with `office-vm.sh start` if you need it.
-- **Zone capacity.** A stopped VM gives its resources back. Starting it, by the
-  schedule or by hand, can fail with `ZONE_RESOURCE_POOL_EXHAUSTED` when
-  `us-central1-a` has no capacity for the machine type, `e2-standard-8` being
-  the likelier to hit it. Instance schedules guarantee no capacity; retry
-  later, or start it with the smaller size.
+- **Guaranteed capacity.** Instance schedules guarantee no capacity, and a
+  reservation would bill the cores all week. See the next section instead.
+
+### No capacity in the zone
+
+A stopped VM gives its resources back. Starting it, by the schedule or by
+hand, can fail with `ZONE_RESOURCE_POOL_EXHAUSTED` when `us-central1-a` has no
+capacity for the machine type, `e2-standard-8` (every Friday) being the
+likelier to hit it. The plan:
+
+1. **Alert.** The `vm_start_failed` policy (`terraform/monitoring.tf`) emails
+   `alert_email` when a start of this instance fails in the Admin Activity
+   audit log. `livekit_down` cannot catch it: it only fires while the VM runs.
+2. **Retry the same size**, a few minutes apart: the pool frees up during the
+   morning. `infra/gcp/scripts/office-vm.sh start` (it waits for `/health`).
+3. **Fall back to the normal size** if the meeting is close: `office-vm.sh
+   start --size e2-standard-4` (the VM is stopped, so the resize is allowed).
+   The meeting runs with the headroom of a normal day (see *Capacity* under
+   *Recordings*). The nightly job puts `e2-standard-8` back for the next
+   heavy day.
+4. **Start earlier** when a Friday start failed the week before: run
+   `office-vm.sh start` at 06:30 that Friday, after the nightly job has already
+   sized it, so a failure leaves an hour to retry before the office opens.
+
+Moving the VM to another zone is a Terraform change that replaces it; not part
+of this plan.
 
 ## CPU per container (issue #278)
 
@@ -1184,7 +1205,7 @@ Everything is GCP-native: no Prometheus or Grafana of our own.
 | Connection quality | Shown to each user in the bottom bar, from LiveKit's `ConnectionQualityChanged` |
 | Scraping | `ops-agent.yaml`, metadata `office-ops-agent-config`, installed and configured by `office-deploy` on every deploy and boot. Never fatal: without it only the metrics are missing |
 | Dashboard | `google_monitoring_dashboard.office`: players per room, tracks, SFU Mbps, VM CPU, CPU per container, disk, recordings, disconnections by reason, connect time |
-| Alerts | `terraform/monitoring.tf`: CPU above 85 % for 10 min; LiveKit uptime check failing 5 min while the VM runs (AND with the VM uptime, so the nightly stop is silent); disk above 85 % while a recording runs |
+| Alerts | `terraform/monitoring.tf`: CPU above 85 % for 10 min; LiveKit uptime check failing 5 min while the VM runs (AND with the VM uptime, so the nightly stop is silent); disk above 85 % while a recording runs; a failed start of the VM in the audit log (#278, see *No capacity in the zone*) |
 | Who is notified | `alert_email` in `terraform.tfvars`. Empty: incidents only show in the console |
 
 ### Rolling it out (by hand, once)
