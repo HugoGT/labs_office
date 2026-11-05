@@ -102,9 +102,10 @@ const CONTENTS_BLOCKED: AdminResult = { status: 409, body: { error: 'contents-bl
  * stay out of the hash for the same reason as `kind`: they do not decide who
  * hears whom, and a floor is chosen once, at creation (step 7).
  */
+/** `meeting` (#282) too: the room editor shows it, and like the floor it decides nobody's membership. */
 function toConfigBody(space: Space): Record<string, unknown> {
-  const { id, slug, name, x, y, w, h, capacity, deskId, floorMaterialId, floorColor } = space;
-  return { id, slug, name, x, y, w, h, capacity, kind: deskId === null ? 'room' : 'desk', floorMaterialId, floorColor };
+  const { id, slug, name, x, y, w, h, capacity, deskId, floorMaterialId, floorColor, meeting } = space;
+  return { id, slug, name, x, y, w, h, capacity, kind: deskId === null ? 'room' : 'desk', floorMaterialId, floorColor, meeting };
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -208,6 +209,7 @@ export async function handleUpdateSpace(
   if ('w' in body) patch.w = body.w as number;
   if ('h' in body) patch.h = body.h as number;
   if ('capacity' in body) patch.capacity = body.capacity as number | null;
+  if ('meeting' in body) patch.meeting = body.meeting as boolean;
 
   const write = () => deps.spaces.updateSpace(id, patch);
   // Only a move whole carries: after a resize what stood inside may not fit,

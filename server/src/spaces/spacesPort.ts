@@ -37,6 +37,13 @@ export interface Space {
    */
   floorMaterialId: string;
   floorColor: string | null;
+  /**
+   * Meeting room (#282): whoever enters starts with microphone and camera
+   * off, and an admin there may mute the others. Set by an update only (a
+   * room is born without it), never on a desk cubicle. Not part of
+   * `version()`: it decides who publishes, not who hears whom.
+   */
+  meeting: boolean;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -82,6 +89,7 @@ export interface UpdateSpaceInput {
   w?: number;
   h?: number;
   capacity?: number | null;
+  meeting?: boolean;
 }
 
 export interface LayoutItemInput {

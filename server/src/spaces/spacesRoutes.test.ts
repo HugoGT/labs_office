@@ -171,6 +171,7 @@ describe('handleGetSpacesConfig', () => {
       'h',
       'id',
       'kind',
+      'meeting',
       'name',
       'slug',
       'w',
@@ -203,6 +204,7 @@ describe('handleGetSpacesConfig', () => {
       h: 3,
       capacity: null,
       deskId: 'id-mesa-1',
+      meeting: false,
       floorMaterialId: 'floor-wood',
       floorColor: null,
       createdAt: NOW,
@@ -464,6 +466,22 @@ describe('handleUpdateSpace', () => {
     const result = await handleUpdateSpace(BEARER_ADMIN, id, { capacity: null }, deps);
 
     expect(result.body.capacity).toBeNull();
+  });
+
+  it('an admin turns a room into a meeting room and back (#282)', async () => {
+    const { deps, spaces, id } = await conEspacio();
+
+    const on = await handleUpdateSpace(BEARER_ADMIN, id, { meeting: true }, deps);
+    expect(on).toMatchObject({ status: 200, body: { meeting: true, name: 'Antes' } });
+    expect((await spaces.getSpace(id))?.meeting).toBe(true);
+
+    expect((await handleUpdateSpace(BEARER_ADMIN, id, { meeting: false }, deps)).body.meeting).toBe(false);
+  });
+
+  it('meeting mode that is not a boolean answers 400 (#282)', async () => {
+    const { deps, id } = await conEspacio();
+
+    expect((await handleUpdateSpace(BEARER_ADMIN, id, { meeting: 'yes' }, deps)).status).toBe(400);
   });
 
   it('medio rectangulo responde 400', async () => {

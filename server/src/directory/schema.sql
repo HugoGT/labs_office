@@ -419,6 +419,10 @@ ALTER TABLE spaces ADD COLUMN IF NOT EXISTS floor_color text;
 ALTER TABLE spaces DROP CONSTRAINT IF EXISTS spaces_floor_color_check;
 ALTER TABLE spaces ADD CONSTRAINT spaces_floor_color_check CHECK (floor_color IS NULL OR floor_color ~ '^#[0-9a-f]{6}$');
 
+-- Meeting rooms (#282): whoever enters starts muted, and an admin there can
+-- mute the others through LiveKit. Every existing space stays a normal one.
+ALTER TABLE spaces ADD COLUMN IF NOT EXISTS meeting boolean NOT NULL DEFAULT false;
+
 -- Terrain blocks (#123 phase 2). One row per 9x9 block an admin edited; a
 -- block without a row keeps the material of the committed Tiled layout
 -- (`src/game/maps/office.json`), so a new layout file still reaches every
