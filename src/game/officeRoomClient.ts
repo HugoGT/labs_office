@@ -204,6 +204,14 @@ export interface OfficeRoomHandlers {
    */
   onResync?(): void;
   /**
+   * The server is restarting on purpose, a deploy (#276). This module cannot
+   * bring the session back: the token died with the old process, and a fresh
+   * join changes the `sessionId` the caller keys everything on. It reports
+   * "reconnecting" and leaves the fresh join to the caller. Without this
+   * handler a restart ends "offline", like a give-up.
+   */
+  onServerRestart?(): void;
+  /**
    * Every active recording, keyed by spaceId (#5). Always the whole map, never
    * a delta; optional for the same reason as the call handlers.
    */
@@ -562,7 +570,8 @@ export async function connectOfficeRoom({
     // `DEBUG=colyseus:connection` registra "terminating unresponsive client"
     // solo en el segundo caso. 1001 es la pestana yendose, y 4002 un error del
     // lado del servidor. 4100 is this account joining from another tab (#78),
-    // and 4101 an admin revoking its access (#93).
+    // 4101 an admin revoking its access (#93), and 4102 the server restarting
+    // for a deploy (#276).
     console.warn(`[office] sesion cerrada (${closeCode}); intento ${attempt}`);
 
     const decision = decideReconnect({ closeCode, attempt });
@@ -572,6 +581,11 @@ export async function connectOfficeRoom({
     }
     if (decision.kind === 'stop' && decision.reason === 'revoked') {
       handlers.onConnectionState?.('revoked');
+      return;
+    }
+    if (decision.kind === 'rejoin' && handlers.onServerRestart) {
+      handlers.onConnectionState?.('reconnecting');
+      handlers.onServerRestart();
       return;
     }
     if (decision.kind !== 'retry') {

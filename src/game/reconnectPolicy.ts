@@ -13,7 +13,7 @@
  * quien puede cancelarlo al apagarse.
  */
 
-import { SESSION_REPLACED_CLOSE_CODE, SESSION_REVOKED_CLOSE_CODE } from './officeProtocol';
+import { SERVER_RESTART_CLOSE_CODE, SESSION_REPLACED_CLOSE_CODE, SESSION_REVOKED_CLOSE_CODE } from './officeProtocol';
 
 /**
  * Cierre voluntario: alguien llamo a `room.leave()` o cerro la pestana.
@@ -65,6 +65,10 @@ export type ReconnectDecision =
   // retry could only fail.
   | { kind: 'stop'; reason: 'revoked' }
   | { kind: 'retry'; delayMs: number }
+  // #276: the server process is going away with its rooms, so the
+  // reconnection token dies with it. Only a fresh join can bring the session
+  // back, and that is the scene's job (`decideRejoin` paces it).
+  | { kind: 'rejoin' }
   | { kind: 'give-up' };
 
 export interface ReconnectInput {
@@ -84,9 +88,40 @@ export function decideReconnect({ closeCode, attempt }: ReconnectInput): Reconne
   if (closeCode === CONSENTED_CLOSE_CODE) return { kind: 'stop', reason: 'consented' };
   if (closeCode === SESSION_REPLACED_CLOSE_CODE) return { kind: 'stop', reason: 'replaced' };
   if (closeCode === SESSION_REVOKED_CLOSE_CODE) return { kind: 'stop', reason: 'revoked' };
+  if (closeCode === SERVER_RESTART_CLOSE_CODE) return { kind: 'rejoin' };
 
   const delayMs = RECONNECT_DELAYS_MS[attempt];
   if (delayMs === undefined) return { kind: 'give-up' };
 
   return { kind: 'retry', delayMs };
+}
+
+/**
+ * Steps between fresh joins after a server restart (#276). The first one
+ * leaves the new container time to boot (migrations and terrain load run
+ * before it listens); a join that still finds no server spends a step.
+ */
+export const REJOIN_DELAYS_MS: readonly number[] = [1000, 2000, 4000, 8000, 16000];
+
+/**
+ * Random extra wait added to every step. A deploy drops the whole office at
+ * the same instant; without it every client would hit the new server in the
+ * same millisecond, each join reading the directory and the saved position.
+ */
+export const REJOIN_JITTER_MS = 4000;
+
+export type RejoinDecision = { kind: 'retry'; delayMs: number } | { kind: 'give-up' };
+
+export interface RejoinInput {
+  /** Fresh joins already failed; 0 is the first, right after the restart. */
+  attempt: number;
+  /** A number in [0, 1), `Math.random()` in production. */
+  random: number;
+}
+
+/** When to try the next fresh join after a restart, or that it is time to stop. */
+export function decideRejoin({ attempt, random }: RejoinInput): RejoinDecision {
+  const base = REJOIN_DELAYS_MS[attempt];
+  if (base === undefined) return { kind: 'give-up' };
+  return { kind: 'retry', delayMs: base + Math.floor(random * REJOIN_JITTER_MS) };
 }

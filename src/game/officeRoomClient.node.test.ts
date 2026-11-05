@@ -559,6 +559,36 @@ describe('connectOfficeRoom: reconexion tras una caida (issue #52)', () => {
  * joiners included, learns about them without asking. The client hands out
  * the whole map each time: the UI compares it to its own space.
  */
+describe('connectOfficeRoom: server restart (#276)', () => {
+  it('reports "reconnecting" and hands the fresh join to the caller, never "offline"', async () => {
+    const session = recorder();
+    const restarts: string[] = [];
+    await connect('Ana', { ...session.handlers, onServerRestart: () => restarts.push(session.states.at(-1) ?? '') });
+
+    await server.shutdown();
+
+    await waitFor(() => restarts.length === 1);
+    // "reconnecting" first, so the HUD never shows the retry button for a
+    // restart that recovers by itself.
+    expect(restarts).toEqual(['reconnecting']);
+    // Past the first reconnect step (500 ms): a `client.reconnect` with the
+    // dead token would have run and failed by now.
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+    expect(session.states).toEqual(['reconnecting']);
+    expect(session.resyncs).toEqual([]);
+  });
+
+  it('without anyone to rejoin it, a restart ends offline like a give-up', async () => {
+    const session = recorder();
+    await connect('Ana', session.handlers);
+
+    await server.shutdown();
+
+    await waitFor(() => session.states.includes('offline'));
+    expect(session.states).toEqual(['offline']);
+  });
+});
+
 describe('connectOfficeRoom: recordings', () => {
   function recordingsRecorder() {
     const snapshots: Record<string, { startedBy: string; startedAt: number }>[] = [];
