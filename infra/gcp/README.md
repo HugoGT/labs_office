@@ -370,8 +370,9 @@ no hold, so a typo never keeps the VM running.
 `tools/vm/scheduleDrift.test.ts` fails until this runbook and `office-vm.sh
 --help` name the same days. On top of them, `office-heavy-days`
 (comma-separated `YYYY-MM-DD`, Lima dates) lists one-off heavy dates. The heavy
-machine doubles the cores for the SFU and allows two concurrent recordings
-instead of one (see *Capacity* under *Recordings*); every other office day runs
+machine doubles the cores for the SFU, while Egress stays capped at 4 cores
+and one recording (see *Recording the Friday meeting* under *Recordings*);
+every other office day runs
 on `e2-standard-4`. The machine type only changes while the VM is stopped, so
 the nightly job sets it the night before (Thursday night for a Friday). Mark a
 one-off date before the 02:30 run of that night, or start it by hand with
@@ -505,11 +506,11 @@ make every call sound robotic. `docker-compose.yml` prevents it two ways:
 | `colyseus` | `cpus: "1.5"` | One Node thread for the rooms, plus GC and libuv |
 | `web` | `cpus: "0.5"` | Static files |
 | `redis` | `cpus: "0.5"` | Message bus between LiveKit and Egress |
-| `egress` | none, default weight | Its admission (`cpu_cost`, see *Recordings*) counts the CPUs of its cgroup quota, so a cap under 3.75 would refuse every recording on `e2-standard-4`. The LiveKit weight is what keeps it from starving the SFU: Chrome slows down first |
+| `egress` | `cpus: "${EGRESS_CPUS}"`: 4, or the whole machine below 4 vCPU (#279) | Its admission (`cpu_cost`, see *Recordings*) counts the CPUs of its cgroup quota, so a cap under 3.75 would refuse every recording. `office-deploy` computes the value from `nproc` on every deploy and boot (`egress_cpus`): on `e2-standard-4` it is the whole machine and the LiveKit weight is what protects the SFU; on the Friday `e2-standard-8` it keeps Chrome off half the cores |
 
-The caps add up to 3.5, below the 4 vCPU of a normal day.
-`tools/vm/cpuIsolation.test.ts` keeps that true and keeps the LiveKit weight
-above the rest. The compose reaches the VM as instance metadata, so the change
+The caps of the other four add up to 3.5, below the 4 vCPU of a normal day.
+`tools/vm/cpuIsolation.test.ts` keeps that true, keeps the LiveKit weight
+above the rest and runs `egress_cpus` for each machine size. The compose reaches the VM as instance metadata, so the change
 ships with `terraform apply` (a metadata update, `update in-place`) followed by
 a deploy.
 
@@ -1119,7 +1120,7 @@ The default room composite cost is 4, which no VM under 6 vCPUs can satisfy.
 |---|---|---|
 | `e2-medium` (2 vCPU, 4 GB, current default) | 1.6 | **0**: every start answers 502 `egress-failed` |
 | `e2-standard-4` (4 vCPU, 16 GB) | 3.2 | 1 |
-| `e2-standard-8` (8 vCPU, 32 GB) | 6.4 | 2 |
+| `e2-standard-8` (8 vCPU, 32 GB), Egress quota of 4 (#279) | 3.2 | 1 |
 
 The refusal on `e2-medium` is deliberate: a headless Chrome encoding 720p on 2
 shared vCPUs would starve the SFU and degrade every live call. For reference,
@@ -1132,7 +1133,12 @@ Other limits of this single VM:
 
 - **Disk.** The Egress image is several GB, and Egress writes each MP4 to the
   container's disk before uploading it: about 1.3 GB per hour of 720p (the
-  local test measured about 3 Mbit/s). The boot disk is 20 GB.
+  local test measured about 3 Mbit/s). The boot disk is 20 GB. The server
+  stops any recording at 3 hours (`MAX_RECORDING_MS` in
+  `server/src/recording/recordingRoutes.ts`, #279), and Egress admits one at
+  a time, so the worst case is one file of about 4.2 GB. Resizing the boot
+  disk is not a Terraform change here: `initialize_params.size` replaces the
+  VM.
 - **Memory.** Chrome takes 1 to 2 GB per recording.
 - **Storage cost** is small (Standard storage, 30 days at most); downloads to
   the internet are billed as network egress.
@@ -1154,8 +1160,53 @@ Other limits of this single VM:
 - **Egress media path.** Egress's Chrome joins through
   `ws://host.docker.internal:7880`, but the media ICE candidates LiveKit
   announces are the public IP (`use_external_ip`), so the media hairpins
-  through the VM's own external address (or TURN). Not yet verified on the VM:
-  if a recording comes out black and silent, look there first.
+  through the VM's own external address (or TURN). If a recording comes out
+  black and silent, look there first. Verifying it is step 2 of *Recording
+  the Friday meeting*.
+
+### Recording the Friday meeting (#279)
+
+The Friday meeting is recorded. Of the two options in #279 this is the
+simpler one: Egress stays on the SFU VM, which is `e2-standard-8` every Friday
+(#278), with a CPU quota of 4 cores.
+
+| | Chosen: `e2-standard-8` + Egress quota | Not chosen: dedicated Egress VM |
+|---|---|---|
+| Network | None new: Redis stays on `127.0.0.1` (pinned by `server/src/observability/metricsExposure.test.ts`) | Redis on the VPC, with auth and a firewall rule |
+| Operations | Nothing new: the nightly job already sizes Fridays | A second VM to start, stop, deploy and monitor |
+| Isolation | Chrome is held to 4 of 8 cores by its quota; LiveKit's weight serves it first in those | Full |
+
+The October test (#287) measured Egress at about 2.4 vCPU and LiveKit at 2.5
+with 5 cameras on `e2-standard-4`; with the quota the SFU keeps at least 4
+cores to itself on Friday, minus the 3.5 capped for the other containers when
+they are busy. If the checks below fail on the audio, the next step is the
+dedicated VM of #279, not a bigger quota.
+
+What the code does: `egress_cpus` in `office-deploy` writes `EGRESS_CPUS` (4,
+or `nproc` below 4) to `/opt/office/.env`; the server stops every recording at
+3 hours. Rolling it out: `terraform apply` (metadata only: the compose and
+`office-deploy`, the plan must say `update in-place`), then
+`gh workflow run deploy-test.yml`.
+
+**Checks, by hand, on a Friday before the meeting or during the #274 load test:**
+
+1. **Quota applied.** On the VM: `sudo docker inspect -f '{{.HostConfig.NanoCpus}}' labs-office-egress-1`
+   prints `4000000000`; `grep EGRESS_CPUS /opt/office/.env` prints 4.
+2. **Media path.** Start a recording in a space with two people talking with
+   camera on, stop it after a minute and play it ('Ver'). Picture and sound
+   mean the hairpin through the external IP works. Black and silent: look at
+   `logs egress` for ICE failures and at `use_external_ip` above.
+3. **Disk.** `df -h /` before starting: at least 6 GB free (4.2 GB for a
+   3-hour file plus margin). If not, `sudo docker image prune -af` and
+   `sudo docker builder prune -af`. The `disk above 85 % while a recording
+   runs` alert covers the rest.
+4. **Load.** Record during the #274 load test (50 people, 8 cameras, one
+   screen share): its thresholds (audio, CPU, disconnections) must hold with
+   the recording on, read in the dashboard (*CPU por contenedor*, *SFU Mbps*,
+   *desconexiones*).
+5. **Video.** Watch the resulting file: the 8 cameras in the grid while
+   nobody shares, the share in the large area with the cameras on the side
+   while someone shares, sound from the whole meeting, no gaps.
 
 ### Diagnosis
 
