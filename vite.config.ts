@@ -174,6 +174,26 @@ export default defineConfig(({ mode }) => {
                   at.addGrant({ roomJoin: true, room, canPublish: true, canSubscribe: true });
                   return at.toJwt();
                 },
+                /**
+                 * Mutes `identity`'s microphone from Node through the server's
+                 * own moderation adapter (#282), like a moderator would.
+                 * Resolves how many microphones it muted: 0 while LiveKit does
+                 * not know the track yet, so the caller polls.
+                 */
+                async muteLivekitMicrophone(context, identity: string, room: string) {
+                  interface Microphone { identity: string; trackSid: string }
+                  const { moderationFromEnv } = await context.project.import<{
+                    moderationFromEnv(env: Record<string, string>): {
+                      listMicrophones(room: string): Promise<Microphone[]>;
+                      muteMicrophone(room: string, microphone: Microphone): Promise<void>;
+                    } | null;
+                  }>(`${context.project.config.root}/server/src/moderation/livekitModeration.ts`);
+                  const moderation = moderationFromEnv({ ...loadLivekitEnv(), LIVEKIT_URL: 'ws://localhost:7880' });
+                  if (!moderation) throw new Error('Faltan LIVEKIT_API_KEY/LIVEKIT_API_SECRET en infra/livekit/.env');
+                  const mine = (await moderation.listMicrophones(room)).filter((microphone) => microphone.identity === identity);
+                  for (const microphone of mine) await moderation.muteMicrophone(room, microphone);
+                  return mine.length;
+                },
               },
             },
           },
