@@ -1545,7 +1545,7 @@ describe('useProximityAudio: a room lost for good is rebuilt (#84)', () => {
     await act(async () => {
       bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's1' });
     });
-    await act(async () => options[0].onDisconnected?.());
+    await act(async () => options[0].onDisconnected?.('rebuild'));
 
     await act(async () => rerender({ status: 'g' }));
     await act(async () => {
@@ -1581,7 +1581,7 @@ describe('useProximityAudio: a room lost for good is rebuilt (#84)', () => {
     });
     await act(async () => options[0].onVideoTrackSubscribed?.('ana', fakeAttachableTrack()));
 
-    await act(async () => options[0].onDisconnected?.());
+    await act(async () => options[0].onDisconnected?.('rebuild'));
 
     // The new room is still connecting: the buttons must not offer a dead one.
     expect(result.current.audioAvailable).toBe(false);
@@ -1609,7 +1609,7 @@ describe('useProximityAudio: a room lost for good is rebuilt (#84)', () => {
 
     // The network is still down when the room gives up.
     failing = true;
-    await act(async () => options[0].onDisconnected?.());
+    await act(async () => options[0].onDisconnected?.('rebuild'));
     expect(result.current.audioAvailable).toBe(false);
     await act(async () => {
       await vi.advanceTimersByTimeAsync(5000);
@@ -1642,7 +1642,7 @@ describe('useProximityAudio: a room lost for good is rebuilt (#84)', () => {
       bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf([]), spaceId: 's1' });
     });
 
-    await act(async () => options[0].onDisconnected?.());
+    await act(async () => options[0].onDisconnected?.('rebuild'));
 
     expect(connect).toHaveBeenCalledTimes(2);
     expect(space.disconnect).not.toHaveBeenCalled();
@@ -1690,7 +1690,7 @@ describe('useProximityAudio: something to record (#144)', () => {
     const lost = callbacks();
     await act(async () => lost.onRoomMediaChanged?.(true));
 
-    await act(async () => lost.onDisconnected?.());
+    await act(async () => lost.onDisconnected?.('rebuild'));
     await act(async () => lost.onRoomMediaChanged?.(true));
 
     expect(result.current.recordableMedia).toBe(false);

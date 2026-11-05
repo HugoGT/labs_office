@@ -1,7 +1,7 @@
-import { Room, RoomEvent } from 'livekit-client';
+import { DisconnectReason, Room, RoomEvent } from 'livekit-client';
 import { describe, expect, it, vi } from 'vitest';
 import type { AttachableTrack } from './attachableTrack';
-import { connectLivekitRoom, createOfficeRoom } from './livekitRoom';
+import { connectLivekitRoom, createOfficeRoom, disconnectReaction } from './livekitRoom';
 
 /**
  * Sala falsa: reproduce solo la superficie de `Room` que este modulo usa. El
@@ -724,6 +724,25 @@ describe('connectLivekitRoom: a room lost for good is reported (#84)', () => {
     room.emit(RoomEvent.Disconnected);
 
     expect(onDisconnected).toHaveBeenCalledTimes(1);
+    // No reason given counts as an unknown one: rebuild.
+    expect(onDisconnected).toHaveBeenCalledWith('rebuild');
+  });
+
+  it('passes on what the reason calls for, and says nothing for a client-initiated one (#283)', async () => {
+    const room = fakeRoom();
+    const onDisconnected = vi.fn();
+    await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onDisconnected,
+    });
+
+    room.emit(RoomEvent.Disconnected, DisconnectReason.PARTICIPANT_REMOVED);
+    room.emit(RoomEvent.Disconnected, DisconnectReason.SIGNAL_CLOSE);
+    room.emit(RoomEvent.Disconnected, DisconnectReason.CLIENT_INITIATED);
+
+    expect(onDisconnected.mock.calls).toEqual([['stop'], ['rebuild']]);
   });
 
   it('stays quiet when the disconnect is our own', async () => {
@@ -744,6 +763,49 @@ describe('connectLivekitRoom: a room lost for good is reported (#84)', () => {
     await connection.disconnect();
 
     expect(onDisconnected).not.toHaveBeenCalled();
+  });
+});
+
+describe('disconnectReaction (#283): what each disconnect reason calls for', () => {
+  it.each([
+    // Our own `disconnect()`, or another call to it: nothing was lost.
+    [DisconnectReason.CLIENT_INITIATED, 'ignore'],
+    // The server removed us (#282) or the same identity joined elsewhere:
+    // coming back on our own would undo exactly that.
+    [DisconnectReason.PARTICIPANT_REMOVED, 'stop'],
+    [DisconnectReason.DUPLICATE_IDENTITY, 'stop'],
+    // Nothing here closes or deletes rooms on purpose: when it happens the
+    // room name is still the right one, so it is rebuilt like any outage.
+    [DisconnectReason.ROOM_DELETED, 'rebuild'],
+    [DisconnectReason.ROOM_CLOSED, 'rebuild'],
+    // The SDK does not reconnect after `Disconnected`: everything else is ours.
+    [DisconnectReason.UNKNOWN_REASON, 'rebuild'],
+    [DisconnectReason.SERVER_SHUTDOWN, 'rebuild'],
+    [DisconnectReason.STATE_MISMATCH, 'rebuild'],
+    [DisconnectReason.JOIN_FAILURE, 'rebuild'],
+    [DisconnectReason.MIGRATION, 'rebuild'],
+    [DisconnectReason.SIGNAL_CLOSE, 'rebuild'],
+    [undefined, 'rebuild'],
+  ] as const)('%s -> %s', (reason, reaction) => {
+    expect(disconnectReaction(reason)).toBe(reaction);
+  });
+});
+
+describe('connectLivekitRoom: a short outage is reported while LiveKit retries it (#283)', () => {
+  it('reports reconnecting, then back', async () => {
+    const room = fakeRoom();
+    const onReconnectingChanged = vi.fn();
+    await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onReconnectingChanged,
+    });
+
+    room.emit(RoomEvent.Reconnecting);
+    room.emit(RoomEvent.Reconnected);
+
+    expect(onReconnectingChanged.mock.calls).toEqual([[true], [false]]);
   });
 });
 
