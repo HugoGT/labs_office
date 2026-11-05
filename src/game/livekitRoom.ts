@@ -15,6 +15,7 @@
  */
 
 import {
+  DisconnectReason,
   Room,
   RoomEvent,
   Track,
@@ -155,8 +156,15 @@ export interface ConnectLivekitRoomOptions {
    * up reconnecting, or the server removed us. Never fired by our own
    * `disconnect()`. Without it a dead room keeps every button enabled, the
    * share picker opens and nothing is published, and no camera comes back.
+   * Carries what the disconnect reason calls for (#283, `disconnectReaction`).
    */
-  onDisconnected?: () => void;
+  onDisconnected?: (reaction: DisconnectReaction) => void;
+  /**
+   * LiveKit lost the connection and is retrying it by itself (`true`), or got
+   * it back (`false`) (#283). A short outage, before any `onDisconnected`:
+   * without it the person only hears silence with nothing explaining it.
+   */
+  onReconnectingChanged?: (reconnecting: boolean) => void;
   /** Injectable for tests; by default the lazy `@livekit/track-processors`. */
   loadBackgroundBlur?: () => Promise<BackgroundBlur>;
   /**
@@ -166,6 +174,29 @@ export interface ConnectLivekitRoomOptions {
    * itself are its result instead, never this callback.
    */
   onCameraFilterFailed?: () => void;
+}
+
+/** What a disconnect calls for (#283); `ignore` never reaches `onDisconnected`. */
+export type DisconnectReaction = 'ignore' | 'stop' | 'rebuild';
+
+/**
+ * The SDK does not reconnect after emitting `Disconnected`, so a room comes
+ * back only when this client rebuilds it. That is right for an outage and
+ * wrong when the server removed us (#282) or the same identity joined from
+ * elsewhere: rebuilding would undo exactly what happened. `ROOM_DELETED` and
+ * `ROOM_CLOSED` are rebuilt too: nothing here closes rooms on purpose, and the
+ * room name of a place does not change.
+ */
+export function disconnectReaction(reason: DisconnectReason | undefined): DisconnectReaction {
+  switch (reason) {
+    case DisconnectReason.CLIENT_INITIATED:
+      return 'ignore';
+    case DisconnectReason.PARTICIPANT_REMOVED:
+    case DisconnectReason.DUPLICATE_IDENTITY:
+      return 'stop';
+    default:
+      return 'rebuild';
+  }
 }
 
 function publicationsOf(participant: Participant, source: Track.Source): TrackPublication[] {
@@ -220,6 +251,7 @@ export async function connectLivekitRoom({
   onActiveScreenSharerChanged,
   onRoomMediaChanged,
   onDisconnected,
+  onReconnectingChanged,
   loadBackgroundBlur = loadRealBackgroundBlur,
   onCameraFilterFailed,
 }: ConnectLivekitRoomOptions): Promise<LivekitRoomConnection> {
@@ -537,9 +569,13 @@ export async function connectLivekitRoom({
   // (#84): a mere blip is `Reconnecting`/`Reconnected` and needs nothing
   // here. Listened to after `connect()`, whose own failure the caller gets
   // as a rejection instead.
-  room.on(RoomEvent.Disconnected, () => {
-    if (!closing) onDisconnected?.();
+  room.on(RoomEvent.Disconnected, (reason?: DisconnectReason) => {
+    if (closing) return;
+    const reaction = disconnectReaction(reason);
+    if (reaction !== 'ignore') onDisconnected?.(reaction);
   });
+  room.on(RoomEvent.Reconnecting, () => onReconnectingChanged?.(true));
+  room.on(RoomEvent.Reconnected, () => onReconnectingChanged?.(false));
 
   // El estado inicial no llega por evento: sin esto, un navegador que ya nace
   // bloqueado no se reporta hasta el primer cambio, que puede no ocurrir nunca.

@@ -108,3 +108,20 @@ test(
     await waitForScreenShareStage(pageB, peerAId);
   },
 );
+
+// Last: A is left out of LiveKit on purpose.
+test(
+  'removed from LiveKit by the server: never comes back on its own (#283)',
+  { skip: !AUDIO_E2E_ENABLED },
+  async () => {
+    await waitForPeerVideoPlaying(pageA, peerBId);
+
+    await harness.removeFromLivekit(peerAId);
+    await waitForNoPeerVideo(pageA, peerBId);
+    // Well past the first rebuild step (1-2 s) and the second (2-4 s): a
+    // rebuild would have put A back in a room by now.
+    await new Promise((resolve) => setTimeout(resolve, 8000));
+
+    assert.deepEqual(await harness.livekitRoomsOf(peerAId), []);
+  },
+);

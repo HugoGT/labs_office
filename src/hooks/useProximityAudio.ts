@@ -27,6 +27,7 @@ import {
   MAX_SLOW_RETRIES,
   SLOW_RETRY_MS,
   decideVoiceTransition,
+  rebuildDelay,
   tokenRetryDelay,
   type VoiceTarget,
 } from '../game/voiceRoomTarget';
@@ -68,6 +69,8 @@ export interface UseProximityAudioOptions {
   cameraFilterStore?: CameraFilterStore;
   /** Whether this browser can blur; by default `supportsCameraBlur` on the real browser. */
   blurSupported?: boolean;
+  /** Jitter source for the rebuild backoff (#283); `Math.random` by default. */
+  random?: () => number;
 }
 
 export interface UseProximityAudioResult {
@@ -81,6 +84,12 @@ export interface UseProximityAudioResult {
    * haga un gesto. Es distinto de `audioAvailable` y se arregla distinto.
    */
   audioBlocked: boolean;
+  /**
+   * The audio connection dropped and is coming back by itself (#283): LiveKit
+   * retrying a short outage, or this hook rebuilding a room lost for good.
+   * Without it the person only hears silence with nothing explaining it.
+   */
+  audioReconnecting: boolean;
   /** `true` en "No molestar": ni se publica ni se escucha audio de la oficina. */
   dnd: boolean;
   toggleMic: () => void;
@@ -141,6 +150,7 @@ export function useProximityAudio(
     fetchToken = fetchLivekitToken,
     cameraFilterStore,
     blurSupported,
+    random = Math.random,
   }: UseProximityAudioOptions,
 ): UseProximityAudioResult {
   const dnd = status === DO_NOT_DISTURB;
@@ -160,6 +170,12 @@ export function useProximityAudio(
   const [camOn, setCamOn] = useState(false);
   const [audioAvailable, setAudioAvailable] = useState(false);
   const [audioBlocked, setAudioBlocked] = useState(false);
+  const [audioReconnecting, setAudioReconnecting] = useState(false);
+  /** By ref: a new function each render must not rebuild the room. */
+  const randomRef = useRef(random);
+  useEffect(() => {
+    randomRef.current = random;
+  }, [random]);
   const [videoTracks, setVideoTracks] = useState<ReadonlyMap<string, AttachableTrack>>(new Map());
   const [speakers, setSpeakers] = useState<ReadonlySet<string>>(new Set());
   const [localVideoTrack, setLocalVideoTrack] = useState<AttachableTrack | null>(null);
@@ -279,6 +295,7 @@ export function useProximityAudio(
     function clearRoomState(): void {
       setAudioAvailable(false);
       setAudioBlocked(false);
+      setAudioReconnecting(false);
       // Ninguna pista, hablante o camara sobrevive a la sala que las reporto:
       // sin esto, salir de una sala dejaria el ultimo estado colgado en React.
       // Estando ya vacias se devuelve la MISMA coleccion, no una nueva: este
@@ -367,7 +384,7 @@ export function useProximityAudio(
           if (!isCurrent()) return;
           setRoomHasMedia(hasMedia);
         },
-        onDisconnected: () => {
+        onDisconnected: (reaction) => {
           // LiveKit gave up on this room (#84). Nothing else would notice:
           // the target did not change, so every later `voice` only forwards
           // to a dead room -- no camera comes back and a share publishes
@@ -375,14 +392,37 @@ export function useProximityAudio(
           // published or subscribed while the room dies.
           const target = targetRef.current;
           if (!isCurrent() || target === null) return;
-          clearRoomState();
-          handleReconnect(target, { retryOnFailure: true });
+          dropDeadRoom();
+          // Removed by the server or replaced by the same identity (#283):
+          // coming back would undo it. The target stays, so only a new place
+          // asks for a room again.
+          if (reaction === 'stop') return;
+          // Never at once (#283): the whole office loses LiveKit together.
+          setAudioReconnecting(true);
+          scheduleRebuild(target, generationRef.current, 0);
+        },
+        onReconnectingChanged: (reconnecting) => {
+          if (!isCurrent()) return;
+          setAudioReconnecting(reconnecting);
         },
         onCameraFilterFailed: () => {
           if (!isCurrent()) return;
           applyCameraFilter('none');
         },
       };
+    }
+
+    /**
+     * Forgets a room LiveKit lost for good: its state, the connection, and
+     * any attempt still in flight for it (a new generation).
+     */
+    function dropDeadRoom(): void {
+      clearSlowRetry();
+      generationRef.current += 1;
+      clearRoomState();
+      const dead = connectionRef.current;
+      connectionRef.current = null;
+      if (dead) void dead.disconnect();
     }
 
     /** Pide un token fresco para `target`, con `spaceId` sustituido por `forSpaceId` (D5: `null` pide el corredor). */
@@ -472,7 +512,7 @@ export function useProximityAudio(
      */
     function handleReconnect(
       target: VoiceTarget,
-      { retryOnFailure = false }: { retryOnFailure?: boolean } = {},
+      { retryOnFailure = false, attempt = 0 }: { retryOnFailure?: boolean; attempt?: number } = {},
     ): void {
       clearSlowRetry();
       // Generacion propia de ESTE intento (hallazgo #1): `target` compara por
@@ -500,7 +540,7 @@ export function useProximityAudio(
         if (acquired === null) {
           // Degrada a sin audio, nunca lanza, nunca reintenta solo (ver el catch de mas abajo).
           setAudioAvailable(false);
-          if (retryOnFailure) scheduleRebuild(target, generation);
+          if (retryOnFailure) scheduleRebuild(target, generation, attempt + 1);
           return;
         }
 
@@ -520,6 +560,7 @@ export function useProximityAudio(
           connectionRef.current = connection;
           if (stale) void stale.disconnect();
           setAudioAvailable(true);
+          setAudioReconnecting(false);
           // Fallen back to the corridor (D5) is not a space: no sharing there.
           setInSpaceRoom(target.spaceId !== null && !acquired.corridor);
           reapplyPublishIntent(connection);
@@ -530,18 +571,24 @@ export function useProximityAudio(
         } catch {
           if (generationRef.current !== generation) return;
           setAudioAvailable(false);
-          if (retryOnFailure) scheduleRebuild(target, generation);
+          if (retryOnFailure) scheduleRebuild(target, generation, attempt + 1);
+          else setAudioReconnecting(false);
         }
       })();
     }
 
-    /** Next attempt at rebuilding a lost room, unless another attempt superseded this one. */
-    function scheduleRebuild(target: VoiceTarget, generation: number): void {
+    /**
+     * Next attempt at rebuilding a lost room, unless another attempt
+     * superseded this one. `attempt` = rebuilds already failed: the wait
+     * grows and is jittered (#283), so an outage of LiveKit is not followed
+     * by every client of the office reconnecting in the same instant.
+     */
+    function scheduleRebuild(target: VoiceTarget, generation: number, attempt: number): void {
       slowRetryTimerRef.current = setTimeout(() => {
         slowRetryTimerRef.current = null;
         if (cancelled || generationRef.current !== generation) return;
-        handleReconnect(target, { retryOnFailure: true });
-      }, SLOW_RETRY_MS);
+        handleReconnect(target, { retryOnFailure: true, attempt });
+      }, rebuildDelay(attempt, randomRef.current()));
     }
 
     const unsubscribe = bridge.on('voice', (payload) => {
@@ -703,6 +750,7 @@ export function useProximityAudio(
     camOn,
     audioAvailable,
     audioBlocked,
+    audioReconnecting,
     dnd,
     toggleMic,
     toggleCam,

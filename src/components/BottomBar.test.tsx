@@ -289,6 +289,28 @@ describe('BottomBar: degradacion cuando LiveKit no esta disponible', () => {
   });
 });
 
+describe('BottomBar: audio reconnecting (#283)', () => {
+  it('says the audio is coming back, so a short outage is not unexplained silence', () => {
+    renderBar({ presence: { online: true, peers: 0, state: 'connected', canRetry: true }, audioReconnecting: true });
+
+    const indicator = within(screen.getByRole('group', { name: 'Estado' })).getByText('🟡 Reconectando audio…');
+    expect(indicator.getAttribute('title')).toBeTruthy();
+  });
+
+  it('says nothing while the audio is fine', () => {
+    renderBar({ audioReconnecting: false });
+
+    expect(screen.queryByText(/Reconectando audio/)).not.toBeInTheDocument();
+  });
+
+  it('mic and camera explain they wait for the audio to come back, not that there is no LiveKit', () => {
+    renderBar({ audioAvailable: false, audioReconnecting: true });
+
+    expect(screen.getByRole('button', { name: /Mic/ })).toHaveAttribute('title', 'Reconectando audio…');
+    expect(screen.getByRole('button', { name: /Cámara/ })).toHaveAttribute('title', 'Reconectando audio…');
+  });
+});
+
 describe('BottomBar: presencia de avatares reales', () => {
   it('conectado no muestra recuento: quien esta en linea vive en la barra lateral', () => {
     renderBar({ presence: { online: true, peers: 3, state: 'connected', canRetry: true } });

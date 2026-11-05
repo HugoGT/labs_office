@@ -48,6 +48,10 @@ export const DEVMODE_RESTART_CLOSE_CODE = 4010;
  * que esa ventana gastaria sus ultimos intentos contra un asiento que el
  * servidor ya solto: el reintento tendria exito a nivel de socket y fallaria a
  * nivel de sala, que es la peor forma de fallar.
+ *
+ * #283: cada escalon suma ademas hasta la mitad de si mismo al azar, para que
+ * los clientes caidos a la vez no vuelvan a la vez; el peor caso suma 23,25 s
+ * y sigue cabiendo en la ventana.
  */
 export const RECONNECT_DELAYS_MS: readonly number[] = [500, 1000, 2000, 4000, 8000];
 
@@ -76,6 +80,12 @@ export interface ReconnectInput {
   closeCode: number;
   /** Reintentos ya fallidos; 0 es el primero, justo despues de la caida. */
   attempt: number;
+  /**
+   * A number in [0, 1), `Math.random()` in production (#283): a network blip
+   * drops many clients at once, and a fixed ladder would bring them back in
+   * the same instant.
+   */
+  random: number;
 }
 
 /**
@@ -84,16 +94,16 @@ export interface ReconnectInput {
  * la issue #52. La lista de codigos "recuperables" seria imposible de cerrar:
  * la pregunta que importa no es por que se cayo, sino si alguien lo pidio.
  */
-export function decideReconnect({ closeCode, attempt }: ReconnectInput): ReconnectDecision {
+export function decideReconnect({ closeCode, attempt, random }: ReconnectInput): ReconnectDecision {
   if (closeCode === CONSENTED_CLOSE_CODE) return { kind: 'stop', reason: 'consented' };
   if (closeCode === SESSION_REPLACED_CLOSE_CODE) return { kind: 'stop', reason: 'replaced' };
   if (closeCode === SESSION_REVOKED_CLOSE_CODE) return { kind: 'stop', reason: 'revoked' };
   if (closeCode === SERVER_RESTART_CLOSE_CODE) return { kind: 'rejoin' };
 
-  const delayMs = RECONNECT_DELAYS_MS[attempt];
-  if (delayMs === undefined) return { kind: 'give-up' };
+  const base = RECONNECT_DELAYS_MS[attempt];
+  if (base === undefined) return { kind: 'give-up' };
 
-  return { kind: 'retry', delayMs };
+  return { kind: 'retry', delayMs: base + Math.floor((random * base) / 2) };
 }
 
 /**

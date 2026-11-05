@@ -128,6 +128,7 @@ function proximityAudio(
     camOn: false,
     audioAvailable: false,
     audioBlocked: false,
+    audioReconnecting: false,
     dnd: false,
     toggleMic: vi.fn(),
     toggleCam: vi.fn(),
@@ -579,6 +580,14 @@ describe('OfficeShell', () => {
 
     expect(screen.getByRole('button', { name: /Mic/ })).toBeDisabled();
     expect(screen.getByRole('button', { name: /Cámara/ })).toBeDisabled();
+  });
+
+  it('a dropped audio connection coming back is announced in the bar (#283)', () => {
+    useProximityAudioMock.mockReturnValue(proximityAudio({ audioAvailable: false, audioReconnecting: true }));
+
+    render(<OfficeShell />);
+
+    expect(screen.getByText('🟡 Reconectando audio…')).toBeInTheDocument();
   });
 
   it('clicar mic/camara invoca toggleMic/toggleCam del hook, no un setState local', async () => {

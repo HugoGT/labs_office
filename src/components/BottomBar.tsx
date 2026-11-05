@@ -17,6 +17,11 @@ export interface BottomBarProps {
   camOn: boolean;
   /** `false` mientras no hay conexion viva a LiveKit (matriz de degradacion). */
   audioAvailable: boolean;
+  /**
+   * The audio connection dropped and is coming back by itself (#283). Optional
+   * because most of the time it is not, and only then is there anything to say.
+   */
+  audioReconnecting?: boolean;
   recording: boolean;
   room: string | null;
   /**
@@ -68,6 +73,11 @@ export interface BottomBarProps {
 /** Explica el `disabled` de mic/camara cuando no hay conexion viva a LiveKit. */
 const AUDIO_UNAVAILABLE_TITLE = 'Audio no disponible: sin conexion a LiveKit';
 
+/** Same wording in the bar and on the buttons it disables (#283). */
+const AUDIO_RECONNECTING_LABEL = 'Reconectando audio…';
+
+const AUDIO_RECONNECTING_TITLE = 'Se perdió la conexión de audio: recuperándola sin recargar la página';
+
 /** El otro motivo de `disabled`, y el unico que el usuario puede deshacer solo. */
 const DND_TITLE = 'No molestar: no publicas micrófono ni cámara';
 
@@ -116,6 +126,7 @@ export function BottomBar({
   micOn,
   camOn,
   audioAvailable,
+  audioReconnecting = false,
   recording,
   room,
   presence,
@@ -147,13 +158,14 @@ export function BottomBar({
   const audioDisabled = !audioAvailable || dnd;
   // El motivo que el usuario puede deshacer va primero: sin LiveKit no hay
   // nada que hacer desde aqui, pero salir de "No molestar" esta a un clic.
-  const audioTitle = dnd ? DND_TITLE : audioAvailable ? undefined : AUDIO_UNAVAILABLE_TITLE;
+  const unavailableTitle = audioReconnecting ? AUDIO_RECONNECTING_LABEL : AUDIO_UNAVAILABLE_TITLE;
+  const audioTitle = dnd ? DND_TITLE : audioAvailable ? undefined : unavailableTitle;
   // Same order of reasons, plus the one only sharing has: being in a space.
   const screenShareDisabled = audioDisabled || !screenShareAvailable;
   const screenShareTitle = dnd
     ? SCREEN_SHARE_DND_TITLE
     : !audioAvailable
-      ? AUDIO_UNAVAILABLE_TITLE
+      ? unavailableTitle
       : screenShareAvailable
         ? undefined
         : ONLY_IN_SPACE_TITLE;
@@ -314,6 +326,11 @@ export function BottomBar({
             ) : (
               <>⚪ Sin servidor</>
             )}
+          </div>
+        )}
+        {audioReconnecting && (
+          <div className={styles.presence} title={AUDIO_RECONNECTING_TITLE}>
+            🟡 {AUDIO_RECONNECTING_LABEL}
           </div>
         )}
         {/* Solo cuando la sesion se perdio Y hay servidor configurado al que

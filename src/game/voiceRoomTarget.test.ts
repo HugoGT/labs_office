@@ -1,8 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   MAX_SLOW_RETRIES,
+  REBUILD_BASE_DELAY_MS,
+  REBUILD_MAX_DELAY_MS,
   SLOW_RETRY_MS,
   decideVoiceTransition,
+  rebuildDelay,
   tokenRetryDelay,
 } from './voiceRoomTarget';
 
@@ -65,5 +68,33 @@ describe('constantes del reintento lento (fallback al corredor)', () => {
   it('SLOW_RETRY_MS es 5 segundos y MAX_SLOW_RETRIES es 6', () => {
     expect(SLOW_RETRY_MS).toBe(5000);
     expect(MAX_SLOW_RETRIES).toBe(6);
+  });
+});
+
+describe('rebuildDelay (#283): a lost room is rebuilt with capped exponential backoff and jitter', () => {
+  it('the first rebuild already waits: never immediate, so a LiveKit outage is not a stampede', () => {
+    expect(rebuildDelay(0, 0)).toBe(REBUILD_BASE_DELAY_MS / 2);
+    expect(rebuildDelay(0, 0)).toBeGreaterThan(0);
+  });
+
+  it('doubles with every failed attempt', () => {
+    const lowest = [0, 1, 2, 3].map((attempt) => rebuildDelay(attempt, 0));
+    expect(lowest).toEqual([1000, 2000, 4000, 8000]);
+    const highest = [0, 1, 2, 3].map((attempt) => rebuildDelay(attempt, 0.999999));
+    expect(highest).toEqual([1999, 3999, 7999, 15999]);
+  });
+
+  it('never waits more than the cap, however many attempts failed', () => {
+    for (const attempt of [5, 10, 50, 1000]) {
+      expect(rebuildDelay(attempt, 0.999999)).toBeLessThan(REBUILD_MAX_DELAY_MS);
+      expect(rebuildDelay(attempt, 0)).toBe(REBUILD_MAX_DELAY_MS / 2);
+    }
+  });
+
+  it('spreads clients that dropped together over half of each step', () => {
+    const delays = Array.from({ length: 60 }, (_, i) => rebuildDelay(2, i / 60));
+    expect(new Set(delays).size).toBe(60);
+    expect(Math.min(...delays)).toBe(4000);
+    expect(Math.max(...delays)).toBeLessThan(8000);
   });
 });

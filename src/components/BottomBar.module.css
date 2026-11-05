@@ -239,7 +239,8 @@
 /* Same separator the old row had, only when another indicator follows. */
 .status + .rec,
 .status + .presence,
-.rec + .presence {
+.rec + .presence,
+.presence + .presence {
   padding-left: var(--bar-sep);
   border-left: 1px solid #2b3444;
 }
