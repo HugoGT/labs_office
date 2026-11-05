@@ -1044,10 +1044,34 @@ export async function connectLivekitRoom({
       closing = true;
       deviceEvents?.removeEventListener('devicechange', handleDeviceChange);
       sink.clear();
-      // After a toggle in flight, before the room stops every track it has:
-      // the shared capture goes on in the next room (#286).
-      if (microphone) await serializeMicrophone(handOffMicrophone);
-      await room.disconnect();
+      // After a toggle in flight (#286): the capture it publishes may be the
+      // shared one, which goes on in the next room.
+      const kept = microphone
+        ? await serializeMicrophone(async () => (microphone.handOff === handOffMicrophone ? microphone.track : null))
+        : null;
+      if (!microphone || !kept) {
+        await room.disconnect();
+        return;
+      }
+      // Left without stopping its tracks: unpublishing the microphone first
+      // would cost a renegotiation at every door. Every other track is
+      // stopped here instead, as `disconnect()` would have.
+      const others = Array.from(room.localParticipant.trackPublications.values())
+        .map((publication) => publication.track as LocalTrack | undefined)
+        .filter((track): track is LocalTrack => track !== undefined && track !== kept);
+      const leaving = room.disconnect(false);
+      // Until the room let go of its sender, no other room may publish it.
+      const handOff = () => leaving;
+      microphone.handOff = handOff;
+      try {
+        await leaving;
+      } finally {
+        if (microphone.handOff === handOff) microphone.handOff = null;
+        for (const track of others) {
+          track.detach();
+          track.stop();
+        }
+      }
     },
   };
 }

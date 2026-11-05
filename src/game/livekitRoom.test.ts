@@ -1904,8 +1904,8 @@ describe('one microphone capture across rooms (#286)', () => {
       publishTrack: vi.fn(async (track: MicTrack) => publish(track)),
       unpublishTrack: vi.fn(async (track: unknown, stop?: boolean) => unpublish(track, stop)),
     });
-    room.disconnect = vi.fn(async () => {
-      for (const publication of Array.from(publications.values())) unpublish(publication.track);
+    room.disconnect = vi.fn(async (stopTracks = true) => {
+      for (const publication of Array.from(publications.values())) unpublish(publication.track, stopTracks);
     });
     return { room, captured, microphone };
   }
@@ -1965,6 +1965,23 @@ describe('one microphone capture across rooms (#286)', () => {
     await closed;
 
     expect(a.captured).toEqual([]);
+  });
+
+  it('a door leaves the room without unpublishing the microphone first, and still stops every other track', async () => {
+    const shared = createSharedMicrophone();
+    const a = micRoom();
+    const first = await connectWith(a.room, shared);
+    await first.setMicrophoneEnabled(true);
+    const camera = { kind: 'video', source: 'camera', stop: vi.fn(), detach: vi.fn() };
+    a.room.localParticipant.trackPublications.set('cam', fakePublication('video', { source: 'camera', track: camera }));
+
+    await first.disconnect();
+
+    expect(a.room.localParticipant.unpublishTrack).not.toHaveBeenCalled();
+    expect(a.room.disconnect).toHaveBeenCalledWith(false);
+    expect(camera.stop).toHaveBeenCalled();
+    expect(a.captured[0].stop).not.toHaveBeenCalled();
+    expect(shared.handOff).toBeNull();
   });
 
   it('a microphone muted in the old room is published in the new one only when turned on, and then unmuted', async () => {
