@@ -194,6 +194,19 @@ export function useProximityAudio(
   const camOnRef = useRef(false);
   const dndRef = useRef(false);
   /**
+   * State and ref together (#277): a room that connects right after a click
+   * must read the click, and the effect that mirrors the refs only runs
+   * after the next render.
+   */
+  const setMicOnIntent = useCallback((on: boolean) => {
+    micOnRef.current = on;
+    setMicOn(on);
+  }, []);
+  const setCamOnIntent = useCallback((on: boolean) => {
+    camOnRef.current = on;
+    setCamOn(on);
+  }, []);
+  /**
    * Ultimo conjunto deseado conocido (obs #570, D1): el recien llegado recibe
    * su primer `voice` con `peers: []` (Colyseus aun no sincronizo), asi que
    * `connect()` arranca con una instantanea vacia. El `voice` que SI trae el
@@ -221,8 +234,21 @@ export function useProximityAudio(
       // already goes on with it.
       void connection.setCameraFilter(cameraFilterRef.current);
       if (dndRef.current) return;
-      if (micOnRef.current) void connection.setMicrophoneEnabled(true);
-      if (camOnRef.current) void connection.setCameraEnabled(true);
+      // The button shows what this room really publishes (#277): a publish
+      // that fails here would otherwise leave it lit with nobody hearing.
+      // An answer is dropped when the room was replaced or the user changed
+      // their mind meanwhile, since their click is newer than this attempt.
+      const isCurrent = () => connectionRef.current === connection;
+      if (micOnRef.current) {
+        void connection.setMicrophoneEnabled(true).then((enabled) => {
+          if (isCurrent() && micOnRef.current) setMicOnIntent(enabled);
+        });
+      }
+      if (camOnRef.current) {
+        void connection.setCameraEnabled(true).then((enabled) => {
+          if (isCurrent() && camOnRef.current) setCamOnIntent(enabled);
+        });
+      }
     }
 
     function applyDesired(connection: LivekitRoomConnection): void {
@@ -626,23 +652,33 @@ export function useProximityAudio(
     const connection = connectionRef.current;
     // Defensa en profundidad: el boton ya va `disabled`, pero un estado que
     // solo protege mientras la UI coopere no protege.
-    if (!connection || dnd) return;
+    if (dnd || (!connection && !audioAvailable)) return;
+    const next = !micOn;
+    // Between rooms (#277) there is no connection, but the button is still
+    // live: the click is kept and `reapplyPublishIntent` applies it on connect.
+    if (!connection) {
+      setMicOnIntent(next);
+      return;
+    }
     void (async () => {
-      const next = !micOn;
       const result = await connection.setMicrophoneEnabled(next);
-      setMicOn(result);
+      setMicOnIntent(result);
     })();
-  }, [micOn, dnd]);
+  }, [micOn, dnd, audioAvailable, setMicOnIntent]);
 
   const toggleCam = useCallback(() => {
     const connection = connectionRef.current;
-    if (!connection || dnd) return;
+    if (dnd || (!connection && !audioAvailable)) return;
+    const next = !camOn;
+    if (!connection) {
+      setCamOnIntent(next);
+      return;
+    }
     void (async () => {
-      const next = !camOn;
       const result = await connection.setCameraEnabled(next);
-      setCamOn(result);
+      setCamOnIntent(result);
     })();
-  }, [camOn, dnd]);
+  }, [camOn, dnd, audioAvailable, setCamOnIntent]);
 
   const screenShareAvailable = audioAvailable && inSpaceRoom;
   const recordableMedia = screenShareAvailable && roomHasMedia;
