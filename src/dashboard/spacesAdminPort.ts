@@ -38,6 +38,8 @@ export interface AdminSpace {
   /** `null` es "sin limite", no un hueco: el servidor lo sirve siempre explicito. */
   capacity: number | null;
   kind: AdminSpaceKind;
+  /** Meeting room (#282): entering it starts muted, and an admin there may mute the others. Absent: a normal room. */
+  meeting?: boolean;
 }
 
 export interface CreateSpaceInput {
@@ -64,6 +66,7 @@ export interface UpdateSpaceInput {
   w?: number;
   h?: number;
   capacity?: number | null;
+  meeting?: boolean;
 }
 
 export interface SpacesAdminPort {

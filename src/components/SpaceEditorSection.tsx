@@ -315,10 +315,11 @@ export function SpaceEditorSection({
           {(!embedded || listShown) && (
             // One line per room, like the desk list: each button acts on its own row.
             <LayoutItemList
-              items={editor.spaces.map((space) => ({ id: space.id, name: space.name }))}
+              items={editor.spaces.map((space) => ({ id: space.id, name: space.name, meeting: space.meeting }))}
               busy={busy}
               onMove={(id) => editor.startMove(id)}
               onRemove={(id) => void editor.remove(id)}
+              onToggleMeeting={(id, meeting) => void editor.setMeeting(id, meeting)}
             />
           )}
 

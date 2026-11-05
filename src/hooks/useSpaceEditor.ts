@@ -89,6 +89,8 @@ export interface UseSpaceEditorResult {
   deselect: () => void;
   /** Borra la seleccionada, o, con un id, esa sala. Mismo patron que `useLayoutEditor.remove`: no pasa por `saving`. */
   remove: (id?: string) => Promise<void>;
+  /** Turns meeting mode (#282) on or off for one room, like a row's other buttons. */
+  setMeeting: (id: string, meeting: boolean) => Promise<void>;
 }
 
 function isRoom(space: AdminSpace): boolean {
@@ -279,6 +281,20 @@ export function useSpaceEditor({
     }
   }, [spaces, desks, refreshDesks, refreshSpaces, reload]);
 
+  // Meeting mode moves nothing on the map, so the scene has nothing to reread.
+  const setMeeting = useCallback(async (id: string, meeting: boolean): Promise<void> => {
+    setError(null);
+    setPending(true);
+    try {
+      await spaces.updateSpace(id, { meeting });
+      await reload();
+    } catch (err) {
+      setError(describeAdminError(err));
+    } finally {
+      setPending(false);
+    }
+  }, [spaces, reload]);
+
   // Off the default view the desks are not this editor's: one held selected goes.
   useEffect(() => {
     const current = stateRef.current;
@@ -355,5 +371,6 @@ export function useSpaceEditor({
     select,
     deselect,
     remove,
+    setMeeting,
   };
 }

@@ -127,7 +127,8 @@ describe('SpaceEditorSection (#74, PR4)', () => {
     // A long name keeps its full text as a tooltip: the row cuts it with an ellipsis.
     expect(screen.getByText(SALA_B.name)).toHaveAttribute('title', SALA_B.name);
     const row = screen.getByText(SALA.name).closest('li');
-    expect(within(row as HTMLElement).getAllByRole('button')).toHaveLength(2);
+    // "Junta" (#282), "Mover" and the trash.
+    expect(within(row as HTMLElement).getAllByRole('button')).toHaveLength(3);
     expect(screen.queryByRole('button', { name: 'Deseleccionar' })).not.toBeInTheDocument();
   });
 
@@ -811,5 +812,19 @@ describe('SpaceEditorSection embedded: a desk picked in the default view moves a
 
     await waitFor(() => expect(selectedOnMap()).toBeNull());
     expect(pickable()).toEqual(['id-sala']);
+  });
+});
+
+describe('SpaceEditorSection: meeting mode (#282)', () => {
+  it('a row of the room list turns that room into a meeting room', async () => {
+    const spaces = fakeSpaces();
+    renderSection({ spaces });
+    await userEvent.click(screen.getByRole('button', { name: /Editar salas/ }));
+
+    const toggle = await screen.findByRole('button', { name: `Sala de junta: ${SALA.name}` });
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+    await userEvent.click(toggle);
+
+    await waitFor(() => expect(spaces.updateSpace).toHaveBeenCalledWith('id-sala', { meeting: true }));
   });
 });
