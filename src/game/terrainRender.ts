@@ -117,10 +117,10 @@ export function wallSprites(grid: WallGrid): WallSprite[] {
 
 /**
  * The shadow a wall casts on the floor beside the ends of its run and under
- * its base, never above it: 30% opaque against the wall, fading to 15% at
- * 0.4 tiles away, where it stops.
+ * its base, never above it: 20% opaque against the wall, fading out at
+ * 0.3 tiles away.
  */
-export const WALL_SHADOW = { reach: 0.4 * ART_TILE, from: 0.3, to: 0.15 } as const;
+export const WALL_SHADOW = { reach: 0.3 * ART_TILE, from: 0.2, to: 0 } as const;
 
 /** The shadow's opacity `distance` pixels from the wall, 0 past its reach. */
 export function wallShadowAlpha(distance: number): number {

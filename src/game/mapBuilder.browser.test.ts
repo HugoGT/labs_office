@@ -331,7 +331,7 @@ describe('placeWalls', () => {
     expect(result.left).toBe(0);
   });
 
-  it('lays the shadow of the walls on the floor under them: 30% black against the wall, no shadow above it', async () => {
+  it('lays the shadow of the walls on the floor under them: 20% black against the wall, no shadow above it', async () => {
     const width = 6;
     const height = 6;
     const walls = new Array<string | null>(width * height).fill(null);
@@ -346,14 +346,14 @@ describe('placeWalls', () => {
       return {
         at: shadows.map((image) => `${image.x / TILE},${image.y / TILE}`).sort(),
         under: shadows.every((image) => image.depth < wall.depth),
-        alphas: [pixel(16, 0), pixel(16, 12), pixel(16, 13)],
+        alphas: [pixel(16, 0), pixel(16, 9), pixel(16, 10)],
       };
     });
 
     expect(result.at).toEqual(['1,1', '1,2', '1,3', '1,4', '2,4', '3,1', '3,2', '3,3', '3,4']);
     expect(result.under).toBe(true);
     expect(result.alphas[0]).toBe(Math.round(wallShadowAlpha(0.5) * 255));
-    expect(result.alphas[1]).toBe(Math.round(wallShadowAlpha(12.5) * 255));
+    expect(result.alphas[1]).toBe(Math.round(wallShadowAlpha(9.5) * 255));
     expect(result.alphas[2]).toBe(0);
   });
 

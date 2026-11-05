@@ -313,11 +313,11 @@ describe('wall shadows', () => {
     return tile === undefined ? 0 : wallShadowPixels(tile.casters)[y * TILE + x]!;
   };
 
-  it('fades from 30% at the wall to 15% at 0.4 tiles, and stops there', () => {
-    expect(wallShadowAlpha(0)).toBeCloseTo(0.3);
-    expect(wallShadowAlpha(0.2 * TILE)).toBeCloseTo(0.225);
-    expect(wallShadowAlpha(0.4 * TILE)).toBeCloseTo(0.15);
-    expect(wallShadowAlpha(0.4 * TILE + 0.1)).toBe(0);
+  it('fades from 20% at the wall to nothing at 0.3 tiles', () => {
+    expect(wallShadowAlpha(0)).toBeCloseTo(0.2);
+    expect(wallShadowAlpha(0.15 * TILE)).toBeCloseTo(0.1);
+    expect(wallShadowAlpha(0.3 * TILE)).toBeCloseTo(0);
+    expect(wallShadowAlpha(0.3 * TILE + 0.1)).toBe(0);
   });
 
   it('shades the floor beside both ends of a run and under its base, never above it', () => {
@@ -326,25 +326,25 @@ describe('wall shadows', () => {
     expect(shadows.map(({ tx, ty }) => `${tx},${ty}`).sort()).toEqual(
       ['3,3', '3,4', '3,5', '6,3', '6,4', '6,5', '4,6', '5,6', '3,6', '6,6'].sort(),
     );
-    // Left of the run: darkest against the wall, gone past 0.4 tiles.
+    // Left of the run: darkest against the wall, gone past 0.3 tiles (9.6px).
     expect(shadowAt(shadows, 3, 4, TILE - 1, 10)).toBeCloseTo(wallShadowAlpha(0.5));
-    expect(shadowAt(shadows, 3, 4, TILE - 13, 10)).toBeCloseTo(wallShadowAlpha(12.5));
-    expect(shadowAt(shadows, 3, 4, TILE - 14, 10)).toBe(0);
+    expect(shadowAt(shadows, 3, 4, TILE - 10, 10)).toBeCloseTo(wallShadowAlpha(9.5));
+    expect(shadowAt(shadows, 3, 4, TILE - 11, 10)).toBe(0);
     // Right of it and under it, the same fade.
     expect(shadowAt(shadows, 6, 3, 0, 0)).toBeCloseTo(wallShadowAlpha(0.5));
     expect(shadowAt(shadows, 4, 6, 20, 0)).toBeCloseTo(wallShadowAlpha(0.5));
-    expect(shadowAt(shadows, 4, 6, 20, 12)).toBeCloseTo(wallShadowAlpha(12.5));
-    expect(shadowAt(shadows, 4, 6, 20, 13)).toBe(0);
+    expect(shadowAt(shadows, 4, 6, 20, 9)).toBeCloseTo(wallShadowAlpha(9.5));
+    expect(shadowAt(shadows, 4, 6, 20, 10)).toBe(0);
     // The corners round off by distance to the wall's corner.
     expect(shadowAt(shadows, 6, 6, 0, 0)).toBeCloseTo(wallShadowAlpha(Math.hypot(0.5, 0.5)));
-    expect(shadowAt(shadows, 6, 6, 9, 9)).toBe(0);
+    expect(shadowAt(shadows, 6, 6, 7, 7)).toBe(0);
   });
 
   it('never darkens a room corner twice: the nearest wall alone sets each pixel', () => {
     // A horizontal run on row 2 and a vertical one down column 6 from it: an inner corner at (5, 4).
     const walls = tiles(18, { '2,2': 'wall-brick', '3,2': 'wall-brick', '4,2': 'wall-brick', '5,2': 'wall-brick', '6,2': 'wall-brick', '6,4': 'wall-brick', '6,6': 'wall-brick' });
     for (const { casters } of wallShadowTiles(blankLayout({ walls }))) {
-      expect(Math.max(...wallShadowPixels(casters))).toBeLessThanOrEqual(0.3);
+      expect(Math.max(...wallShadowPixels(casters))).toBeLessThanOrEqual(0.2);
     }
   });
 
