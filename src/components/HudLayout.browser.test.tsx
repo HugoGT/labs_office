@@ -224,7 +224,7 @@ describe('HUD layout: camera filter caret', () => {
       expect(cam.top).toBeCloseTo(mic.top - 2, 1);
 
       await userEvent.click(caret);
-      const menu = box(screen.getByRole('menu', { name: 'Filtro de cámara' }));
+      const menu = box(screen.getByRole('menu', { name: 'Opciones de cámara' }));
       expect(menu.bottom).toBeLessThanOrEqual(box(caret).top);
       expect(menu.top).toBeGreaterThanOrEqual(0);
       expect(menu.left).toBeGreaterThanOrEqual(0);

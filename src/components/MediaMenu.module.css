@@ -1,14 +1,14 @@
-/* The menu opens above the caret, over the camera button it belongs to. */
+/* The menu opens above the caret, over the call button it belongs to. */
 .anchor {
   position: relative;
   display: inline-flex;
 }
 
 /*
- * Second half of a split button with the camera button (`BottomBar.splitMain`):
+ * Second half of a split button with a call button (`BottomBar.splitMain`):
  * same box as the bar's `.btn`, its left corners squared to join it. No left
- * border: the camera button's right border is the divider, so that button
- * keeps a symmetric box and its content stays centered.
+ * border: that button's right border is the divider, so it keeps a symmetric
+ * box and its content stays centered.
  */
 .caret {
   display: inline-flex;
@@ -52,11 +52,38 @@
   flex-direction: column;
   gap: 4px;
   min-width: 150px;
+  /* Device names can be long: never wider than the screen. */
+  max-width: min(320px, calc(100vw - 32px));
   padding: 6px;
   background: #111827f2;
   border: 1px solid #2b3444;
   border-radius: var(--radius-panel);
   box-shadow: 0 8px 30px #0009;
+}
+
+.alignStart {
+  right: auto;
+  left: 0;
+}
+
+.section {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.section + .section {
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid #2b3444;
+}
+
+.heading {
+  padding: 0 10px;
+  color: #9ca3af;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .item {
@@ -76,9 +103,16 @@
   cursor: pointer;
 }
 
-/* Fixed slot for the check, so both labels line up whichever is active. */
+.label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Fixed slot for the check, so every label lines up whichever is active. */
 .item::before {
   content: '';
+  flex: none;
   width: 12px;
   color: #4ade80;
 }
@@ -95,4 +129,10 @@
 .item:disabled {
   opacity: 0.35;
   cursor: not-allowed;
+}
+
+/* Not an option: what to do to get some. */
+.empty:disabled {
+  opacity: 0.7;
+  white-space: normal;
 }

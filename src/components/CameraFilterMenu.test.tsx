@@ -38,7 +38,7 @@ describe('CameraFilterMenu', () => {
     await userEvent.click(caret);
 
     expect(caret).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByRole('menu', { name: 'Filtro de cámara' })).toBeInTheDocument();
+    expect(screen.getByRole('menu', { name: 'Opciones de cámara' })).toBeInTheDocument();
     expect(items().map((item) => item.textContent)).toEqual(['Sin filtro', 'Desenfoque ligero', 'Desenfoque total']);
     expect(items().map((item) => item.getAttribute('aria-checked'))).toEqual(['false', 'false', 'true']);
     expect(screen.getByRole('menuitemradio', { name: 'Desenfoque total' })).toHaveFocus();
