@@ -49,3 +49,22 @@ export const SLOW_RETRY_MS = 5000;
 
 /** Tope de reintentos lentos antes de rendirse y quedarse en el corredor. */
 export const MAX_SLOW_RETRIES = 6;
+
+/** First step of the rebuild of a room LiveKit lost for good (#283). */
+export const REBUILD_BASE_DELAY_MS = 2000;
+
+/** No step waits longer than this, however long LiveKit stays down. */
+export const REBUILD_MAX_DELAY_MS = 30000;
+
+/**
+ * Wait before rebuilding a lost room (#283). `attempt` = rebuilds already
+ * failed (0-indexed), `random` in [0, 1) (`Math.random()` in production).
+ * Each step doubles up to the cap and is drawn from its upper half: a LiveKit
+ * outage drops the whole office at once, and a fixed or immediate retry would
+ * bring every client back in the same instant. Never gives up: the target did
+ * not change, so nothing else would try again.
+ */
+export function rebuildDelay(attempt: number, random: number): number {
+  const step = Math.min(REBUILD_MAX_DELAY_MS, REBUILD_BASE_DELAY_MS * 2 ** Math.min(attempt, 30));
+  return Math.floor(step / 2 + (random * step) / 2);
+}
