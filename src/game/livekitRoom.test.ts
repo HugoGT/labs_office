@@ -30,6 +30,13 @@ function fakeRoom() {
       publishTrack: vi.fn(async () => undefined),
       unpublishTrack: vi.fn(async () => undefined),
     },
+    /** What `getActiveDevice` answers, as the SDK's own `activeDeviceMap`. */
+    activeDevices: new Map<string, string>(),
+    getActiveDevice: vi.fn((kind: string): string | undefined => room.activeDevices.get(kind)),
+    switchActiveDevice: vi.fn(async (kind: string, deviceId: string, _exact?: boolean) => {
+      room.activeDevices.set(kind, deviceId);
+      return true;
+    }),
     on(event: string, handler: (...args: unknown[]) => void) {
       handlers.set(event, [...(handlers.get(event) ?? []), handler]);
       return room;
@@ -1474,5 +1481,289 @@ describe('connectLivekitRoom: a microphone muted by a moderator (#282)', () => {
     room.emit(RoomEvent.TrackMuted, fakePublication('audio', { source: 'microphone' }), fakeParticipant([]));
 
     expect(onMicrophoneMutedRemotely).not.toHaveBeenCalled();
+  });
+});
+
+function domError(name: string): Error {
+  const error = new Error(name);
+  error.name = name;
+  return error;
+}
+
+/** Lets the background device work (listing, a switch after a change) finish. */
+async function settle(): Promise<void> {
+  for (let i = 0; i < 10; i++) await Promise.resolve();
+}
+
+describe('connectLivekitRoom: picking devices and surviving their loss (#284)', () => {
+  const HEADSET = { kind: 'audioinput', deviceId: 'headset', label: 'Headset USB' };
+  const DEFAULT_MIC = { kind: 'audioinput', deviceId: 'default', label: 'Predeterminado' };
+  const CAM = { kind: 'videoinput', deviceId: 'cam1', label: 'Integrada' };
+  const SPEAKERS = { kind: 'audiooutput', deviceId: 'altavoces', label: 'Altavoces' };
+
+  function connectWithDevices({
+    room = fakeRoom(),
+    devices = [DEFAULT_MIC, HEADSET, CAM, SPEAKERS],
+    preferredDevices,
+  }: {
+    room?: ReturnType<typeof fakeRoom>;
+    devices?: { kind: string; deviceId: string; label: string }[];
+    preferredDevices?: { audioinput: string | null; audiooutput: string | null; videoinput: string | null };
+  } = {}) {
+    const deviceEvents = new EventTarget();
+    const current = { devices };
+    const listDevices = vi.fn(async () => current.devices);
+    const onDevicesChanged = vi.fn();
+    const onDeviceLost = vi.fn();
+    const onDeviceFailed = vi.fn();
+    const connected = connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      audioContainer: document.createElement('div'),
+      preferredDevices,
+      listDevices,
+      deviceEvents,
+      onDevicesChanged,
+      onDeviceLost,
+      onDeviceFailed,
+    });
+    /** The OS changed its devices: the browser fires `devicechange`. */
+    const changeDevices = async (next: { kind: string; deviceId: string; label: string }[]) => {
+      current.devices = next;
+      deviceEvents.dispatchEvent(new Event('devicechange'));
+      await settle();
+    };
+    return { room, connected, listDevices, deviceEvents, onDevicesChanged, onDeviceLost, onDeviceFailed, changeDevices };
+  }
+
+  it('applies the remembered microphone and camera before connecting, as a preference a missing device does not break', async () => {
+    const room = fakeRoom();
+    const order: string[] = [];
+    room.switchActiveDevice.mockImplementation(async (kind: string) => {
+      order.push(`switch ${kind}`);
+      return true;
+    });
+    room.connect.mockImplementation(async () => {
+      order.push('connect');
+    });
+    const { connected } = connectWithDevices({
+      room,
+      preferredDevices: { audioinput: 'headset', audiooutput: null, videoinput: 'cam1' },
+    });
+    await connected;
+
+    // Not exact: a remembered device that is unplugged today falls back to
+    // the system's instead of failing the first microphone on.
+    expect(room.switchActiveDevice).toHaveBeenCalledWith('audioinput', 'headset', false);
+    expect(room.switchActiveDevice).toHaveBeenCalledWith('videoinput', 'cam1', false);
+    expect(order.indexOf('connect')).toBeGreaterThan(order.lastIndexOf('switch videoinput'));
+  });
+
+  it('applies the remembered speaker only while it is connected', async () => {
+    const plugged = connectWithDevices({ preferredDevices: { audioinput: null, audiooutput: 'altavoces', videoinput: null } });
+    await plugged.connected;
+    await settle();
+    expect(plugged.room.switchActiveDevice).toHaveBeenCalledWith('audiooutput', 'altavoces', true);
+
+    const unplugged = connectWithDevices({
+      devices: [DEFAULT_MIC],
+      preferredDevices: { audioinput: null, audiooutput: 'altavoces', videoinput: null },
+    });
+    await unplugged.connected;
+    await settle();
+    expect(unplugged.room.switchActiveDevice).not.toHaveBeenCalled();
+  });
+
+  it('nothing remembered: the system devices are left alone', async () => {
+    const { room, connected } = connectWithDevices();
+    await connected;
+    await settle();
+
+    expect(room.switchActiveDevice).not.toHaveBeenCalled();
+  });
+
+  it('reports the devices by kind on connect and again on every device change', async () => {
+    const { connected, onDevicesChanged, changeDevices } = connectWithDevices();
+    await connected;
+    await settle();
+
+    expect(onDevicesChanged).toHaveBeenLastCalledWith({
+      audioinput: [
+        { deviceId: 'default', label: 'Predeterminado' },
+        { deviceId: 'headset', label: 'Headset USB' },
+      ],
+      videoinput: [{ deviceId: 'cam1', label: 'Integrada' }],
+      audiooutput: [{ deviceId: 'altavoces', label: 'Altavoces' }],
+    });
+
+    await changeDevices([DEFAULT_MIC]);
+
+    expect(onDevicesChanged).toHaveBeenLastCalledWith({ audioinput: [{ deviceId: 'default', label: 'Predeterminado' }], videoinput: [], audiooutput: [] });
+  });
+
+  it('lists again once a microphone is on: the permission it took gives devices their names', async () => {
+    const { connected, listDevices } = connectWithDevices();
+    const connection = await connected;
+    await settle();
+    const before = listDevices.mock.calls.length;
+
+    await connection.setMicrophoneEnabled(true);
+    await settle();
+
+    expect(listDevices.mock.calls.length).toBe(before + 1);
+  });
+
+  it('switchDevice is the one place that changes a device: exact, and true when it took', async () => {
+    const { room, connected, onDeviceFailed } = connectWithDevices();
+    const connection = await connected;
+
+    expect(await connection.switchDevice('audioinput', 'headset')).toBe(true);
+    expect(await connection.switchDevice('audiooutput', 'altavoces')).toBe(true);
+
+    expect(room.switchActiveDevice).toHaveBeenCalledWith('audioinput', 'headset', true);
+    expect(room.switchActiveDevice).toHaveBeenCalledWith('audiooutput', 'altavoces', true);
+    expect(onDeviceFailed).not.toHaveBeenCalled();
+  });
+
+  it('a switch that fails resolves false and says why', async () => {
+    const { room, connected, onDeviceFailed } = connectWithDevices();
+    room.switchActiveDevice.mockRejectedValueOnce(domError('NotReadableError'));
+    const connection = await connected;
+
+    expect(await connection.switchDevice('videoinput', 'cam1')).toBe(false);
+
+    expect(onDeviceFailed).toHaveBeenCalledExactlyOnceWith('videoinput', 'in-use');
+  });
+
+  it('a microphone switch waits for a microphone toggle in flight: both change the same track', async () => {
+    const { room, connected } = connectWithDevices();
+    const calls: string[] = [];
+    let finishUnmute!: () => void;
+    room.localParticipant.setMicrophoneEnabled = vi.fn(async () => {
+      calls.push('unmute start');
+      await new Promise<void>((resolve) => (finishUnmute = resolve));
+      calls.push('unmute end');
+    }) as never;
+    room.switchActiveDevice.mockImplementation(async () => {
+      calls.push('switch');
+      return true;
+    });
+    const connection = await connected;
+
+    const unmute = connection.setMicrophoneEnabled(true);
+    const switched = connection.switchDevice('audioinput', 'headset');
+    await Promise.resolve();
+    finishUnmute();
+    await Promise.all([unmute, switched]);
+
+    expect(calls).toEqual(['unmute start', 'unmute end', 'switch']);
+  });
+
+  it.each([
+    ['NotAllowedError', 'permission-denied'],
+    ['NotFoundError', 'not-found'],
+    ['NotReadableError', 'in-use'],
+  ])('a microphone the browser refuses with %s is off and reported as %s', async (name, failure) => {
+    const { room, connected, onDeviceFailed } = connectWithDevices();
+    room.localParticipant.setMicrophoneEnabled.mockRejectedValueOnce(domError(name));
+    const connection = await connected;
+
+    expect(await connection.setMicrophoneEnabled(true)).toBe(false);
+
+    expect(onDeviceFailed).toHaveBeenCalledExactlyOnceWith('audioinput', failure);
+  });
+
+  it('a camera that fails is reported for the camera only, and the microphone keeps working', async () => {
+    const { room, connected, onDeviceFailed } = connectWithDevices();
+    room.localParticipant.setCameraEnabled.mockRejectedValueOnce(domError('NotReadableError'));
+    const connection = await connected;
+
+    expect(await connection.setCameraEnabled(true)).toBe(false);
+    expect(await connection.setMicrophoneEnabled(true)).toBe(true);
+
+    expect(onDeviceFailed).toHaveBeenCalledExactlyOnceWith('videoinput', 'in-use');
+    expect(room.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+  });
+
+  it('turning a device off is never reported as a device failure', async () => {
+    const { room, connected, onDeviceFailed } = connectWithDevices();
+    room.localParticipant.setMicrophoneEnabled.mockRejectedValueOnce(domError('NotReadableError'));
+    const connection = await connected;
+
+    await connection.setMicrophoneEnabled(false);
+
+    expect(onDeviceFailed).not.toHaveBeenCalled();
+  });
+
+  it('the microphone in use is unplugged: it falls back to the default one in the same room, and says so', async () => {
+    const { room, connected, onDeviceLost, changeDevices } = connectWithDevices();
+    const connection = await connected;
+    await connection.switchDevice('audioinput', 'headset');
+    room.switchActiveDevice.mockClear();
+
+    await changeDevices([DEFAULT_MIC, CAM, SPEAKERS]);
+
+    expect(room.switchActiveDevice).toHaveBeenCalledExactlyOnceWith('audioinput', 'default', true);
+    expect(onDeviceLost).toHaveBeenCalledExactlyOnceWith('audioinput');
+    expect(room.disconnect).not.toHaveBeenCalled();
+  });
+
+  it('the camera in use is unplugged: it falls back to the first camera left', async () => {
+    const { room, connected, onDeviceLost, changeDevices } = connectWithDevices();
+    const connection = await connected;
+    await connection.switchDevice('videoinput', 'cam1');
+    room.switchActiveDevice.mockClear();
+
+    await changeDevices([DEFAULT_MIC, { kind: 'videoinput', deviceId: 'cam2', label: 'USB' }]);
+
+    expect(room.switchActiveDevice).toHaveBeenCalledExactlyOnceWith('videoinput', 'cam2', true);
+    expect(onDeviceLost).toHaveBeenCalledExactlyOnceWith('videoinput');
+  });
+
+  it('livekit-client already moved to another device by itself: kept, but the loss is still told', async () => {
+    const SYSTEM = { kind: 'audiooutput', deviceId: 'default', label: 'Sistema' };
+    const { room, connected, onDeviceLost, deviceEvents, changeDevices } = connectWithDevices({
+      devices: [SPEAKERS, SYSTEM],
+    });
+    const connection = await connected;
+    await connection.switchDevice('audiooutput', 'altavoces');
+    room.switchActiveDevice.mockClear();
+    // The SDK runs its own default-device switch on the same event, listened
+    // to after ours: done before ours reads it back.
+    deviceEvents.addEventListener('devicechange', () => room.activeDevices.set('audiooutput', 'default'));
+
+    await changeDevices([SYSTEM]);
+
+    expect(room.switchActiveDevice).not.toHaveBeenCalled();
+    expect(onDeviceLost).toHaveBeenCalledExactlyOnceWith('audiooutput');
+  });
+
+  it('a change that leaves the device in use connected does nothing', async () => {
+    const { room, connected, onDeviceLost, changeDevices } = connectWithDevices();
+    const connection = await connected;
+    await connection.switchDevice('audioinput', 'headset');
+    room.switchActiveDevice.mockClear();
+
+    await changeDevices([DEFAULT_MIC, HEADSET]);
+
+    expect(room.switchActiveDevice).not.toHaveBeenCalled();
+    expect(onDeviceLost).not.toHaveBeenCalled();
+  });
+
+  it('after disconnect a device change is ignored', async () => {
+    const { room, connected, onDeviceLost, onDevicesChanged, changeDevices } = connectWithDevices();
+    const connection = await connected;
+    await connection.switchDevice('audioinput', 'headset');
+    await settle();
+    await connection.disconnect();
+    onDevicesChanged.mockClear();
+    room.switchActiveDevice.mockClear();
+
+    await changeDevices([DEFAULT_MIC]);
+
+    expect(onDevicesChanged).not.toHaveBeenCalled();
+    expect(onDeviceLost).not.toHaveBeenCalled();
+    expect(room.switchActiveDevice).not.toHaveBeenCalled();
   });
 });

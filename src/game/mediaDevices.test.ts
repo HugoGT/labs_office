@@ -82,27 +82,34 @@ describe('resolveDevice', () => {
 
 describe('deviceLoss', () => {
   it('nothing lost while the device in use is still listed', () => {
-    expect(deviceLoss('headset', 'headset', MICS)).toEqual({ lost: false, switchTo: null });
+    expect(deviceLoss('headset', 'headset', MICS, MICS)).toEqual({ lost: false, switchTo: null });
   });
 
   it('nothing lost when no device was in use yet', () => {
-    expect(deviceLoss(undefined, undefined, MICS)).toEqual({ lost: false, switchTo: null });
+    expect(deviceLoss(undefined, undefined, MICS, MICS)).toEqual({ lost: false, switchTo: null });
   });
 
   it('the device in use is gone: lost, and switches to the fallback', () => {
     const now = MICS.filter((device) => device.deviceId !== 'headset');
 
-    expect(deviceLoss('headset', 'headset', now)).toEqual({ lost: true, switchTo: 'default' });
+    expect(deviceLoss('headset', 'headset', MICS, now)).toEqual({ lost: true, switchTo: 'default' });
   });
 
   it('lost but already moved to a connected device (the SDK switched by itself): nothing to switch', () => {
-    const cams = [{ deviceId: 'cam2', label: '' }];
+    const before = [{ deviceId: 'cam1', label: '' }, { deviceId: 'cam2', label: '' }];
+    const now = [{ deviceId: 'cam2', label: '' }];
 
-    expect(deviceLoss('cam1', 'cam2', cams)).toEqual({ lost: true, switchTo: null });
+    expect(deviceLoss('cam1', 'cam2', before, now)).toEqual({ lost: true, switchTo: null });
   });
 
   it('lost with nothing left to use: told, nothing to switch to', () => {
-    expect(deviceLoss('headset', 'headset', [])).toEqual({ lost: true, switchTo: null });
+    expect(deviceLoss('headset', 'headset', MICS, [])).toEqual({ lost: true, switchTo: null });
+  });
+
+  it('a remembered device that was already missing is not lost now: it was never in use here', () => {
+    const now = [{ deviceId: 'default', label: '' }];
+
+    expect(deviceLoss('headset', 'headset', now, now)).toEqual({ lost: false, switchTo: null });
   });
 });
 

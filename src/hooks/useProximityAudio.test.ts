@@ -24,6 +24,7 @@ function fakeConnection(overrides: Partial<LivekitRoomConnection> = {}): Livekit
     setMicrophoneEnabled: vi.fn(async (enabled: boolean) => enabled),
     setCameraEnabled: vi.fn(async (enabled: boolean) => enabled),
     setCameraFilter: vi.fn(async (filter: CameraFilter) => filter),
+    switchDevice: vi.fn(async () => true),
     setScreenShareEnabled: vi.fn(async (enabled: boolean) => enabled),
     startAudio: vi.fn(async () => undefined),
     disconnect: vi.fn(async () => undefined),

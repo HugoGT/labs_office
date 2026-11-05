@@ -79,18 +79,21 @@ export interface DeviceLoss {
 
 /**
  * After a device change. `before` is the device in use when the change
- * happened, `now` the one in use after it: livekit-client may already have
- * moved to another device by itself, and that one is kept.
+ * happened and `previous` the devices listed then; `now` is the one in use
+ * after it, since livekit-client may already have moved to another device by
+ * itself, and that one is kept. Only a device that was connected can be
+ * lost: a remembered one unplugged since the last visit was never in use.
  */
 export function deviceLoss(
   before: string | undefined,
   now: string | undefined,
+  previous: readonly DeviceOption[],
   devices: readonly DeviceOption[],
 ): DeviceLoss {
-  const listed = (deviceId: string | undefined) =>
-    deviceId !== undefined && devices.some((device) => device.deviceId === deviceId);
-  if (before === undefined || before === '' || listed(before)) return { lost: false, switchTo: null };
-  return { lost: true, switchTo: listed(now) ? null : fallbackDevice(devices) };
+  const listedIn = (list: readonly DeviceOption[], deviceId: string | undefined) =>
+    deviceId !== undefined && list.some((device) => device.deviceId === deviceId);
+  if (!listedIn(previous, before) || listedIn(devices, before)) return { lost: false, switchTo: null };
+  return { lost: true, switchTo: listedIn(devices, now) ? null : fallbackDevice(devices) };
 }
 
 /** Why a device could not be used, each with its own explanation in the UI. */
