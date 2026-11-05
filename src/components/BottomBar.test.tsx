@@ -47,6 +47,7 @@ function renderBar(overrides: Partial<ComponentProps<typeof BottomBar>> = {}) {
     roomLockedByMe: false,
     onLockRoom: vi.fn(),
     onUnlockRoom: vi.fn(),
+    onSelectDevice: vi.fn(),
     ...overrides,
   };
   render(<BottomBar {...props} />);
@@ -875,5 +876,98 @@ describe('BottomBar: active camera emoji', () => {
       expect(screen.getByRole('button', { name }).querySelector('span')).toBeNull();
     }
     expect(document.querySelector(`.${styles.liftedIcon}`)).toBeNull();
+  });
+});
+
+describe('BottomBar: picking the microphone, speaker and camera (#284)', () => {
+  const DEVICES = {
+    audioinput: [
+      { deviceId: 'default', label: 'Predeterminado' },
+      { deviceId: 'headset', label: 'Headset USB' },
+    ],
+    audiooutput: [{ deviceId: 'altavoces', label: 'Altavoces' }],
+    videoinput: [
+      { deviceId: 'cam1', label: 'Integrada' },
+      { deviceId: 'cam2', label: '' },
+    ],
+  };
+  const SELECTED = { audioinput: 'headset', audiooutput: 'altavoces', videoinput: 'cam1' };
+
+  function openMenu(name: string) {
+    return userEvent.click(screen.getByRole('button', { name }));
+  }
+
+  it('a caret right after the microphone opens its microphones, the one in use checked', async () => {
+    renderBar({ devices: DEVICES, selectedDevices: SELECTED, audioOutputSelectable: true });
+
+    const toolbar = screen.getByRole('toolbar', { name: 'Controles de llamada' });
+    const buttons = within(toolbar).getAllByRole('button');
+    const mic = within(toolbar).getByRole('button', { name: /Mic/ });
+    expect(buttons[buttons.indexOf(mic) + 1]).toHaveAccessibleName('Opciones de micrófono');
+
+    await openMenu('Opciones de micrófono');
+
+    const mics = within(screen.getByRole('group', { name: 'Micrófono' })).getAllByRole('menuitemradio');
+    expect(mics.map((item) => item.textContent)).toEqual(['Predeterminado', 'Headset USB']);
+    expect(mics.map((item) => item.getAttribute('aria-checked'))).toEqual(['false', 'true']);
+  });
+
+  it('reports a microphone and a speaker pick', async () => {
+    const { onSelectDevice } = renderBar({
+      devices: { ...DEVICES, audiooutput: [...DEVICES.audiooutput, { deviceId: 'cascos', label: 'Cascos' }] },
+      selectedDevices: SELECTED,
+      audioOutputSelectable: true,
+    });
+
+    await openMenu('Opciones de micrófono');
+    await userEvent.click(screen.getByRole('menuitemradio', { name: 'Predeterminado' }));
+    await openMenu('Opciones de micrófono');
+    await userEvent.click(screen.getByRole('menuitemradio', { name: 'Cascos' }));
+
+    expect(onSelectDevice).toHaveBeenNthCalledWith(1, 'audioinput', 'default');
+    expect(onSelectDevice).toHaveBeenNthCalledWith(2, 'audiooutput', 'cascos');
+  });
+
+  it('a browser that cannot pick the speaker shows no speaker selector', async () => {
+    renderBar({ devices: DEVICES, selectedDevices: SELECTED, audioOutputSelectable: false });
+
+    await openMenu('Opciones de micrófono');
+
+    expect(screen.queryByRole('group', { name: 'Altavoz' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('menuitemradio', { name: 'Altavoces' })).not.toBeInTheDocument();
+  });
+
+  it('the camera caret lists the cameras above the filter, naming the unnamed ones', async () => {
+    const { onSelectDevice } = renderBar({ devices: DEVICES, selectedDevices: SELECTED });
+
+    await openMenu('Opciones de cámara');
+    const cameras = within(screen.getByRole('group', { name: 'Cámara' })).getAllByRole('menuitemradio');
+    expect(cameras.map((item) => item.textContent)).toEqual(['Integrada', 'Cámara 2']);
+    expect(screen.getByRole('group', { name: 'Filtro de cámara' })).toBeInTheDocument();
+    await userEvent.click(cameras[1]);
+
+    expect(onSelectDevice).toHaveBeenCalledExactlyOnceWith('videoinput', 'cam2');
+  });
+
+  it('before the browser names any device, says how to get them listed', async () => {
+    renderBar({ audioOutputSelectable: true });
+
+    await openMenu('Opciones de micrófono');
+    expect(screen.getByRole('menuitem', { name: 'Enciende el micrófono para ver tus micrófonos' })).toBeDisabled();
+    expect(screen.getByRole('menuitem', { name: 'Enciende el micrófono para ver tus altavoces' })).toBeDisabled();
+    await userEvent.keyboard('{Escape}');
+    await openMenu('Opciones de cámara');
+    expect(screen.getByRole('menuitem', { name: 'Enciende la cámara para ver tus cámaras' })).toBeDisabled();
+  });
+
+  it.each([
+    { name: 'without LiveKit', overrides: { audioAvailable: false }, title: 'Audio no disponible: sin conexion a LiveKit' },
+    { name: 'in "No molestar"', overrides: { status: 'r' as const }, title: 'No molestar: no publicas micrófono ni cámara' },
+  ])('the microphone caret is disabled $name, with the microphone and its reason', ({ overrides, title }) => {
+    renderBar(overrides);
+
+    const caret = screen.getByRole('button', { name: 'Opciones de micrófono' });
+    expect(caret).toBeDisabled();
+    expect(caret).toHaveAttribute('title', title);
   });
 });
