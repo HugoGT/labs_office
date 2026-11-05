@@ -327,7 +327,7 @@ describe.skipIf(!import.meta.env.VITE_LIVEKIT_E2E)('switching a device mid call 
         expect(getUserMedia).not.toHaveBeenCalled();
         expect(ownPublication(room, kind).isMuted).toBe(true);
         const track = ownPublication(room, kind).track?.mediaStreamTrack;
-        // A muted microphone keeps a silent track; a muted camera has none running.
+        // A bare `Room` keeps a muted microphone as a silent track; a muted camera has none running.
         expect(track?.readyState === 'ended' || track?.enabled === false).toBe(true);
       } finally {
         getUserMedia.mockRestore();
@@ -440,6 +440,124 @@ describe.skipIf(!import.meta.env.VITE_LIVEKIT_E2E)('crossing a door keeps the mi
     expect(captured.mediaStreamTrack.readyState).toBe('ended');
     expect(room.localParticipant.getTrackPublication(Track.Source.Microphone)).toBeUndefined();
     expect(room.state).toBe('connected');
+  });
+});
+
+describe.skipIf(!import.meta.env.VITE_LIVEKIT_E2E)('a muted microphone releases its capture', () => {
+  async function join(identity: string, roomName: string, options: Partial<ConnectLivekitRoomOptions> = {}) {
+    const token = await commands.mintLivekitToken(identity, roomName);
+    const room = createOfficeRoom();
+    const connection = await connectLivekitRoom({ url: LIVEKIT_WS_URL, token, createRoom: () => room, ...options });
+    rooms.push(connection);
+    return { connection, room };
+  }
+
+  const ON = { echoCancellation: true, noiseSuppression: true, autoGainControl: true };
+
+  function processing(track: MediaStreamTrack) {
+    const { echoCancellation, noiseSuppression, autoGainControl } = track.getSettings();
+    return { echoCancellation, noiseSuppression, autoGainControl };
+  }
+
+  it('muting ends the capture; unmuting captures again in the same publication', async () => {
+    const stamp = Date.now();
+    const microphone = createSharedMicrophone();
+    const { connection, room } = await join(`mute-${stamp}`, LIVEKIT_ROOM_NAME, { microphone });
+    expect(await connection.setMicrophoneEnabled(true)).toBe(true);
+    const publication = ownPublication(room, 'audioinput');
+    const sid = publication.trackSid;
+    const firstCapture = publication.track!.mediaStreamTrack;
+
+    expect(await connection.setMicrophoneEnabled(false)).toBe(false);
+
+    expect(firstCapture.readyState).toBe('ended');
+    expect(publication.isMuted).toBe(true);
+
+    expect(await connection.setMicrophoneEnabled(true)).toBe(true);
+
+    const secondCapture = publication.track!.mediaStreamTrack;
+    expect(ownPublication(room, 'audioinput')).toBe(publication);
+    expect(publication.trackSid).toBe(sid);
+    expect(publication.isMuted).toBe(false);
+    expect(secondCapture).not.toBe(firstCapture);
+    expect(secondCapture.readyState).toBe('live');
+    expect(publication.track!.sender?.track).toBe(secondCapture);
+    expect(processing(secondCapture)).toEqual(ON);
+    await releaseSharedMicrophone(microphone);
+  });
+
+  it('an unmute the browser refuses stays muted, tells the caller, and the next one works', async () => {
+    const onDeviceFailed = vi.fn();
+    const { connection, room } = await join(`refused-${Date.now()}`, LIVEKIT_ROOM_NAME, { onDeviceFailed });
+    expect(await connection.setMicrophoneEnabled(true)).toBe(true);
+    expect(await connection.setMicrophoneEnabled(false)).toBe(false);
+    const publication = ownPublication(room, 'audioinput');
+    const getUserMedia = vi
+      .spyOn(navigator.mediaDevices, 'getUserMedia')
+      .mockRejectedValueOnce(new DOMException('denied', 'NotAllowedError'));
+
+    try {
+      expect(await connection.setMicrophoneEnabled(true)).toBe(false);
+
+      expect(onDeviceFailed).toHaveBeenCalledExactlyOnceWith('audioinput', 'permission-denied');
+      expect(publication.isMuted).toBe(true);
+    } finally {
+      getUserMedia.mockRestore();
+    }
+
+    expect(await connection.setMicrophoneEnabled(true)).toBe(true);
+    expect(publication.isMuted).toBe(false);
+    expect(publication.track!.mediaStreamTrack.readyState).toBe('live');
+    expect(publication.track!.sender?.track).toBe(publication.track!.mediaStreamTrack);
+  });
+
+  it('a moderator mute ends the capture too (#282)', async () => {
+    const identity = `moderated-capture-${Date.now()}`;
+    const { connection, room } = await join(identity, LIVEKIT_ROOM_NAME);
+    expect(await connection.setMicrophoneEnabled(true)).toBe(true);
+    const capture = ownPublication(room, 'audioinput').track!.mediaStreamTrack;
+
+    await expect.poll(() => commands.muteLivekitMicrophone(identity, LIVEKIT_ROOM_NAME), { timeout: 10_000 }).toBe(1);
+
+    await expect.poll(() => capture.readyState, { timeout: 10_000 }).toBe('ended');
+  });
+
+  it('a door crossed while muted captures nothing; the next room captures on unmute, with the picked device', async () => {
+    const stamp = Date.now();
+    const microphone = createSharedMicrophone();
+    const identity = `muted-door-${stamp}`;
+    const floor = await join(identity, LIVEKIT_ROOM_NAME, { microphone });
+    expect(await floor.connection.setMicrophoneEnabled(true)).toBe(true);
+    const target = await otherDevice('audioinput', capturedDevice(floor.room, 'audioinput'));
+    expect(await floor.connection.setMicrophoneEnabled(false)).toBe(false);
+    expect(await floor.connection.switchDevice('audioinput', target)).toBe(true);
+    const getUserMedia = vi.spyOn(navigator.mediaDevices, 'getUserMedia');
+
+    try {
+      await floor.connection.disconnect();
+      const inside = await join(identity, livekitRoomFor(`muted-door-${stamp}`), {
+        microphone,
+        preferredDevices: { audioinput: target, audiooutput: null, videoinput: null },
+      });
+
+      expect(getUserMedia).not.toHaveBeenCalled();
+      expect(inside.room.localParticipant.getTrackPublication(Track.Source.Microphone)).toBeUndefined();
+
+      expect(await inside.connection.setMicrophoneEnabled(true)).toBe(true);
+
+      const published = ownPublication(inside.room, 'audioinput');
+      expect(published.isMuted).toBe(false);
+      expect(published.track!.mediaStreamTrack.readyState).toBe('live');
+      expect(published.track!.sender?.track).toBe(published.track!.mediaStreamTrack);
+      expect(capturedDevice(inside.room, 'audioinput')).toBe(target);
+      expect(processing(published.track!.mediaStreamTrack)).toEqual(ON);
+
+      await inside.connection.disconnect();
+      await releaseSharedMicrophone(microphone);
+      expect(published.track?.mediaStreamTrack.readyState ?? 'ended').toBe('ended');
+    } finally {
+      getUserMedia.mockRestore();
+    }
   });
 });
 

@@ -128,6 +128,12 @@ describe('createOfficeRoom: bandwidth for a full space', () => {
     expect(room.options.publishDefaults?.audioPreset).toEqual(AudioPresets.speech);
   });
 
+  it('stops the capture of a muted microphone, or the system keeps showing it in use', () => {
+    const room = createOfficeRoom();
+
+    expect(room.options.publishDefaults?.stopMicTrackOnMute).toBe(true);
+  });
+
   it('asks the browser for its own voice processing explicitly, so an SDK upgrade cannot drop it (#285)', () => {
     const room = createOfficeRoom();
 

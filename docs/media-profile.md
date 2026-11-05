@@ -70,9 +70,13 @@ capture the microphone again:
   stopping it (`room.disconnect(false)`, every other track stopped by hand) and
   the next room publishes the same track, then unmutes it. Only one room
   publishes it at a time: a sender belongs to one peer connection.
-- Muting only mutes, as before. Leaving the office and entering "No molestar"
-  stop the capture (`releaseMicrophone`, `releaseSharedMicrophone`), so the
-  system microphone indicator goes off.
+- Muting stops the capture (`stopMicTrackOnMute`), so the system microphone
+  indicator goes off, and unmuting captures again in the same publication. The
+  cost is the time of that capture on each unmute and, on Bluetooth headsets,
+  a switch of profile (HFP to A2DP and back) with an audible difference. A door
+  crossed while muted carries no capture: the next room captures on unmute.
+- Leaving the office and entering "No molestar" stop the capture too
+  (`releaseMicrophone`, `releaseSharedMicrophone`).
 - A capture LiveKit already stopped (a room lost for good) is captured again
   instead of being published dead. A microphone picked while the capture is
   published nowhere is applied to it before the next room publishes it.
