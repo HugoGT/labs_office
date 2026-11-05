@@ -71,7 +71,7 @@ export function createMemorySpaces(
     // Los espacios de partida son siempre salas: este adaptador todavia no
     // sabe crear cubiculos de escritorio (llega en S1b, tarea 2.5).
     // The default floor, like the schema backfill of rows that predate it.
-    spaces.set(seeded.id, { ...seeded, deskId: null, ...DEFAULT_FLOOR, createdAt: at, updatedAt: at });
+    spaces.set(seeded.id, { ...seeded, deskId: null, meeting: false, ...DEFAULT_FLOOR, createdAt: at, updatedAt: at });
   }
 
   function canonical(): CanonicalSpace[] {
@@ -180,6 +180,7 @@ export function createMemorySpaces(
         ...bounds,
         capacity: null,
         deskId: desk.id,
+        meeting: false,
         // The column DEFAULT the pg cubicle upsert relies on; a later upsert
         // moves or renames the cubicle and never touches its floor.
         ...DEFAULT_FLOOR,
@@ -225,6 +226,7 @@ export function createMemorySpaces(
         id: newId(),
         ...normalized,
         deskId: null,
+        meeting: false,
         floorMaterialId: floor.materialId,
         floorColor: floor.color,
         createdAt: at,

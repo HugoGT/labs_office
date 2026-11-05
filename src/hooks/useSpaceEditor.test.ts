@@ -518,3 +518,27 @@ describe('useSpaceEditor: Supr or Backspace deletes the selected room, or desk i
     expect(spaces.deleteSpace).toHaveBeenCalledTimes(1);
   });
 });
+
+describe('useSpaceEditor: meeting mode (#282)', () => {
+  it('turns a room into a meeting room through the port and rereads the list', async () => {
+    const { spaces, result } = setup(fakeSpaces());
+    act(() => result.current.enter());
+    await waitFor(() => expect(spaces.listSpaces).toHaveBeenCalledTimes(1));
+
+    await act(async () => result.current.setMeeting('id-sala', true));
+
+    expect(spaces.updateSpace).toHaveBeenCalledWith('id-sala', { meeting: true });
+    expect(spaces.listSpaces).toHaveBeenCalledTimes(2);
+    expect(result.current.error).toBeNull();
+  });
+
+  it('a refusal is told, not swallowed', async () => {
+    const { result } = setup(fakeSpaces({ updateSpace: vi.fn(async () => { throw new AdminError('forbidden'); }) }));
+    act(() => result.current.enter());
+
+    await act(async () => result.current.setMeeting('id-sala', true));
+
+    expect(result.current.error).not.toBeNull();
+    expect(result.current.pending).toBe(false);
+  });
+});

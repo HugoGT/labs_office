@@ -83,6 +83,7 @@ const SPACE_ROW = {
   desk_id: null,
   floor_material_id: 'floor-wood',
   floor_color: null,
+  meeting: false,
   created_at: new Date('2026-01-01T00:00:00.000Z'),
   updated_at: new Date('2026-01-01T00:00:00.000Z'),
 };
@@ -132,6 +133,7 @@ describe('pgSpaces: listSpaces', () => {
         deskId: null,
         floorMaterialId: 'floor-wood',
         floorColor: null,
+        meeting: false,
         createdAt: SPACE_ROW.created_at,
         updatedAt: SPACE_ROW.updated_at,
       },
@@ -590,5 +592,29 @@ describe('pgSpaces: floor (art migration, step 3)', () => {
 
     const update = pool.queries.map((query) => squash(query.text)).find((sql) => sql.startsWith('update spaces'))!;
     expect(update.slice(0, update.indexOf('returning'))).not.toContain('floor_');
+  });
+});
+
+describe('pgSpaces: meeting mode (#282)', () => {
+  it('reads the flag, and a row read before the migration is a normal room', async () => {
+    const pool = fakePool(() => ({ rows: [{ ...SPACE_ROW, meeting: true }, { ...SPACE_ROW, id: 'b', meeting: undefined }], rowCount: 2 }));
+
+    const [meeting, legacy] = await createPgSpaces(pool).listSpaces();
+
+    expect(squash(pool.queries[0].text)).toContain('meeting');
+    expect(meeting.meeting).toBe(true);
+    expect(legacy.meeting).toBe(false);
+  });
+
+  it('updateSpace writes only the flag when only the flag changes', async () => {
+    const pool = fakePool(() => ({ rows: [{ ...SPACE_ROW, meeting: true }], rowCount: 1 }));
+
+    const updated = await createPgSpaces(pool).updateSpace(SPACE_ROW.id, { meeting: true });
+
+    const sql = squash(pool.queries[0].text);
+    expect(sql.slice(0, sql.indexOf('returning'))).toContain('meeting = $2');
+    expect(sql.slice(0, sql.indexOf('returning'))).not.toContain('name = $');
+    expect(pool.queries[0].values).toEqual([SPACE_ROW.id, true]);
+    expect(updated?.meeting).toBe(true);
   });
 });

@@ -203,6 +203,15 @@ describe('normalizeUpdateSpaceInput', () => {
   it('un patch vacio da un objeto vacio: no reinventa campos que no llegaron', () => {
     expect(normalizeUpdateSpaceInput({})).toEqual({});
   });
+
+  it('meeting mode (#282) passes as a boolean on its own', () => {
+    expect(normalizeUpdateSpaceInput({ meeting: true })).toEqual({ meeting: true });
+    expect(normalizeUpdateSpaceInput({ meeting: false })).toEqual({ meeting: false });
+  });
+
+  it('meeting mode that is not a boolean is refused: an untyped body may send "true"', () => {
+    expect(() => normalizeUpdateSpaceInput({ meeting: 'true' as unknown as boolean })).toThrow(InvalidSpaceError);
+  });
 });
 
 describe('hashSpaces: la version servida (D4)', () => {

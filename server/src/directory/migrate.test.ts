@@ -891,3 +891,9 @@ describe('schema.sql: the office decor layer (#208)', () => {
     }
   });
 });
+
+describe('schema.sql: meeting rooms (#282)', () => {
+  it('adds the flag to databases that already exist, leaving every existing space a normal one', () => {
+    expect(squash(schema)).toContain('alter table spaces add column if not exists meeting boolean not null default false');
+  });
+});

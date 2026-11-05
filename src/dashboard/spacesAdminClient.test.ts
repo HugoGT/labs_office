@@ -102,6 +102,7 @@ describe('createSpacesAdminClient: contrato del servidor', () => {
         h: 5,
         capacity: 8,
         kind: 'room',
+        meeting: false,
       },
     ]);
   });
@@ -173,6 +174,23 @@ describe('createSpacesAdminClient: contrato del servidor', () => {
     await clientWith(fetchImpl).updateSpace('space-1', { capacity: null });
 
     expect(sentBody(fetchImpl)).toEqual({ capacity: null });
+  });
+
+  it('reads whether each room is a meeting room, a missing flag being a normal room (#282)', async () => {
+    const fetchImpl = fetchWith(200, { spaces: [{ ...SERVED_ROOM, meeting: true }, SERVED_DESK_SPACE], version: 'v1' });
+
+    const spaces = await clientWith(fetchImpl).listSpaces();
+
+    expect(spaces.map((space) => space.meeting)).toEqual([true, false]);
+  });
+
+  it('turning meeting mode on sends only the flag (#282)', async () => {
+    const fetchImpl = fetchWith(200, { ...SERVED_ROOM, meeting: true });
+
+    const updated = await clientWith(fetchImpl).updateSpace('space-1', { meeting: true });
+
+    expect(sentBody(fetchImpl)).toEqual({ meeting: true });
+    expect(updated.meeting).toBe(true);
   });
 
   it('actualiza con POST /admin/spaces/:id y escapa el id', async () => {

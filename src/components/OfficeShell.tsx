@@ -44,7 +44,8 @@ import { useInstallPrompt } from '../hooks/useInstallPrompt';
 import { useMapZoom } from '../hooks/useMapZoom';
 import { useOfficeAdminRole } from '../hooks/useOfficeAdminRole';
 import { useOfficeBridge } from '../hooks/useOfficeBridge';
-import { useProximityAudio } from '../hooks/useProximityAudio';
+import { useProximityAudio, type MeetingNotice } from '../hooks/useProximityAudio';
+import { muteMicrophones, resolveMuteUrl } from '../game/moderationClient';
 import { useRoster } from '../hooks/useRoster';
 import { useSpacesConfig } from '../hooks/useSpacesConfig';
 import { placeLabel, placeOf } from './roomPlace';
@@ -69,6 +70,12 @@ import { ZoomControls } from './ZoomControls';
 const TOAST_TIMEOUT_MS = 3200;
 /** How long walking into a locked space is told. */
 const SPACE_LOCKED_TOAST_MS = 3000;
+
+/** Why the own microphone went off in a meeting room (#282). */
+const MEETING_NOTICES: Record<MeetingNotice, string> = {
+  'entered-muted': '🔇 Sala de junta: entras con el micrófono y la cámara apagados',
+  'muted-by-moderator': '🔇 Un moderador silenció tu micrófono. Púlsalo para volver a hablar',
+};
 
 export interface OfficeShellProps {
   onEntryState?: (state: OfficeEntryState) => void;
@@ -425,7 +432,15 @@ export function OfficeShell({
     cameraFilter,
     setCameraFilter,
     cameraBlurAvailable,
-  } = useProximityAudio(bridge, { config: livekitConfig, status, session });
+    canModerate,
+    roomPeerIds,
+  } = useProximityAudio(bridge, {
+    config: livekitConfig,
+    status,
+    session,
+    // Called after render, once `setToastMessage` below exists.
+    onMeetingNotice: (notice: MeetingNotice) => setToastMessage(MEETING_NOTICES[notice]),
+  });
 
   /**
    * Mismo patron que `setStatus` (D7): React es el dueno del `Set` de
@@ -532,6 +547,26 @@ export function OfficeShell({
     },
     [recordingsUrl, session],
   );
+
+  /**
+   * Meeting moderation (#282): the server checks the role and the room again,
+   * so `canModerate` only decides whether the controls are shown.
+   */
+  const [muteUrl] = useState(() => resolveMuteUrl(endpoint));
+  async function mute(target: string, name: string | null): Promise<void> {
+    if (muteUrl === null || spaceId === null || selfSessionId === null) return;
+    try {
+      const token = session ? await session.getIdToken() : null;
+      const muted = await muteMicrophones({ url: muteUrl, sessionId: selfSessionId, token, spaceId, target });
+      if (name === null) setToastMessage(muted === 1 ? '🔇 Silenciaste 1 micrófono' : `🔇 Silenciaste ${muted} micrófonos`);
+      else setToastMessage(muted > 0 ? <>🔇 Silenciaste a <b>{name}</b></> : <><b>{name}</b> no tiene el micrófono abierto</>);
+    } catch {
+      setToastMessage('No se pudo silenciar');
+    }
+  }
+  const moderation = canModerate && muteUrl !== null && spaceId !== null && selfSessionId !== null
+    ? { roomPeerIds, onMutePeer: (sessionId: string, name: string) => void mute(sessionId, name), onMuteAll: () => void mute('all', null) }
+    : null;
 
   async function toggleRecording(): Promise<void> {
     if (spaceId === null || selfSessionId === null) return;
@@ -874,6 +909,7 @@ export function OfficeShell({
           refreshSpaces={refreshSpaces}
           onLayoutEditingChange={setLayoutEditing}
           onCallPeer={callPeer}
+          moderation={moderation}
           openRequest={sidebarRequest}
         />
       </div>

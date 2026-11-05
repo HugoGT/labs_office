@@ -1439,3 +1439,40 @@ describe('camera filter: two blur strengths switch on the running processor', ()
     expect(cameraTrack()!.stopProcessor).toHaveBeenCalledOnce();
   });
 });
+
+describe('connectLivekitRoom: a microphone muted by a moderator (#282)', () => {
+  async function connectWatchingMutes() {
+    const room = fakeRoom();
+    const onMicrophoneMutedRemotely = vi.fn();
+    const connection = await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      audioContainer: document.createElement('div'),
+      onMicrophoneMutedRemotely,
+    });
+    return { room, connection, onMicrophoneMutedRemotely };
+  }
+
+  it('reports a mute of the own microphone that this client did not ask for', async () => {
+    const { room, onMicrophoneMutedRemotely } = await connectWatchingMutes();
+
+    room.emit(RoomEvent.TrackMuted, fakePublication('audio', { source: 'microphone' }), room.localParticipant);
+
+    expect(onMicrophoneMutedRemotely).toHaveBeenCalledTimes(1);
+  });
+
+  it('stays quiet for the own click, for a camera, and for somebody else microphone', async () => {
+    const { room, connection, onMicrophoneMutedRemotely } = await connectWatchingMutes();
+    // livekit-client mutes the track inside the call, so the event fires while it runs.
+    room.localParticipant.setMicrophoneEnabled.mockImplementation(async () => {
+      room.emit(RoomEvent.TrackMuted, fakePublication('audio', { source: 'microphone' }), room.localParticipant);
+    });
+
+    await connection.setMicrophoneEnabled(false);
+    room.emit(RoomEvent.TrackMuted, fakePublication('video', { source: 'camera' }), room.localParticipant);
+    room.emit(RoomEvent.TrackMuted, fakePublication('audio', { source: 'microphone' }), fakeParticipant([]));
+
+    expect(onMicrophoneMutedRemotely).not.toHaveBeenCalled();
+  });
+});

@@ -186,6 +186,7 @@ export interface UpdateSpaceInput {
   w?: number;
   h?: number;
   capacity?: number | null;
+  meeting?: boolean;
 }
 
 export interface NormalizedUpdateSpaceInput {
@@ -196,6 +197,7 @@ export interface NormalizedUpdateSpaceInput {
   w?: number;
   h?: number;
   capacity?: number | null;
+  meeting?: boolean;
 }
 
 /**
@@ -228,6 +230,11 @@ export function normalizeUpdateSpaceInput(input: UpdateSpaceInput): NormalizedUp
   if (input.capacity !== undefined) {
     assertValidCapacity(input.capacity);
     result.capacity = input.capacity;
+  }
+
+  if (input.meeting !== undefined) {
+    if (typeof input.meeting !== 'boolean') throw new InvalidSpaceError('meeting debe ser true o false');
+    result.meeting = input.meeting;
   }
 
   return result;

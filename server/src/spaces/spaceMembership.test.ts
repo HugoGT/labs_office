@@ -19,6 +19,7 @@ function space(overrides: Partial<Space> & Pick<Space, 'id' | 'x' | 'y' | 'w' | 
     deskId: null,
     floorMaterialId: 'floor-wood',
     floorColor: null,
+    meeting: false,
     createdAt: now,
     updatedAt: now,
     ...overrides,

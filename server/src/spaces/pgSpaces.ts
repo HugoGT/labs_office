@@ -62,7 +62,7 @@ function translatePgError(error: unknown): never {
 }
 
 const SPACE_COLUMNS =
-  'id, slug, name, x, y, w, h, capacity, desk_id, floor_material_id, floor_color, created_at, updated_at';
+  'id, slug, name, x, y, w, h, capacity, desk_id, floor_material_id, floor_color, meeting, created_at, updated_at';
 
 function toSpace(row: Record<string, unknown>): Space {
   return {
@@ -79,6 +79,8 @@ function toSpace(row: Record<string, unknown>): Space {
     // the migration ran, same as `above_avatars` (#71).
     floorMaterialId: (row.floor_material_id as string | null | undefined) ?? ART_PACK_DEFAULTS.floor,
     floorColor: (row.floor_color as string | null | undefined) ?? null,
+    // Same fallback as the floor: NOT NULL DEFAULT false once migrated (#282).
+    meeting: (row.meeting as boolean | null | undefined) ?? false,
     createdAt: row.created_at as Date,
     updatedAt: row.updated_at as Date,
   };

@@ -15,6 +15,7 @@ import { fetchSpacesConfig } from '../game/spacesConfig';
 import { zoomView, type ZoomAction } from '../game/mapZoom';
 import { DEFAULT_NAME } from '../game/officeProtocol';
 import { RecordingError, getRecordingUrl, startRecording, stopRecording } from '../game/recordingClient';
+import { ModerationError, muteMicrophones } from '../game/moderationClient';
 import { useOfficeAdminRole } from '../hooks/useOfficeAdminRole';
 import { useProximityAudio } from '../hooks/useProximityAudio';
 import { OfficeShell } from './OfficeShell';
@@ -47,6 +48,11 @@ vi.mock('../hooks/useOfficeAdminRole', () => ({ useOfficeAdminRole: vi.fn() }));
 vi.mock('../game/callChime', () => ({ createCallChime: () => ({ play: () => {}, stop: () => {} }) }));
 // The only module that talks to `/recordings/*` (#5): whether a room is being
 // recorded comes from the bridge, never from these calls.
+// The only module that talks to `/livekit/mute` (#282).
+vi.mock('../game/moderationClient', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../game/moderationClient')>()),
+  muteMicrophones: vi.fn(),
+}));
 vi.mock('../game/recordingClient', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../game/recordingClient')>()),
   startRecording: vi.fn(),
@@ -147,6 +153,9 @@ function proximityAudio(
     cameraFilter: 'none',
     setCameraFilter: vi.fn(),
     cameraBlurAvailable: true,
+    meetingRoom: false,
+    canModerate: false,
+    roomPeerIds: new Set(),
     ...overrides,
   };
 }
@@ -1880,5 +1889,71 @@ describe('OfficeShell: right rail while painting terrain', () => {
     expect(sidebar()).not.toBeVisible();
     act(() => bridge.emitCommand('terrainedit', null));
     expect(sidebar()).toBeVisible();
+  });
+});
+
+describe('OfficeShell: meeting rooms (#282)', () => {
+  const SELF = 'ses-me';
+
+  function renderInMeeting() {
+    render(<OfficeShell />);
+    const bridge = createGameMock.mock.calls[0][1];
+    act(() => bridge.emit('voice', { selfSessionId: SELF, selfName: 'Yo', peers: [], spaceId: 'junta' }));
+    act(() => bridge.emit('room', { spaceId: 'junta', name: 'Junta' }));
+    act(() => bridge.emit('roster', { peers: [{ sessionId: 'ses-ana', name: 'Ana', status: 'g' }] }));
+    return bridge;
+  }
+
+  it('tells why the microphone went off: entering the meeting, or a moderator', () => {
+    renderInMeeting();
+    const { onMeetingNotice } = useProximityAudioMock.mock.calls.at(-1)![1];
+
+    act(() => onMeetingNotice?.('entered-muted'));
+    expect(screen.getByText(/Sala de junta: entras con el micrófono y la cámara apagados/)).toBeInTheDocument();
+
+    act(() => onMeetingNotice?.('muted-by-moderator'));
+    expect(screen.getByText(/Un moderador silenció tu micrófono/)).toBeInTheDocument();
+  });
+
+  it('a moderator mutes one person or everyone through the server, and is told the result', async () => {
+    const user = userEvent.setup();
+    useProximityAudioMock.mockReturnValue(proximityAudio({ meetingRoom: true, canModerate: true, roomPeerIds: new Set(['ses-ana']) }));
+    vi.mocked(muteMicrophones).mockResolvedValue(1);
+    renderInMeeting();
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+
+    await user.click(screen.getByRole('button', { name: 'Silenciar a Ana' }));
+    expect(muteMicrophones).toHaveBeenLastCalledWith({
+      url: expect.stringMatching(/\/livekit\/mute$/),
+      sessionId: SELF,
+      token: null,
+      spaceId: 'junta',
+      target: 'ses-ana',
+    });
+    expect(await screen.findByText(/Silenciaste a/)).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: 'Silenciar a todos' }));
+    expect(muteMicrophones).toHaveBeenLastCalledWith(expect.objectContaining({ target: 'all' }));
+  });
+
+  it('says so when the server refuses', async () => {
+    const user = userEvent.setup();
+    useProximityAudioMock.mockReturnValue(proximityAudio({ meetingRoom: true, canModerate: true, roomPeerIds: new Set(['ses-ana']) }));
+    vi.mocked(muteMicrophones).mockRejectedValue(new ModerationError(403, 'forbidden'));
+    renderInMeeting();
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+
+    await user.click(screen.getByRole('button', { name: 'Silenciar a todos' }));
+
+    expect(await screen.findByText('No se pudo silenciar')).toBeInTheDocument();
+  });
+
+  it('whoever does not moderate gets no mute controls', async () => {
+    const user = userEvent.setup();
+    useProximityAudioMock.mockReturnValue(proximityAudio({ meetingRoom: true, canModerate: false, roomPeerIds: new Set(['ses-ana']) }));
+    renderInMeeting();
+    await user.click(screen.getByRole('button', { name: /Personas/ }));
+
+    expect(screen.queryByRole('button', { name: /Silenciar/ })).toBeNull();
   });
 });

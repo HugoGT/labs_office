@@ -357,3 +357,31 @@ describe('createMemorySpaces: floor (art migration, step 3)', () => {
     expect(await spaces.version()).toBe(BUILT_IN_SEED_VERSION);
   });
 });
+
+describe('createMemorySpaces: meeting mode (#282)', () => {
+  it('a new room, a seeded one and a desk cubicle are not meeting rooms', async () => {
+    const spaces = createMemorySpaces({ seed: BUILT_IN_SEED_SPACES });
+    await spaces.createSpace({ name: 'Sala', x: 200, y: 200, w: 6, h: 6, capacity: null });
+    spaces.deskSpaces.upsertDeskSpace({ id: 'desk-1', label: 'Mesa 1', x: 300, y: 300 });
+
+    for (const space of await spaces.listSpaces()) expect(space.meeting).toBe(false);
+  });
+
+  it('updateSpace turns meeting mode on and off without touching anything else', async () => {
+    const spaces = createMemorySpaces();
+    const created = await spaces.createSpace({ name: 'Sala', x: 1, y: 1, w: 6, h: 6, capacity: 10 });
+
+    expect(await spaces.updateSpace(created.id, { meeting: true })).toMatchObject({ meeting: true, name: 'Sala', capacity: 10 });
+    expect(await spaces.updateSpace(created.id, { meeting: false })).toMatchObject({ meeting: false });
+  });
+
+  it('meeting mode does not change the spaces version: it decides who publishes, not who hears whom', async () => {
+    const spaces = createMemorySpaces();
+    const created = await spaces.createSpace({ name: 'Sala', x: 1, y: 1, w: 6, h: 6, capacity: null });
+    const before = await spaces.version();
+
+    await spaces.updateSpace(created.id, { meeting: true });
+
+    expect(await spaces.version()).toBe(before);
+  });
+});

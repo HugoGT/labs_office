@@ -3514,3 +3514,125 @@ describe('local auth mode', () => {
     await local.shutdown();
   });
 });
+
+/**
+ * Meeting rooms (#282) over HTTP: the token says whether the room is a
+ * meeting room and whether this person may moderate it, and `/livekit/mute`
+ * is wired to the moderation port. The rules are tested in `moderation/`.
+ */
+describe('meeting rooms (#282)', () => {
+  const ADMIN_USER: DirectoryUser = {
+    id: '00000000-0000-4000-8000-0000000002a1',
+    uid: 'uid-admin',
+    email: 'admin@example.com',
+    displayName: 'Admin',
+    role: 'admin',
+    status: 'active',
+    expiresAt: null,
+    invitedBy: null,
+    avatarId: 'character-p01-burgundy-suit',
+    avatarChosenAt: null,
+    createdAt: new Date('2025-12-01T00:00:00.000Z'),
+  };
+  const STAFF_USER: DirectoryUser = { ...ADMIN_USER, id: '00000000-0000-4000-8000-0000000002e1', uid: 'uid-staff', email: 'staff@example.com', displayName: 'Staff', role: 'employee' };
+  const identities: Record<string, VerifiedIdentity> = {
+    'token-admin': { uid: 'uid-admin', email: 'admin@example.com', name: 'Admin' },
+    'token-staff': { uid: 'uid-staff', email: 'staff@example.com', name: 'Staff' },
+  };
+  const meetingVerifier: IdTokenVerifier = {
+    async verify(token: unknown) {
+      return typeof token === 'string' ? (identities[token] ?? null) : null;
+    },
+  };
+
+  async function meetingServer(meeting: boolean) {
+    const spaces = createMemorySpaces();
+    // Tiles (10,10)-(16,16) -> pixels (320,320)-(512,512).
+    const created = await spaces.createSpace({ name: 'Junta', x: 10, y: 10, w: 6, h: 6, capacity: null });
+    if (meeting) await spaces.updateSpace(created.id, { meeting: true });
+    const muted: string[] = [];
+    const meetingServer = createOfficeServer({
+      auth: meetingVerifier,
+      directory: createMemoryDirectory({ seed: [ADMIN_USER, STAFF_USER] }),
+      identityAdmin: null,
+      spaces,
+      moderation: {
+        async listMicrophones() {
+          return [{ identity: 'someone', trackSid: 'TR_someone' }];
+        },
+        async muteMicrophone(_room, microphone) {
+          muted.push(microphone.identity);
+        },
+      },
+    });
+    const port = await meetingServer.listen(0);
+    process.env.LIVEKIT_API_KEY = 'devkey';
+    process.env.LIVEKIT_API_SECRET = 'un-secreto-suficientemente-largo-para-hs256';
+    return { meetingServer, spaceId: created.id, port, muted };
+  }
+
+  async function enter(port: number, token: string, server: OfficeServer) {
+    const room = await new Client(`ws://localhost:${port}`).joinOrCreate<OfficeState>(OFFICE_ROOM_NAME, { token });
+    openRooms.push(room);
+    server.sessions.moveTo(room.sessionId, 330, 330);
+    return room.sessionId;
+  }
+
+  function post(port: number, path: string, body: unknown) {
+    return fetch(`http://localhost:${port}${path}`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
+  it('the token of a meeting room says so, and offers moderation to an admin only', async () => {
+    const { meetingServer: s, spaceId, port } = await meetingServer(true);
+    try {
+      const admin = await enter(port, 'token-admin', s);
+      const staff = await enter(port, 'token-staff', s);
+
+      const adminToken = await (await post(port, '/livekit/token', { sessionId: admin, token: 'token-admin', spaceId })).json();
+      const staffToken = await (await post(port, '/livekit/token', { sessionId: staff, token: 'token-staff', spaceId })).json();
+      const corridor = await (await post(port, '/livekit/token', { sessionId: staff, token: 'token-staff' })).json();
+
+      expect(adminToken).toMatchObject({ meeting: true, moderator: true });
+      expect(staffToken).toMatchObject({ meeting: true, moderator: false });
+      expect(corridor).toMatchObject({ meeting: false, moderator: false });
+    } finally {
+      await s.shutdown();
+    }
+  });
+
+  it('the token of a normal room is not a meeting, not even for an admin', async () => {
+    const { meetingServer: s, spaceId, port } = await meetingServer(false);
+    try {
+      const admin = await enter(port, 'token-admin', s);
+
+      const body = await (await post(port, '/livekit/token', { sessionId: admin, token: 'token-admin', spaceId })).json();
+
+      expect(body).toMatchObject({ meeting: false, moderator: false });
+    } finally {
+      await s.shutdown();
+    }
+  });
+
+  it('POST /livekit/mute mutes through LiveKit for an admin and answers 403 to an employee', async () => {
+    const { meetingServer: s, spaceId, port, muted } = await meetingServer(true);
+    try {
+      const admin = await enter(port, 'token-admin', s);
+      const staff = await enter(port, 'token-staff', s);
+
+      const refused = await post(port, '/livekit/mute', { sessionId: staff, token: 'token-staff', spaceId, all: true });
+      expect(refused.status).toBe(403);
+      expect(muted).toEqual([]);
+
+      const done = await post(port, '/livekit/mute', { sessionId: admin, token: 'token-admin', spaceId, target: 'someone' });
+      expect(done.status).toBe(200);
+      expect(await done.json()).toEqual({ muted: 1 });
+      expect(muted).toEqual(['someone']);
+    } finally {
+      await s.shutdown();
+    }
+  });
+});

@@ -47,6 +47,11 @@
   cursor: pointer;
 }
 
+.on {
+  border-color: #2563eb;
+  background: #1e3a8a;
+}
+
 .button:disabled {
   opacity: 0.5;
   cursor: default;

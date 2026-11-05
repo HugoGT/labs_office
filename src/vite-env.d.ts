@@ -11,6 +11,7 @@ declare const __OFFICE_E2E__: boolean;
 declare module 'vitest/browser' {
   interface BrowserCommands {
     mintLivekitToken: (identity: string, room: string) => Promise<string>;
+    muteLivekitMicrophone: (identity: string, room: string) => Promise<number>;
     authoritativePositionServer: (action: 'start' | 'state' | 'stop', sessionId?: string) => Promise<{
       endpoint: string;
       position: { x: number; y: number } | null;

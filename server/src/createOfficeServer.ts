@@ -102,6 +102,9 @@ import { directoryFromEnv, type DirectoryRuntime } from './directory/fromEnv.ts'
 import { createLiveSessionRegistry, type LiveSessionRegistry } from './liveSessions.ts';
 import { createSessionEvictionHub, type SessionEvictor } from './sessionEviction.ts';
 import { mintOfficeToken } from './livekitToken.ts';
+import { moderationFromEnv } from './moderation/livekitModeration.ts';
+import type { RoomModerationPort } from './moderation/moderationPort.ts';
+import { handleMuteMicrophones, sessionCanModerate } from './moderation/moderationRoutes.ts';
 import { OFFICE_ROOM_NAME, OfficeRoom, RECONNECTION_WINDOW_SECONDS } from './OfficeRoom.ts';
 import { egressFromEnv, type EgressPort } from './recording/egressPort.ts';
 import { createFinishedRecordingStore } from './recording/finishedRecordings.ts';
@@ -197,6 +200,7 @@ async function handleLivekitToken(
   sessions: LiveSessionRegistry,
   auth?: IdTokenVerifier,
   spaces?: SpacesDirectory,
+  directory?: UserDirectory,
 ): Promise<LivekitTokenResult> {
   const guard = await guardSessionRequest(body, sessions, auth);
   if (!guard.ok) return { status: guard.status, body: guard.body };
@@ -223,6 +227,11 @@ async function handleLivekitToken(
   }
 
   const room = livekitRoomFor(mintedSpaceId);
+  // Meeting rooms (#282): the client enters them muted, and offers the
+  // moderation controls only to whom `/livekit/mute` would accept. A hint,
+  // not a grant: that route checks the role again on every request.
+  const meeting = mintedSpaceId !== null && (await spaces?.getSpace(mintedSpaceId))?.meeting === true;
+  const moderator = meeting && (await sessionCanModerate(sessionId, { sessions, directory }));
 
   const token = await mintOfficeToken(
     { apiKey, apiSecret },
@@ -247,6 +256,8 @@ async function handleLivekitToken(
       url: process.env.LIVEKIT_URL ?? 'ws://localhost:7880',
       identity: sessionId,
       room,
+      meeting,
+      moderator,
     },
   };
 }
@@ -388,6 +399,8 @@ export interface OfficeServerOverrides {
   egress?: EgressPort | null;
   /** Same as `egress`, for the recordings bucket (#58). */
   storage?: RecordingStoragePort | null;
+  /** Same as `egress`, for muting microphones in a meeting room (#282). */
+  moderation?: RoomModerationPort | null;
   /** Same again, for the bucket of uploaded art files (#121). `null`: uploads answer 503. */
   assetStorage?: AssetStoragePort | null;
   /**
@@ -1438,7 +1451,7 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
   );
 
   app.post('/livekit/token', (req, res) => {
-    handleLivekitToken(req.body, sessions, auth, spaces)
+    handleLivekitToken(req.body, sessions, auth, spaces, directory)
       .then((result) => {
         res.status(result.status).json(result.body);
       })
@@ -1466,6 +1479,20 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
         });
     };
   }
+
+  // Meeting moderation (#282). The LiveKit credentials are read per call,
+  // like those of `/livekit/token`.
+  app.post('/livekit/mute', (req, res) => {
+    const moderation = overrides?.moderation !== undefined ? overrides.moderation : moderationFromEnv(process.env);
+    handleMuteMicrophones(req.body, { sessions, auth, spaces, directory, moderation })
+      .then((result) => {
+        res.status(result.status).json(result.body);
+      })
+      .catch(() => {
+        console.error('[moderation] unhandled failure in the mute route');
+        res.status(500).json({ error: 'internal' });
+      });
+  });
 
   // POST and not DELETE for stop, same CORS reason as the admin routes above.
   app.post('/recordings/start', recordingRoute(handleStartRecording));

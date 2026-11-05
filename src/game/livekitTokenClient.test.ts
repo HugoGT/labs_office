@@ -44,6 +44,30 @@ describe('fetchLivekitToken', () => {
       url: 'ws://localhost:7880',
       identity: 'abc',
       room: 'office-livekit',
+      meeting: false,
+      moderator: false,
+    });
+  });
+
+  it('reads whether the room is a meeting room and whether this person moderates it (#282)', async () => {
+    const fetchImpl = vi.fn(async () =>
+      fakeResponse(200, { token: 'jwt', url: 'ws://x', identity: 'abc', room: 'r', meeting: true, moderator: true }),
+    );
+
+    expect(await fetchLivekitToken({ tokenUrl: TOKEN_URL, sessionId: 'abc' }, fetchImpl)).toMatchObject({
+      meeting: true,
+      moderator: true,
+    });
+  });
+
+  it('anything but true is false: an older server, or a value of the wrong type, never moderates (#282)', async () => {
+    const fetchImpl = vi.fn(async () =>
+      fakeResponse(200, { token: 'jwt', url: 'ws://x', identity: 'abc', room: 'r', meeting: 'yes', moderator: 1 }),
+    );
+
+    expect(await fetchLivekitToken({ tokenUrl: TOKEN_URL, sessionId: 'abc' }, fetchImpl)).toMatchObject({
+      meeting: false,
+      moderator: false,
     });
   });
 

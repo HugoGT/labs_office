@@ -155,8 +155,21 @@ export interface OfficeSidebarProps {
    * context menu's "Llamar". Without it the list offers no calls.
    */
   onCallPeer?: (sessionId: string, name: string) => void;
+  /**
+   * Muting in a meeting room this person moderates (#282): one button per
+   * person in the room and one for everyone. Absent, the list offers neither.
+   * The server checks the role again, so this only decides what is shown.
+   */
+  moderation?: SidebarModeration | null;
   /** Opens a section of "Personalizar" on each new request. */
   openRequest?: SidebarOpenRequest | null;
+}
+
+export interface SidebarModeration {
+  /** Everyone in the meeting room but oneself: only they get a mute button. */
+  roomPeerIds: ReadonlySet<string>;
+  onMutePeer: (sessionId: string, name: string) => void;
+  onMuteAll: () => void;
 }
 
 /**
@@ -190,6 +203,7 @@ export function OfficeSidebar({
   artAdmin,
   character,
   onCallPeer,
+  moderation = null,
   openRequest = null,
 }: OfficeSidebarProps) {
   const [openPanel, setOpenPanel] = useState<'personalize' | 'people' | null>(null);
@@ -418,6 +432,11 @@ export function OfficeSidebar({
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
+          {moderation !== null && (
+            <button type="button" className={styles.back} onClick={moderation.onMuteAll}>
+              <span aria-hidden="true">🔇</span> Silenciar a todos
+            </button>
+          )}
           <ul className={styles.list}>
             {visible.map((person) => (
               <li key={person.sessionId} className={styles.entry}>
@@ -441,6 +460,17 @@ export function OfficeSidebar({
                     onClick={() => onCallPeer(person.sessionId, person.name)}
                   >
                     <PhoneIcon />
+                  </button>
+                )}
+                {!person.isSelf && moderation !== null && moderation.roomPeerIds.has(person.sessionId) && (
+                  <button
+                    type="button"
+                    className={styles.call}
+                    aria-label={`Silenciar a ${person.name}`}
+                    title={`Silenciar a ${person.name}`}
+                    onClick={() => moderation.onMutePeer(person.sessionId, person.name)}
+                  >
+                    <span aria-hidden="true">🔇</span>
                   </button>
                 )}
               </li>

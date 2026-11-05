@@ -71,6 +71,8 @@ function toAdminSpace(raw: unknown): AdminSpace | null {
     h: row.h,
     capacity: row.capacity as number | null,
     kind: row.kind,
+    // Only a literal `true`: an older server serves no flag at all (#282).
+    meeting: row.meeting === true,
   };
 }
 
@@ -150,6 +152,7 @@ export function createSpacesAdminClient(
       if (input.w !== undefined) patch.w = input.w;
       if (input.h !== undefined) patch.h = input.h;
       if (input.capacity !== undefined) patch.capacity = input.capacity;
+      if (input.meeting !== undefined) patch.meeting = input.meeting;
 
       return parseAdminSpace(await request(spacePath(id), jsonBody(patch)));
     },

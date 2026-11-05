@@ -189,5 +189,29 @@ describe.skipIf(!import.meta.env.VITE_LIVEKIT_E2E)(
 
       expect(document.querySelectorAll('audio')).toHaveLength(0);
     });
+
+    it('a microphone muted through the room API is reported as a moderator mute (#282)', async () => {
+      const identity = `moderated-${Date.now()}`;
+      const token = await commands.mintLivekitToken(identity, LIVEKIT_ROOM_NAME);
+      const room = new Room();
+      let mutedRemotely = 0;
+      const connection = await connectLivekitRoom({
+        url: LIVEKIT_WS_URL,
+        token,
+        createRoom: () => room,
+        onMicrophoneMutedRemotely: () => {
+          mutedRemotely += 1;
+        },
+      });
+      rooms.push(connection);
+      expect(await connection.setMicrophoneEnabled(true)).toBe(true);
+      expect(mutedRemotely).toBe(0);
+
+      await expect.poll(() => commands.muteLivekitMicrophone(identity, LIVEKIT_ROOM_NAME), { timeout: 10_000 }).toBe(1);
+
+      await expect.poll(() => mutedRemotely, { timeout: 10_000 }).toBe(1);
+      const microphone = [...room.localParticipant.trackPublications.values()].find((pub) => pub.source === 'microphone');
+      expect(microphone?.isMuted).toBe(true);
+    });
   },
 );

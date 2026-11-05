@@ -72,7 +72,15 @@ export interface UseProximityAudioOptions {
   blurSupported?: boolean;
   /** Jitter source for the rebuild backoff (#283); `Math.random` by default. */
   random?: () => number;
+  /** What the person should be told about a meeting room (#282); the owner shows it. */
+  onMeetingNotice?: (notice: MeetingNotice) => void;
 }
+
+/**
+ * `entered-muted`: a meeting room was entered, with microphone and camera
+ * off. `muted-by-moderator`: a moderator muted the own microphone (#282).
+ */
+export type MeetingNotice = 'entered-muted' | 'muted-by-moderator';
 
 export interface UseProximityAudioResult {
   micOn: boolean;
@@ -133,6 +141,12 @@ export interface UseProximityAudioResult {
   setCameraFilter: (filter: CameraFilter) => void;
   /** This browser can blur: without it the menu disables the option. */
   cameraBlurAvailable: boolean;
+  /** Connected to a meeting room (#282). */
+  meetingRoom: boolean;
+  /** The server lets this person mute others in this meeting room (#282); it checks again on each request. */
+  canModerate: boolean;
+  /** Who this room's voice set holds right now (everyone else in a space), for the moderation controls. */
+  roomPeerIds: ReadonlySet<string>;
 }
 
 export interface ActiveScreenSharer {
@@ -154,6 +168,7 @@ export function useProximityAudio(
     cameraFilterStore,
     blurSupported,
     random = Math.random,
+    onMeetingNotice,
   }: UseProximityAudioOptions,
 ): UseProximityAudioResult {
   const dnd = status === DO_NOT_DISTURB;
@@ -189,6 +204,20 @@ export function useProximityAudio(
   );
   const [activeScreenSharer, setActiveScreenSharer] = useState<ActiveScreenSharer | null>(null);
   const [inSpaceRoom, setInSpaceRoom] = useState(false);
+  const [meetingRoom, setMeetingRoom] = useState(false);
+  const [canModerate, setCanModerate] = useState(false);
+  const [roomPeerIds, setRoomPeerIds] = useState<ReadonlySet<string>>(new Set());
+  /** By ref, like `random`: a new callback each render must not rebuild the room. */
+  const onMeetingNoticeRef = useRef(onMeetingNotice);
+  useEffect(() => {
+    onMeetingNoticeRef.current = onMeetingNotice;
+  }, [onMeetingNotice]);
+  /**
+   * The meeting room of the current target already muted this person on
+   * entry (#282). Cleared by every new target; a rebuild of the same room
+   * keeps it, so a microphone opened inside the meeting stays open.
+   */
+  const meetingEnteredRef = useRef(false);
   const [roomHasMedia, setRoomHasMedia] = useState(false);
   /** Names from the latest `voice` (self included), to announce who started sharing (#20). */
   const namesRef = useRef<ReadonlyMap<string, string>>(new Map());
@@ -271,6 +300,21 @@ export function useProximityAudio(
       }
     }
 
+    /**
+     * Entering a meeting room (#282) publishes nothing: whatever was on in the
+     * previous room goes off before `reapplyPublishIntent`, once per target.
+     */
+    function applyRoomKind(response: LivekitTokenResponse, corridor: boolean): void {
+      const meeting = response.meeting && !corridor;
+      setMeetingRoom(meeting);
+      setCanModerate(meeting && response.moderator);
+      if (!meeting || meetingEnteredRef.current) return;
+      meetingEnteredRef.current = true;
+      setMicOnIntent(false);
+      setCamOnIntent(false);
+      onMeetingNoticeRef.current?.('entered-muted');
+    }
+
     function applyDesired(connection: LivekitRoomConnection): void {
       const desired = desiredRef.current;
       connection.setDesiredAudioPeers(desired?.sessionIds ?? []);
@@ -321,6 +365,8 @@ export function useProximityAudio(
      */
     function resetScreenShare(): void {
       setInSpaceRoom(false);
+      setMeetingRoom(false);
+      setCanModerate(false);
       setLocalScreenShareTrack(null);
       setScreenShareTracks((current) => (current.size === 0 ? current : new Map()));
       setActiveScreenSharer(null);
@@ -421,6 +467,11 @@ export function useProximityAudio(
           if (!isCurrent()) return;
           applyCameraFilter('none');
         },
+        onMicrophoneMutedRemotely: () => {
+          if (!isCurrent()) return;
+          setMicOnIntent(false);
+          onMeetingNoticeRef.current?.('muted-by-moderator');
+        },
       };
     }
 
@@ -506,6 +557,7 @@ export function useProximityAudio(
             connectionRef.current = connection;
             setAudioAvailable(true);
             setInSpaceRoom(true);
+            applyRoomKind(response, false);
             reapplyPublishIntent(connection);
             applyDesired(connection);
             if (oldConnection) void oldConnection.disconnect();
@@ -575,6 +627,7 @@ export function useProximityAudio(
           setAudioReconnecting(false);
           // Fallen back to the corridor (D5) is not a space: no sharing there.
           setInSpaceRoom(target.spaceId !== null && !acquired.corridor);
+          applyRoomKind(acquired.response, acquired.corridor);
           reapplyPublishIntent(connection);
           applyDesired(connection); // D1: lo ultimo conocido, no la instantanea capturada al arrancar.
 
@@ -616,6 +669,11 @@ export function useProximityAudio(
         ...payload.peers.map((peer): [string, string] => [peer.sessionId, peer.name]),
       ]);
       const audibleSessionIds = payload.peers.map((peer) => peer.sessionId);
+      setRoomPeerIds((current) =>
+        current.size === audibleSessionIds.length && audibleSessionIds.every((id) => current.has(id))
+          ? current
+          : new Set(audibleSessionIds),
+      );
       // Se guarda ANTES de la rama de abajo (D1): sirve tanto a la conexion viva como a la que sigue en vuelo.
       desiredRef.current = { sessionIds: audibleSessionIds };
 
@@ -632,6 +690,7 @@ export function useProximityAudio(
       }
 
       // 'reconnect': primera conexion, cambio de sesion (#52 manual) o cambio de espacio (D7) -- los tres exigen sala nueva.
+      meetingEnteredRef.current = false;
       handleReconnect({ sessionId: payload.selfSessionId, spaceId: payload.spaceId });
     });
 
@@ -781,5 +840,8 @@ export function useProximityAudio(
     cameraFilter,
     setCameraFilter,
     cameraBlurAvailable,
+    meetingRoom,
+    canModerate,
+    roomPeerIds,
   };
 }

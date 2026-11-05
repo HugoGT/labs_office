@@ -42,3 +42,35 @@ describe('LayoutItemList', () => {
     for (const button of screen.getAllByRole('button')) expect(button).toBeDisabled();
   });
 });
+
+describe('LayoutItemList: meeting mode (#282)', () => {
+  it('with onToggleMeeting, each row says whether it is a meeting room and flips it', async () => {
+    const onToggleMeeting = vi.fn();
+    render(
+      <LayoutItemList
+        items={[{ id: 'a', name: 'Sala 1', meeting: true }, { id: 'b', name: 'Sala 2' }]}
+        busy={false}
+        onMove={vi.fn()}
+        onRemove={vi.fn()}
+        onToggleMeeting={onToggleMeeting}
+      />,
+    );
+
+    const on = screen.getByRole('button', { name: 'Sala de junta: Sala 1' });
+    const off = screen.getByRole('button', { name: 'Sala de junta: Sala 2' });
+    expect(on).toHaveAttribute('aria-pressed', 'true');
+    expect(off).toHaveAttribute('aria-pressed', 'false');
+
+    await userEvent.click(on);
+    await userEvent.click(off);
+
+    expect(onToggleMeeting).toHaveBeenNthCalledWith(1, 'a', false);
+    expect(onToggleMeeting).toHaveBeenNthCalledWith(2, 'b', true);
+  });
+
+  it('without it, no row offers meeting mode (desks)', () => {
+    render(<LayoutItemList items={ITEMS} busy={false} onMove={vi.fn()} onRemove={vi.fn()} />);
+
+    expect(screen.queryByRole('button', { name: /Sala de junta/ })).toBeNull();
+  });
+});
