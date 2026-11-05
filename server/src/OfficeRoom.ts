@@ -38,6 +38,7 @@ import {
   FACINGS,
   MAX_NAME_LENGTH,
   OFFICE_ROOM_NAME,
+  SERVER_RESTART_CLOSE_CODE,
   SESSION_REPLACED_CLOSE_CODE,
   SESSION_REVOKED_CLOSE_CODE,
   isPresenceStatus,
@@ -651,6 +652,16 @@ export class OfficeRoom extends Room<OfficeState, unknown, unknown, OfficeAuthDa
       const recipient = this.state.players.get(client.sessionId);
       this.sendTo(from, 'callaccepted', { by: client.sessionId, name: recipient?.name ?? DEFAULT_NAME });
     });
+  }
+
+  /**
+   * A deploy stops this process with SIGTERM (#276). The default closes with
+   * 4000, the consented leave, so every client stayed offline until someone
+   * clicked retry. While disposing, `allowReconnection` refuses at once, so
+   * `onLeave` still releases each session and saves its position.
+   */
+  onBeforeShutdown(): void {
+    void this.disconnect(SERVER_RESTART_CLOSE_CODE);
   }
 
   onDispose(): void {
