@@ -231,6 +231,19 @@ DB_PASSWORD_ENC="$(
 )"
 DATABASE_URL="postgresql://${DB_USER}:${DB_PASSWORD_ENC}@${DB_HOST}:5432/${DB_NAME}"
 
+# CPU quota of Egress (#279): at most 4 cores, never more than the machine
+# has (Docker refuses to create a container that asks for more). Egress admits
+# a recording by the CPUs of its quota (cpu_cost in docker-compose.yml), so 4
+# admits one recording on both sizes of the schedule, and on the Friday
+# e2-standard-8 the other 4 cores stay out of its reach, for the SFU. Computed
+# on every deploy and every boot, which is when a resize takes effect: the
+# machine type only changes while the VM is stopped.
+egress_cpus() {
+  local cores
+  cores="$(nproc)"
+  if ((cores < 4)); then echo "${cores}"; else echo 4; fi
+}
+
 # Se escribe a un temporal y se mueve: si algo falla a mitad, el .env anterior
 # sigue intacto y el stack sigue en pie.
 TMP_ENV="$(mktemp "${WORKDIR}/.env.XXXXXX")"
@@ -264,6 +277,8 @@ trap 'rm -f "${TMP_ENV}"' EXIT
   echo "RECORDING_GCS_BUCKET=${RECORDING_GCS_BUCKET}"
   # The uploaded art bucket. Empty disables uploads (503).
   echo "ASSET_GCS_BUCKET=${ASSET_GCS_BUCKET}"
+  # Not a secret: a size, from this machine (see egress_cpus above).
+  echo "EGRESS_CPUS=$(egress_cpus)"
 } >"${TMP_ENV}"
 
 chown root:root "${TMP_ENV}"

@@ -27,6 +27,7 @@
 # CPU (#278): the SFU must never starve. Every service but LiveKit and Egress
 # has a hard `cpus` cap, all of them together below the 4 vCPU of a normal
 # day, so a runaway Colyseus or a TLS storm in Caddy cannot eat the machine.
+# Egress gets a cap sized to the machine by office-deploy (#279).
 # LiveKit has no cap and a `cpu_shares` weight above the rest together, so
 # under contention the kernel serves it first. See "CPU per container" in
 # README.md.
@@ -245,10 +246,15 @@ services:
     image: livekit/egress:v1.14.1@sha256:bf2b648b947349c3e9ff7aa8c718f00378d5c06af7624652a3653318e00333ce
     restart: unless-stopped
     logging: *logging
-    # Egress gets no `cpus` quota on purpose (#278): it admits a recording by
-    # the CPUs it sees, and it reads them from the cgroup quota, so any cap
-    # under 3.75 refuses every recording (cpu_cost below). What keeps it from
-    # starving the SFU is LiveKit's `cpu_shares`: Chrome slows down first.
+    # CPU quota (#279): 4 cores, or the whole machine when it has fewer.
+    # Egress admits a recording by the CPUs of its cgroup quota, so a cap
+    # under 3.75 would refuse every recording (cpu_cost below); 4 admits one
+    # on both sizes of the schedule. On the Friday e2-standard-8 the quota is
+    # what keeps Chrome off the other 4 cores, where the SFU of the meeting
+    # runs; LiveKit's `cpu_shares` still serves the SFU first inside the
+    # shared ones. office-deploy computes the value from `nproc` on every
+    # boot (`egress_cpus`); unset, "0" means no quota, the pre-#279 behavior.
+    cpus: "${EGRESS_CPUS:-0}"
     environment:
       # No storage section: the upload target (bucket and key) travels in
       # every request (server/src/recording/egressPort.ts), and with no

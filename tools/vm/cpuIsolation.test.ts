@@ -3,11 +3,13 @@
  * the VM compose, like `scheduleDrift.test.ts`: the file is only ever parsed
  * by Docker on the VM.
  */
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { NORMAL_MACHINE_TYPE } from './vmSchedule.ts';
+import { HEAVY_MACHINE_TYPE, NORMAL_MACHINE_TYPE } from './vmSchedule.ts';
 
 const compose = readFileSync(new URL('../../infra/gcp/docker-compose.yml', import.meta.url), 'utf8');
+const deploy = readFileSync(new URL('../../infra/gcp/scripts/office-deploy.sh', import.meta.url), 'utf8');
 
 /** Each top-level service and the text of its block. */
 function services(): Map<string, string> {
@@ -49,9 +51,36 @@ describe('CPU isolation of the SFU (#278)', () => {
     expect(caps.reduce((sum, cap) => sum + cap, 0)).toBeLessThan(vcpusOf(NORMAL_MACHINE_TYPE));
   });
 
-  it('leaves Egress unquoted on purpose: its admission reads the cgroup quota', () => {
-    const egress = all.get('egress') as string;
-    expect(egress).not.toMatch(/^ {4}cpus:/m);
-    expect(compose).toMatch(/Egress gets no `cpus` quota/);
+  it('caps Egress with the value office-deploy computes for the machine, uncapped without it', () => {
+    expect(all.get('egress')).toMatch(/^ {4}cpus: "\$\{EGRESS_CPUS:-0\}"$/m);
+    expect(deploy).toMatch(/^ {2}echo "EGRESS_CPUS=\$\(egress_cpus\)"$/m);
+  });
+});
+
+describe('Egress CPU cap (#279)', () => {
+  const fn = /^egress_cpus\(\) \{\n[\s\S]*?^\}$/m.exec(deploy)?.[0] ?? '';
+  const capFor = (vcpus: number) =>
+    Number(execFileSync('bash', ['-c', `${fn}\nnproc() { echo ${vcpus}; }\negress_cpus`], { encoding: 'utf8' }).trim());
+  const cost = Number(/room_composite_cpu_cost: ([\d.]+)/.exec(compose)?.[1]);
+  // Egress admits a start while cores * 0.8 (max_cpu_utilization) >= cost.
+  const admitted = (cap: number) => Math.floor((cap * 0.8) / cost);
+
+  it('finds the function office-deploy runs', () => {
+    expect(fn).not.toBe('');
+    expect(cost).toBe(3);
+  });
+
+  it('never asks Docker for more CPUs than the machine has, which would refuse to create the container', () => {
+    for (const vcpus of [1, 2, 4]) expect(capFor(vcpus)).toBe(vcpus);
+  });
+
+  it('admits exactly one recording on both sizes of the schedule', () => {
+    expect(admitted(capFor(vcpusOf(NORMAL_MACHINE_TYPE)))).toBe(1);
+    expect(admitted(capFor(vcpusOf(HEAVY_MACHINE_TYPE)))).toBe(1);
+  });
+
+  it('keeps half of the heavy machine out of reach of Egress, for the SFU of the Friday meeting', () => {
+    const vcpus = vcpusOf(HEAVY_MACHINE_TYPE);
+    expect(vcpus - capFor(vcpus)).toBeGreaterThanOrEqual(vcpus / 2);
   });
 });
