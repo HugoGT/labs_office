@@ -11,7 +11,7 @@
  *      placed in the space, and only once the file is uploaded.
  */
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { livekitRoomFor, recordingAvailableUntil } from '../../../src/game/officeProtocol.ts';
 import { createLiveSessionRegistry, type LiveSessionRegistry } from '../liveSessions.ts';
 import { createMemorySpaces } from '../spaces/memorySpaces.ts';
@@ -21,9 +21,11 @@ import type { EgressPort } from './egressPort.ts';
 import { createFinishedRecordingStore, type FinishedRecordingStore } from './finishedRecordings.ts';
 import { createRecordingRegistry, type RecordingRegistry } from './recordingRegistry.ts';
 import {
+  DEFAULT_READINESS,
   handleRecordingUrl,
   handleStartRecording,
   handleStopRecording,
+  MAX_RECORDING_MS,
   type RecordingDeps,
 } from './recordingRoutes.ts';
 import type { PresignOptions, RecordingStoragePort } from './recordingStorage.ts';
@@ -511,6 +513,72 @@ describe('handleStopRecording', () => {
       status: 503,
       body: { error: 'recording-not-configured' },
     });
+  });
+});
+
+describe('maximum duration (#279)', () => {
+  // Egress writes the whole MP4 to the VM boot disk before uploading it, so an
+  // endless recording is what can fill the disk, not the meeting.
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    deps = { ...deps, storage: null, maxDurationMs: 1000 };
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('stops and files a recording that reaches the limit, like a stop from the room', async () => {
+    await handleStartRecording({ sessionId: 'ses-ana', spaceId }, deps);
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(egress.stopped).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(egress.stopped).toEqual(['EG_1']);
+    expect(recordings.get(spaceId)).toBeUndefined();
+  });
+
+  it('never stops a recording that was already stopped, nor the next one in that space', async () => {
+    await handleStartRecording({ sessionId: 'ses-ana', spaceId }, deps);
+    await vi.advanceTimersByTimeAsync(600);
+    await handleStopRecording({ sessionId: 'ses-ana', spaceId }, deps);
+    await handleStartRecording({ sessionId: 'ses-bruno', spaceId }, deps);
+
+    await vi.advanceTimersByTimeAsync(600);
+
+    expect(egress.stopped).toEqual(['EG_1']);
+    expect(recordings.get(spaceId)?.egressId).toBe('EG_2');
+  });
+
+  it('leaves no timer behind when a start fails', async () => {
+    egress.failStart = true;
+    vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    await handleStartRecording({ sessionId: 'ses-ana', spaceId }, deps);
+
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('clears the timer when the recording is stopped', async () => {
+    await handleStartRecording({ sessionId: 'ses-ana', spaceId }, deps);
+    expect(vi.getTimerCount()).toBe(1);
+
+    await handleStopRecording({ sessionId: 'ses-ana', spaceId }, deps);
+
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('defaults to three hours: about 4.2 GB of 720p at the measured 1.3 GB per hour, with room on the 20 GB disk', () => {
+    expect(MAX_RECORDING_MS).toBe(3 * 60 * 60 * 1000);
+  });
+
+  it('waits for the upload of a maximum-length file before giving up on its notice', () => {
+    // Worst case of the default limit: 3 h at about 1.4 GB/h. A slow 10 MB/s
+    // upload from the VM to the bucket of its own region still fits.
+    const bytes = 3 * 1.4e9;
+    expect(DEFAULT_READINESS.timeoutMs).toBeGreaterThanOrEqual((bytes / 10e6) * 1000);
   });
 });
 
