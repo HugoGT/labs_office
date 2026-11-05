@@ -314,7 +314,7 @@ describe('placeWalls', () => {
     const walls = new Array<string | null>(width * height).fill(null);
     walls[width + 1] = 'wall-brick';
     walls[width + 2] = 'wall-brick';
-    walls[2 * width + 4] = 'wall-glass';
+    walls[2 * width + 4] = 'wall-plaster';
     const grid = { width, height, walls };
     const result = await withArtScene((scene, art) => {
       const drawn = placeWalls(scene, grid, art);
@@ -325,27 +325,25 @@ describe('placeWalls', () => {
 
     expect(result.count).toBe(wallSprites(grid).length);
     expect(result.keys.filter((key) => key === artSheetKey('wall-brick', 'sheet')).length).toBe(wallSprites(grid).filter((sprite) => sprite.piece === 'wall-brick').length);
-    expect(result.keys).toContain(artSheetKey('wall-glass', 'sheet'));
+    expect(result.keys).toContain(artSheetKey('wall-plaster', 'sheet'));
     expect(result.left).toBe(0);
   });
 
-  it('without the pack draws a grey placeholder over the footprint of every post, never a whole tile', async () => {
-    const walls = new Array<string | null>(4).fill(null);
-    walls[1] = 'wall-stone';
-    const lone = await withScene((scene) => placeWalls(scene, { width: 2, height: 2, walls }).length);
-    expect(lone).toBe(1);
-
-    // Two connected posts on the vertices (0,1) and (1,1): two joints and the body between them.
-    const pair = new Array<string | null>(4).fill(null);
-    pair[2] = 'wall-stone';
-    pair[3] = 'wall-stone';
+  it('without the pack draws a grey tile placeholder on every tile a wall covers', async () => {
+    // A wall on (1, 1) of a 3x4 grid covers rows 0 to 2 of column 1; one on (2, 3), the bottom row, is clipped to rows 2 and 3.
+    const walls = new Array<string | null>(12).fill(null);
+    walls[1 * 3 + 1] = 'wall-stone';
+    walls[3 * 3 + 2] = 'wall-stone';
+    const grid = { width: 3, height: 4, walls };
     const boxes = await withScene((scene) =>
-      placeWalls(scene, { width: 2, height: 2, walls: pair }).map((object) => {
+      placeWalls(scene, grid).map((object) => {
         const rect = object as Phaser.GameObjects.Rectangle;
         return { x: rect.x - rect.width / 2, y: rect.y - rect.height / 2, w: rect.width, h: rect.height };
       }),
     );
-    expect(boxes).toEqual(wallFootprintRects({ width: 2, height: 2, walls: pair }));
+    const tiles = wallFootprintRects(grid).flatMap(({ x, y, w, h }) => Array.from({ length: h / TILE }, (_, row) => ({ x, y: y + row * TILE, w, h: TILE })));
+    expect(tiles).toHaveLength(5);
+    expect(boxes).toEqual(tiles);
   });
 });
 

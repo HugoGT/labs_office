@@ -236,11 +236,12 @@ describe('OfficeRoom: walkable terrain', () => {
     await waitFor(() => room.state.players.size === 1);
     // Tile centers, as the e2e teleport puts them: Cafeteria, its door, the
     // Sala de Juntas, the corridor and the spawn on the open lawn.
+    // Rows 20 and 4 are under the rooms' top walls now that walls stand on whole tiles: the spots there move down.
     const spots = [
-      { tx: 58, ty: 20, space: 'Cafetería' },
+      { tx: 58, ty: 22, space: 'Cafetería' },
       { tx: 59, ty: 21, space: 'Cafetería' },
       { tx: 50, ty: 24, space: 'Cafetería' },
-      { tx: 55, ty: 4, space: 'Sala de Juntas' },
+      { tx: 55, ty: 5, space: 'Sala de Juntas' },
       { tx: 48, ty: 30, space: null },
       { tx: PLAYER_SPAWN_TX, ty: PLAYER_SPAWN_TY, space: null },
     ];
@@ -418,9 +419,9 @@ describe('OfficeRoom: edited terrain', () => {
     const ana = await join('Ana');
     await waitFor(() => wallsOf(ana) !== null);
 
-    await server.terrain.setWalls([{ index: tile(20, 30), piece: 'wall-brick' }, { index: tile(21, 30), piece: 'wall-glass' }], null, nobody);
+    await server.terrain.setWalls([{ index: tile(20, 30), piece: 'wall-brick' }, { index: tile(21, 30), piece: 'wall-stone' }], null, nobody);
 
-    await waitFor(() => wallsOf(ana)?.[tile(21, 30)] === 'wall-glass');
+    await waitFor(() => wallsOf(ana)?.[tile(21, 30)] === 'wall-stone');
     expect(wallsOf(ana)?.[tile(20, 30)]).toBe('wall-brick');
     const late = await join('Beto');
     await waitFor(() => wallsOf(late)?.[tile(20, 30)] === 'wall-brick');
@@ -431,11 +432,11 @@ describe('OfficeRoom: edited terrain', () => {
     const ana = await join('Ana');
     await waitFor(() => wallsOf(ana) !== null);
 
-    await server.terrain.setWalls([{ index: tile(21, 30), piece: 'wall-glass' }], null, nobody);
+    await server.terrain.setWalls([{ index: tile(21, 30), piece: 'wall-plaster' }], null, nobody);
     await server.terrain.setWalls([{ index: tile(20, 30), piece: 'wall-brick' }], null, nobody);
     await waitFor(() => wallsOf(ana)?.[tile(20, 30)] === 'wall-brick');
     // The layout's own posts come first; the painted ones follow in the order they were placed.
-    expect(ana.state.terrainWalls.endsWith(`,${tile(21, 30)}:glass,${tile(20, 30)}:brick`)).toBe(true);
+    expect(ana.state.terrainWalls.endsWith(`,${tile(21, 30)}:plaster,${tile(20, 30)}:brick`)).toBe(true);
 
     // A repaint makes the post the latest.
     await server.terrain.setWalls([{ index: tile(21, 30), piece: 'wall-stone' }], null, nobody);
@@ -448,18 +449,19 @@ describe('OfficeRoom: edited terrain', () => {
   it('drops a move into a wall, and returns someone a wall lands on to the spawn', async () => {
     const room = await join('Ana');
     await waitFor(() => room.state.players.size === 1);
-    const ashore = onTile(22, 23);
+    // Body centered 5 px west of column 23, on tile (22, 23): the 18 px body reaches 4 px into column 23.
+    const ashore = { x: 23 * TILE - 5, y: 23 * TILE + 5, facing: 'down' };
     room.send('move', ashore);
     await waitFor(() => room.state.players.get(room.sessionId)?.x === ashore.x);
 
-    // A lone post on the top-left corner of tile (23, 23) clears the body: nobody moves.
-    await server.terrain.setWalls([{ index: tile(23, 23), piece: 'wall-stone' }], null, nobody);
-    // A move whose body center lands on the post's vertex is refused.
-    room.send('move', { x: 23 * TILE, y: 23 * TILE - 11, facing: 'down' });
+    // A wall on tile (24, 23) covers column 24, rows 22 to 24: it clears the body, nobody moves.
+    await server.terrain.setWalls([{ index: tile(24, 23), piece: 'wall-stone' }], null, nobody);
+    // A move whose body center lands on any of the wall's tiles is refused.
+    room.send('move', { x: 24 * TILE + 16, y: 22 * TILE + 5, facing: 'down' });
     await settle(room);
     expect(room.state.players.get(room.sessionId)).toMatchObject({ x: ashore.x, y: ashore.y, positionRevision: 0 });
 
-    // Joined to a post below it, the wall runs down x = 23 * TILE and clips the 18 px body standing west of it.
+    // A wall on tile (23, 24) covers column 23, rows 23 to 25, and clips the body standing west of it.
     await server.terrain.setWalls([{ index: tile(23, 24), piece: 'wall-stone' }], null, nobody);
     await waitFor(() => room.state.players.get(room.sessionId)?.positionRevision === 1);
     const moved = room.state.players.get(room.sessionId)!;
@@ -2098,7 +2100,8 @@ describe('OfficeRoom: one session per account without auth (#78)', () => {
  */
 describe('OfficeRoom: seats', () => {
   const CHAIR = BASE_MAP_SEATS[0];
-  const besideChair = { x: CHAIR.tx * TILE + 16, y: (CHAIR.ty - 1) * TILE + 16, facing: 'down' };
+  // The tile left of the chair, body centered on it: the one above the chair is the room's top wall.
+  const besideChair = { x: (CHAIR.tx - 1) * TILE + 16, y: CHAIR.ty * TILE + 5, facing: 'right' };
 
   async function moveNextToChair(room: Awaited<ReturnType<typeof join>>) {
     room.send('move', besideChair);
@@ -2605,61 +2608,6 @@ describe('OfficeRoom: desk occupancy', () => {
 
     expect(seventh.state.players.get(seventh.sessionId)?.seat).toBe('');
   }, 20_000);
-});
-
-describe('OfficeRoom: doors (#223, #233)', () => {
-  const tile = (tx: number, ty: number) => ty * BASE_LAYOUT.width + tx;
-  /** Posts along row 22 (64..75) and down column 64 (rows 23..26): no wall is needed between a door's end posts, but there is one. */
-  const POSTS: (readonly [number, 'wall-brick'])[] = [];
-  for (let x = 64; x <= 75; x += 1) POSTS.push([tile(x, 22), 'wall-brick']);
-  for (let y = 23; y <= 26; y += 1) POSTS.push([tile(64, y), 'wall-brick']);
-  /** A door (posts 66 and 68), a double door (posts 70 and 73) and a vertical door (posts (64, 24) and (64, 26)). */
-  const SINGLE = tile(66, 22);
-  const DOUBLE = tile(70, 22);
-  const SIDE = tile(64, 24);
-  /** The network position whose body center is (cx, cy). */
-  const at = (cx: number, cy: number) => ({ x: cx, y: cy - 11, facing: 'down' });
-  const north = (tx: number) => at(tx * TILE + 16, 22 * TILE - 16);
-  const south = (tx: number) => at(tx * TILE + 16, 22 * TILE + 16);
-  const east = at(64 * TILE + 16, 24 * TILE + 16);
-  const west = at(64 * TILE - 16, 24 * TILE + 16);
-
-  beforeEach(async () => {
-    await server.shutdown();
-    server = createOfficeServer({
-      terrain: createMemoryTerrain([], POSTS, [
-        { index: SINGLE, piece: 'door-wood', rotation: 0 },
-        { index: DOUBLE, piece: 'door-wood-double', rotation: 180 },
-        { index: SIDE, piece: 'door-wood', rotation: 90 },
-      ]),
-    });
-    endpoint = `ws://localhost:${await server.listen(0)}`;
-  });
-
-  async function moveTo(room: Awaited<ReturnType<typeof join>>, position: { x: number; y: number; facing: string }) {
-    room.send('move', position);
-    await waitFor(() => room.state.players.get(room.sessionId)?.y === position.y && room.state.players.get(room.sessionId)?.x === position.x);
-  }
-
-  it('walks through a door both ways along its whole 2-tile span, as any move', async () => {
-    const ana = await join('Ana');
-    await moveTo(ana, north(66));
-    await moveTo(ana, south(66));
-    await moveTo(ana, north(66));
-    await moveTo(ana, north(67));
-    await moveTo(ana, south(67));
-  });
-
-  it('walks through a double door along its whole 3-tile span, and through a vertical door', async () => {
-    const ana = await join('Ana');
-    for (const tx of [70, 71, 72]) {
-      await moveTo(ana, north(tx));
-      await moveTo(ana, south(tx));
-    }
-    await moveTo(ana, east);
-    await moveTo(ana, west);
-    await moveTo(ana, east);
-  });
 });
 
 /**

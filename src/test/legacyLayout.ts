@@ -27,7 +27,7 @@ const W = 126;
 const H = 90;
 const BLOCK = 9;
 
-const WALLS = ['wall-brick', 'wall-stone', 'wall-plaster', 'wall-glass'] as const;
+const WALLS = ['wall-brick', 'wall-stone', 'wall-plaster'] as const;
 const HEDGE = 'hedge-boxwood';
 
 /** Tile types of the embedded tileset, in tile id order. */

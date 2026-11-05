@@ -211,7 +211,7 @@ function hasDrawingFields(piece: Record<string, unknown>, kind: ArtPieceKind): b
     case 'floor':
       return isColorModel(piece);
     case 'wall':
-      return Number.isFinite(piece.segmentLength) && Number.isFinite(piece.thickness);
+      return Number.isInteger(piece.heightTiles) && Number.isFinite(piece.topHeight);
     case 'tileset':
       return piece.tileSize === ART_TILE && Array.isArray(piece.materials) && piece.materials.length > 0 && piece.materials.every(isTilesetMaterial);
     case 'tree':

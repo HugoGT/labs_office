@@ -56,6 +56,13 @@ export interface UseTerrainEditorOptions {
   onExit?: () => void;
   /** The outlines of every room and desk the map draws while the editor is open (#216): a guide only. */
   outlines?: readonly TileRect[];
+  /**
+   * Another tool of the same menu holds the `terrainedit` overlay (the wall
+   * tool): the editor stays open and keeps its brush, but sends the map
+   * nothing until it is resumed, then draws its own state again. Both tools
+   * share that one overlay, so only one may speak to it at a time.
+   */
+  paused?: boolean;
 }
 
 export interface TerrainEditor {
@@ -111,7 +118,7 @@ function floorBrush(material: LayoutMaterial, color: string | undefined): FloorB
   return isColorableTerrainMaterial(material) && color !== undefined ? { kind: 'floor', material, color } : { kind: 'floor', material };
 }
 
-export function useTerrainEditor({ bridge, terrain, onExit, outlines }: UseTerrainEditorOptions): TerrainEditor {
+export function useTerrainEditor({ bridge, terrain, onExit, outlines, paused = false }: UseTerrainEditorOptions): TerrainEditor {
   const [active, setActive] = useState(false);
   const [blocks, setBlocks] = useState<readonly LayoutMaterial[]>(BASE_LAYOUT.blocks);
   const [liveColors, setLiveColors] = useState<TerrainColors>(() => new Map());
@@ -258,7 +265,7 @@ export function useTerrainEditor({ bridge, terrain, onExit, outlines }: UseTerra
   ].join('|');
 
   useEffect(() => {
-    if (!active) return;
+    if (!active || paused) return;
     bridge.emitCommand('terrainedit', {
       brush,
       ...(previewBlocks === null ? {} : { previewBlocks }),
@@ -268,14 +275,16 @@ export function useTerrainEditor({ bridge, terrain, onExit, outlines }: UseTerra
     });
     // `previewKey` stands for both previews and the outlines: only a different drawing is worth a command.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bridge, active, brush, previewKey, holdingPicker]);
+  }, [bridge, active, paused, brush, previewKey, holdingPicker]);
 
   // Separate from the effect above so a new pick does not close and reopen
-  // the overlay: only leaving (or unmounting) does.
+  // the overlay: only leaving, a pause (or unmounting) does. React runs this
+  // cleanup before any effect that sends a command, so whoever takes the
+  // overlay next speaks last.
   useEffect(() => {
-    if (!active) return undefined;
+    if (!active || paused) return undefined;
     return () => bridge.emitCommand('terrainedit', null);
-  }, [bridge, active]);
+  }, [bridge, active, paused]);
 
   const reset = (): void => {
     setBrush(null);

@@ -5,40 +5,54 @@ import {
   DOOR_OPEN_REACH_PX,
   DOOR_HOLD_MS,
   DOOR_SWING_MS,
-  doorEdge,
-  doorEdges,
+  decorPieceTurns,
   doorEndPosts,
+  doorsLeftOffWall,
   doorFarSide,
   doorHingeStops,
-  doorInnerPosts,
-  doorPosts,
-  doorShoulders,
   doorLeaves,
+  doorLine,
   doorOnWall,
   doorOpenings,
+  doorOwnWallTiles,
+  doorPosts,
   doorPostSet,
+  doorsReplacedBy,
   doorSpan,
-  doorSwingRotation,
   doorStepOf,
+  doorSwingRotation,
+  doorTiles,
   isDoorPiece,
+  isWindowPiece,
   keptSwings,
   moveDoors,
   openDoorLeaves,
-  wallsUnderLeftDoors,
+  wallTilesAfter,
+  withReplacedDoors,
 } from './officeDoors';
 
-const WIDTH = 12;
-const HEIGHT = 10;
+const T = 32;
+const WIDTH = 14;
+const HEIGHT = 14;
 const at = (tx: number, ty: number): number => ty * WIDTH + tx;
 const door = (tx: number, ty: number, rotation: DecorItem['rotation'] = 0, piece = 'door-wood'): DecorItem => ({ index: at(tx, ty), piece, rotation });
 const doubleDoor = (tx: number, ty: number, rotation: DecorItem['rotation'] = 0): DecorItem => door(tx, ty, rotation, 'door-wood-double');
+const windowAt = (tx: number, ty: number, rotation: DecorItem['rotation'] = 0): DecorItem => door(tx, ty, rotation, 'door-glass-window');
 
-/** A wall grid with `piece` posts on the given vertices. */
-function wallGrid(posts: readonly (readonly [number, number, string?])[]) {
+/** A wall grid with `piece` walls on the given tiles. */
+function wallGrid(tiles: readonly (readonly [number, number, string?])[]) {
   const walls = new Array<string | null>(WIDTH * HEIGHT).fill(null);
-  for (const [tx, ty, piece] of posts) walls[at(tx, ty)] = piece ?? 'wall-brick';
+  for (const [tx, ty, piece] of tiles) walls[at(tx, ty)] = piece ?? 'wall-brick';
   return { width: WIDTH, height: HEIGHT, walls };
 }
+
+/** A horizontal run on row 3 (columns 1..9, stone from 6 on) and a vertical one in column 11 (rows 2..10). */
+const RUN: (readonly [number, number, string?])[] = [
+  ...[1, 2, 3, 4, 5].map((tx) => [tx, 3] as const),
+  ...[6, 7, 8, 9].map((tx) => [tx, 3, 'wall-stone'] as const),
+  ...[2, 3, 4, 5, 6, 7, 8, 9, 10].map((ty) => [11, ty] as const),
+];
+const grid = wallGrid(RUN);
 
 /** A network position whose body center is at (cx, cy). */
 const standingAt = (cx: number, cy: number) => {
@@ -46,147 +60,145 @@ const standingAt = (cx: number, cy: number) => {
   return { x: cx - (body.x + body.width / 2), y: cy - (body.y + body.height / 2) };
 };
 
-describe('officeDoors: the line a door stands on (#223, #233)', () => {
-  it('knows a door by its id, single or double', () => {
-    expect(isDoorPiece('door-wood')).toBe(true);
-    expect(isDoorPiece('door-wood-double')).toBe(true);
-    expect(isDoorPiece('desk-wood')).toBe(false);
+describe('officeDoors: doors and windows in tile walls (tile walls, S7-S10)', () => {
+  it('never turns a window, which only stands horizontal, and turns doors and chairs as their kind does (S8, L23)', () => {
+    expect(decorPieceTurns('door-glass-window', 'door')).toBe(false);
+    expect(decorPieceTurns('door-wood', 'door')).toBe(true);
+    expect(decorPieceTurns('chair-wood', 'chair')).toBe(true);
+    // A plant turns to its mirror (#121).
+    expect(decorPieceTurns('plant-ficus', 'plant')).toBe(true);
   });
 
-  it('spans 2 tiles of wall for a door and 3 for a double door', () => {
-    expect(doorSpan(door(0, 0))).toBe(2);
-    expect(doorSpan(doubleDoor(0, 0))).toBe(3);
+  it('never lets a window take the place of another window it overlaps, while doors and windows still replace each other (S6, L23)', () => {
+    const window = windowAt(4, 3);
+    expect(doorsReplacedBy([window], [windowAt(5, 3)], WIDTH)).toEqual([]);
+    expect(doorsReplacedBy([window], [door(5, 3, 0)], WIDTH)).toEqual([window.index]);
+    expect(doorsReplacedBy([door(4, 3, 0)], [windowAt(5, 3)], WIDTH)).toEqual([at(4, 3)]);
+    // Side by side, nothing is replaced; a door over a door replaces nothing either (it is refused).
+    expect(doorsReplacedBy([window], [windowAt(6, 3)], WIDTH)).toEqual([]);
+    expect(doorsReplacedBy([door(4, 3, 0)], [door(5, 3, 0)], WIDTH)).toEqual([]);
   });
 
-  it('starts on the top edge of its anchor tile for 0 and 180, on the left edge for 90 and 270', () => {
-    expect(doorEdge(door(4, 6, 0), WIDTH)).toEqual({ col: 4, row: 6, axis: 'horizontal' });
-    expect(doorEdge(door(4, 6, 180), WIDTH)).toEqual({ col: 4, row: 6, axis: 'horizontal' });
-    expect(doorEdge(door(4, 6, 90), WIDTH)).toEqual({ col: 4, row: 6, axis: 'vertical' });
-    expect(doorEdge(door(4, 6, 270), WIDTH)).toEqual({ col: 4, row: 6, axis: 'vertical' });
+  it('tells when walls after an edit would leave a door that stands on its wall off it, the run under a vertical door included', () => {
+    const vertical = door(11, 4, 90);
+    expect(doorOnWall(grid, vertical)).toBe(true);
+    const without = (...rows: number[]) => grid.walls.map((wall, index) => (index % WIDTH === 11 && rows.includes(Math.floor(index / WIDTH)) ? null : wall));
+    // Erasing the bottom of the run under it leaves it standing in nothing: refused.
+    expect(doorsLeftOffWall([vertical], grid, without(6, 7, 8, 9, 10))).toBe(true);
+    // The same walls with no door, or erasing a wall the door does not need, is fine.
+    expect(doorsLeftOffWall([], grid, without(7, 8, 9, 10))).toBe(false);
+    expect(doorsLeftOffWall([door(3, 3, 0)], grid, without(7, 8, 9, 10))).toBe(false);
   });
 
-  it('runs its span along the line, west to east or north to south', () => {
-    expect(doorEdges(door(4, 6, 0), WIDTH)).toEqual([
-      { col: 4, row: 6, axis: 'horizontal' },
-      { col: 5, row: 6, axis: 'horizontal' },
+  it('knows a door by its id, single, double or a window, and a window apart', () => {
+    expect(['door-wood', 'door-wood-double', 'door-glass-window', 'chair-wood'].map(isDoorPiece)).toEqual([true, true, true, false]);
+    expect(['door-wood', 'door-wood-double', 'door-glass-window'].map(isWindowPiece)).toEqual([false, false, true]);
+  });
+
+  it('spans 2 wall tiles for a door or a window and 3 for a double door', () => {
+    expect([door(0, 0), doubleDoor(0, 0), windowAt(0, 0)].map(doorSpan)).toEqual([2, 3, 2]);
+  });
+
+  it('runs its span from its anchor along the run, west to east or north to south, between the walls past each end', () => {
+    expect(doorTiles(door(3, 3, 0), WIDTH)).toEqual([at(3, 3), at(4, 3)]);
+    expect(doorTiles(doubleDoor(11, 4, 90), WIDTH)).toEqual([at(11, 4), at(11, 5)]);
+    expect(doorEndPosts(door(3, 3, 180), WIDTH)).toEqual([at(2, 3), at(5, 3)]);
+    expect(doorPosts(door(11, 4, 270), WIDTH)).toEqual([at(11, 3), at(11, 4), at(11, 5)]);
+  });
+
+  it('goes between two walls of a horizontal run, of any material, the run going on under it (S7)', () => {
+    expect(doorOnWall(grid, door(3, 3, 0))).toBe(true);
+    expect(doorOnWall(grid, doubleDoor(4, 3, 180))).toBe(true);
+    // Brick on one side, stone on the other.
+    expect(doorOnWall(grid, door(5, 3, 0))).toBe(true);
+  });
+
+  it('refuses a door or window that lacks a wall past either end or under its span, or leaves the map (S7)', () => {
+    expect(doorOnWall(grid, door(1, 3, 0))).toBe(false); // nothing west of column 1
+    expect(doorOnWall(grid, door(8, 3, 0))).toBe(false); // nothing east of column 9
+    expect(doorOnWall(grid, door(3, 2, 0))).toBe(false); // not the run's wall tile
+    expect(doorOnWall(grid, windowAt(1, 3))).toBe(false);
+    const gap = wallGrid(RUN.filter(([tx, ty]) => !(tx === 4 && ty === 3)));
+    expect(doorOnWall(gap, door(3, 3, 0))).toBe(false);
+    expect(doorOnWall(grid, door(12, 3, 0))).toBe(false);
+  });
+
+  it('refuses a horizontal door where a wall is stacked on its columns: it stands in the face of the run', () => {
+    expect(doorOnWall(wallGrid([...RUN, [3, 1]]), door(3, 3, 0))).toBe(false);
+    expect(doorOnWall(wallGrid([...RUN, [4, 4]]), door(3, 3, 0))).toBe(false);
+    expect(doorOnWall(wallGrid([...RUN, [2, 4]]), door(3, 3, 0))).toBe(true);
+  });
+
+  it('puts a window only between two walls of a horizontal run, never in a vertical one (S7, S8)', () => {
+    expect(doorOnWall(grid, windowAt(3, 3, 0))).toBe(true);
+    expect(doorOnWall(grid, windowAt(3, 3, 180))).toBe(true);
+    expect(doorOnWall(grid, windowAt(11, 4, 90))).toBe(false);
+    expect(doorOnWall(grid, windowAt(11, 4, 270))).toBe(false);
+  });
+
+  it('puts a door in a vertical run where it shows its dark top, above the face at its bottom (S9)', () => {
+    expect(doorOnWall(grid, door(11, 4, 90))).toBe(true);
+    expect(doorOnWall(grid, doubleDoor(11, 3, 270))).toBe(true);
+    // The run ends at row 10: the door's last tile must stay two tiles above it (L41: a single door is one tile).
+    expect(doorOnWall(grid, door(11, 8, 90))).toBe(true);
+    expect(doorOnWall(grid, door(11, 9, 90))).toBe(false);
+    expect(doorOnWall(grid, door(11, 1, 90))).toBe(false);
+  });
+
+  it('opens the walls for every door on its wall, in layer order, and for no window nor door off its wall', () => {
+    expect(doorOpenings([door(3, 3, 0), windowAt(6, 3), door(1, 3, 0), door(11, 4, 90), { index: at(2, 6), piece: 'chair-wood', rotation: 0 }], grid)).toEqual([
+      { axis: 'horizontal', tx: 3, ty: 3, span: 2, inset: 10 },
+      { axis: 'vertical', tx: 11, ty: 4, span: 1 },
     ]);
-    expect(doorEdges(doubleDoor(4, 6, 90), WIDTH).map(({ row }) => row)).toEqual([6, 7, 8]);
   });
 
-  it('ends on the two posts at the ends of its span, the start first', () => {
-    expect(doorEndPosts(door(4, 6, 0), WIDTH)).toEqual([at(4, 6), at(6, 6)]);
-    expect(doorEndPosts(door(4, 6, 90), WIDTH)).toEqual([at(4, 6), at(4, 8)]);
-    expect(doorEndPosts(doubleDoor(2, 6, 0), WIDTH)).toEqual([at(2, 6), at(5, 6)]);
+  it('protects every wall a door or window needs from being removed: the ones it spans and the one past each end', () => {
+    expect(doorPostSet([door(3, 3, 0), windowAt(7, 3)], WIDTH)).toEqual(new Set([at(2, 3), at(3, 3), at(4, 3), at(5, 3), at(6, 3), at(7, 3), at(8, 3), at(9, 3)]));
   });
 
-  it('goes between two standing posts and needs no wall between them', () => {
-    expect(doorOnWall(wallGrid([[4, 6], [6, 6]]), door(4, 6, 0))).toBe(true);
-    expect(doorOnWall(wallGrid([[4, 6], [4, 8]]), door(4, 6, 90))).toBe(true);
-    expect(doorOnWall(wallGrid([[2, 6], [5, 6]]), doubleDoor(2, 6, 0))).toBe(true);
+  it('counts its own wall as none of the walls it must keep off: the whole column in a horizontal run, the column only in a vertical one', () => {
+    expect(doorOwnWallTiles(door(3, 3, 0), WIDTH)).toEqual(new Set([at(3, 2), at(4, 2), at(3, 3), at(4, 3), at(3, 4), at(4, 4)]));
+    expect(doorOwnWallTiles(door(11, 4, 90), WIDTH)).toEqual(new Set([at(11, 4)]));
   });
 
-  it('takes posts of any material, with any wall around them: a straight wall, a corner or an L', () => {
-    expect(doorOnWall(wallGrid([[4, 6, 'wall-brick'], [5, 6], [6, 6, 'wall-stone']]), door(4, 6, 0))).toBe(true);
-    // Both ends are corners: walls turn away from the line at each one.
-    expect(doorOnWall(wallGrid([[4, 6], [4, 3], [6, 6], [6, 9]]), door(4, 6, 0))).toBe(true);
-  });
-
-  it('refuses a door that lacks a post at either end, or whose span leaves the map', () => {
-    expect(doorOnWall(wallGrid([[4, 6]]), door(4, 6, 0))).toBe(false);
-    expect(doorOnWall(wallGrid([[6, 6]]), door(4, 6, 0))).toBe(false);
-    expect(doorOnWall(wallGrid([]), door(4, 6, 0))).toBe(false);
-    // Posts one tile short of a double door's far end.
-    expect(doorOnWall(wallGrid([[2, 6], [4, 6]]), doubleDoor(2, 6, 0))).toBe(false);
-    expect(doorOnWall(wallGrid([[WIDTH - 2, 6]]), door(WIDTH - 2, 6, 0))).toBe(false);
-  });
-
-  it('opens every edge of every door of the layer, and of nothing else', () => {
-    const items: DecorItem[] = [door(4, 6, 0), { index: at(0, 0), piece: 'desk-wood', rotation: 0 }, doubleDoor(2, 2, 90)];
-    expect(doorOpenings(items, WIDTH)).toEqual([
-      { col: 4, row: 6, axis: 'horizontal' },
-      { col: 5, row: 6, axis: 'horizontal' },
-      { col: 2, row: 2, axis: 'vertical' },
-      { col: 2, row: 3, axis: 'vertical' },
-      { col: 2, row: 4, axis: 'vertical' },
-    ]);
-    expect(doorOpenings([{ index: at(0, 0), piece: 'desk-wood', rotation: 0 }], WIDTH)).toEqual([]);
-  });
-
-  it('protects only the two end posts of a door from being removed', () => {
-    expect(doorPostSet([door(4, 6, 0)], WIDTH)).toEqual(new Set([at(4, 6), at(6, 6)]));
-    expect(doorPostSet([doubleDoor(2, 6, 0)], WIDTH)).toEqual(new Set([at(2, 6), at(5, 6)]));
+  it('closes the wall of a door that goes for whatever takes its tiles, and keeps the ground as it is otherwise', () => {
+    const openings = doorOpenings([door(3, 3, 0)], grid);
+    const wallTiles = new Array<boolean>(WIDTH * HEIGHT).fill(false);
+    const ground = { ...grid, openings, wallTiles };
+    expect(wallTilesAfter(ground, [door(3, 3, 0)])).toBe(wallTiles);
+    const closed = wallTilesAfter(ground, []);
+    expect([at(3, 2), at(3, 3), at(3, 4)].map((tile) => closed[tile])).toEqual([true, true, true]);
   });
 });
 
-describe('officeDoors: the shoulders of a door (#233)', () => {
-  const sorted = (posts: number[]): number[] => posts.sort((a, b) => a - b);
-
-  it('are the vertices straight across its span ends, one row or column to each side', () => {
-    expect(sorted(doorShoulders(door(4, 6, 0), WIDTH, HEIGHT))).toEqual(sorted([at(4, 5), at(4, 7), at(6, 5), at(6, 7)]));
-    expect(sorted(doorShoulders(door(4, 6, 90), WIDTH, HEIGHT))).toEqual(sorted([at(3, 6), at(3, 8), at(5, 6), at(5, 8)]));
-    expect(sorted(doorShoulders(doubleDoor(2, 6, 0), WIDTH, HEIGHT))).toEqual(sorted([at(2, 5), at(2, 7), at(5, 5), at(5, 7)]));
+describe('officeDoors: a door replaces a window and the other way round (S6)', () => {
+  it('replaces every door or window sharing a wall tile with the one placed, and nothing else', () => {
+    const items = [windowAt(3, 3), door(6, 3, 0), { index: at(4, 6), piece: 'chair-wood', rotation: 0 as const }];
+    expect(doorsReplacedBy(items, [door(4, 3, 0)], WIDTH)).toEqual([at(3, 3)]);
+    expect(doorsReplacedBy(items, [windowAt(5, 3)], WIDTH)).toEqual([at(6, 3)]);
+    expect(doorsReplacedBy([door(3, 3, 0)], [windowAt(3, 3)], WIDTH)).toEqual([]);
+    expect(doorsReplacedBy(items, [{ index: at(4, 3), piece: 'chair-wood', rotation: 0 }], WIDTH)).toEqual([]);
   });
 
-  it('leave out the ones off the map', () => {
-    expect(sorted(doorShoulders(door(0, 0, 0), WIDTH, HEIGHT))).toEqual(sorted([at(0, 1), at(2, 1)]));
-    expect(sorted(doorShoulders(door(3, HEIGHT - 1, 0), WIDTH, HEIGHT))).toEqual(sorted([at(3, HEIGHT - 2), at(5, HEIGHT - 2)]));
-  });
-});
-
-describe('officeDoors: the wall under a door that leaves (#233)', () => {
-  /** Posts in a row on row 6, from x = 2 to x = 8, and nothing else. */
-  const row = (...extra: readonly (readonly [number, number])[]) => wallGrid([...[2, 3, 4, 5, 6, 7, 8].map((tx) => [tx, 6] as const), ...extra]).walls;
-  const gone = (before: readonly DecorItem[], after: readonly DecorItem[], walls = row()) => wallsUnderLeftDoors(before, after, walls, WIDTH);
-
-  it('lists the posts strictly between the two end posts of a door', () => {
-    expect(doorInnerPosts(door(4, 6, 0), WIDTH)).toEqual([at(5, 6)]);
-    expect(doorInnerPosts(doubleDoor(2, 6, 0), WIDTH)).toEqual([at(3, 6), at(4, 6)]);
-    expect(doorInnerPosts(doubleDoor(4, 2, 90), WIDTH)).toEqual([at(4, 3), at(4, 4)]);
-  });
-
-  it('lists every post a door spans, the ends and the ones between, start first', () => {
-    expect(doorPosts(door(4, 6, 0), WIDTH)).toEqual([at(4, 6), at(5, 6), at(6, 6)]);
-    expect(doorPosts(doubleDoor(2, 6, 0), WIDTH)).toEqual([at(2, 6), at(3, 6), at(4, 6), at(5, 6)]);
-    expect(doorPosts(doubleDoor(4, 2, 90), WIDTH)).toEqual([at(4, 2), at(4, 3), at(4, 4), at(4, 5)]);
-  });
-
-  it('takes the standing posts between the ends of a door that is gone, and leaves the end posts', () => {
-    expect(gone([door(3, 6, 0)], [])).toEqual([at(4, 6)]);
-    expect(gone([doubleDoor(3, 6, 0)], [])).toEqual([at(4, 6), at(5, 6)]);
-    // Posts already missing are not listed.
-    const hole = row();
-    hole[at(4, 6)] = null;
-    expect(gone([doubleDoor(3, 6, 0)], [], hole)).toEqual([at(5, 6)]);
-  });
-
-  it('takes nothing for a door that stays: turned in place, or still on the same edges', () => {
-    expect(gone([door(3, 6, 0)], [door(3, 6, 180)])).toEqual([]);
-    expect(gone([door(3, 6, 0)], [door(3, 6, 0)])).toEqual([]);
-    expect(gone([], [door(3, 6, 0)])).toEqual([]);
-  });
-
-  it('takes the posts of a door that moved, but never one that ends a door which stays', () => {
-    // Moved one tile west: its old middle post, 4, is the end of the new door.
-    expect(gone([door(3, 6, 0)], [door(2, 6, 0)])).toEqual([]);
-    expect(gone([door(3, 6, 0)], [door(5, 6, 0)])).toEqual([at(4, 6)]);
-  });
-
-  it('keeps a post where another wall meets it: it is not under the door', () => {
-    expect(gone([door(3, 6, 0)], [], row([4, 5]))).toEqual([]);
-    expect(gone([door(3, 6, 0)], [], row([4, 7]))).toEqual([]);
-    // A vertical door: the walls across are the ones on its row.
-    const column = wallGrid([[4, 2], [4, 3], [4, 4], [3, 3]]).walls;
-    expect(gone([door(4, 2, 90)], [], column)).toEqual([]);
-    expect(gone([door(4, 2, 90)], [], wallGrid([[4, 2], [4, 3], [4, 4]]).walls)).toEqual([at(4, 3)]);
+  it('adds the removals of what a click replaces to it, once', () => {
+    const items = [windowAt(3, 3), door(7, 3, 0)];
+    expect(withReplacedDoors(items, [{ index: at(4, 3), item: { piece: 'door-wood', rotation: 0 } }], WIDTH)).toEqual([
+      { index: at(4, 3), item: { piece: 'door-wood', rotation: 0 } },
+      { index: at(3, 3), item: null },
+    ]);
+    expect(withReplacedDoors(items, [{ index: at(3, 3), item: null }, { index: at(4, 3), item: { piece: 'door-wood', rotation: 0 } }], WIDTH)).toEqual([
+      { index: at(3, 3), item: null },
+      { index: at(4, 3), item: { piece: 'door-wood', rotation: 0 } },
+    ]);
   });
 });
 
 describe('officeDoors: leaves (#223, #233)', () => {
-  it('makes one leaf per door item, a double door included, hinged at its start', () => {
-    const leaves = doorLeaves([door(4, 6, 0), doubleDoor(2, 2, 90)], WIDTH);
+  it('makes one leaf per door, a double door included, and none for a window', () => {
+    const leaves = doorLeaves([door(3, 3, 0), windowAt(6, 3), doubleDoor(11, 3, 90)], WIDTH);
     expect(leaves).toEqual([
-      expect.objectContaining({ index: at(4, 6), span: 2, hinge: 'start', edge: { col: 4, row: 6, axis: 'horizontal' } }),
-      expect.objectContaining({ index: at(2, 2), span: 3, hinge: 'start', edge: { col: 2, row: 2, axis: 'vertical' } }),
+      expect.objectContaining({ index: at(3, 3), axis: 'horizontal', tx: 3, ty: 3, span: 2, hinge: 'start' }),
+      expect.objectContaining({ index: at(11, 3), axis: 'vertical', tx: 11, ty: 3, span: 2, hinge: 'start' }),
     ]);
   });
 
@@ -195,57 +207,52 @@ describe('officeDoors: leaves (#223, #233)', () => {
     expect(leaves.map(({ hinge }) => hinge)).toEqual(['start', 'end', 'end', 'start', 'start']);
   });
 
-  it('does not join neighbouring doors: each stays its own leaf', () => {
-    const leaves = doorLeaves([door(4, 6, 0), door(6, 6, 0)], WIDTH);
-    expect(leaves.map(({ index }) => index)).toEqual([at(4, 6), at(6, 6)]);
-  });
-
-  it('covers a tile on each side of its span', () => {
-    expect(doorLeaves([door(4, 6, 0)], WIDTH)[0]!.footprint).toEqual({ x: 4, y: 5, w: 2, h: 2 });
-    expect(doorLeaves([doubleDoor(4, 6, 90)], WIDTH)[0]!.footprint).toEqual({ x: 3, y: 6, w: 2, h: 3 });
+  it('covers the wall three tiles across a horizontal run, and the column with a tile each side in a vertical one', () => {
+    const [horizontal, vertical] = doorLeaves([door(3, 3, 0), doubleDoor(11, 3, 90)], WIDTH);
+    expect(horizontal!.footprint).toEqual({ x: 3, y: 2, w: 2, h: 3 });
+    expect(vertical!.footprint).toEqual({ x: 10, y: 3, w: 3, h: 2 });
+    expect(doorLine(horizontal!)).toBe(3.5 * T);
+    expect(doorLine(vertical!)).toBe(11.5 * T);
   });
 });
 
 describe('officeDoors: open and closed (#223, #233)', () => {
   /** The anchors open, whatever side they swing to. */
   const openAnchors = (...args: Parameters<typeof openDoorLeaves>) => new Set(openDoorLeaves(...args).keys());
+  // A door on row 3, columns 3..4: its wall is rows 2..4, x 96..160, y 64..160.
+  const leaves = doorLeaves([door(3, 3, 0)], WIDTH);
 
-  it('opens a door while an avatar is lined up with its span and on its tiles or a few pixels past them, and closes it otherwise', () => {
-    const leaves = doorLeaves([door(4, 6, 0)], WIDTH);
-    // The door's tiles are (4..5, 5..6): x 128..192, y 160..224.
+  it('opens a door while an avatar is lined up with its span and in its wall or a few pixels past it, and closes it otherwise', () => {
     expect(openAnchors(leaves, [])).toEqual(new Set());
-    expect(openAnchors(leaves, [standingAt(160, 200)])).toEqual(new Set([at(4, 6)]));
-    expect(openAnchors(leaves, [standingAt(184, 170)])).toEqual(new Set([at(4, 6)]));
-    expect(openAnchors(leaves, [standingAt(160, 224 + DOOR_OPEN_REACH_PX - 1)])).toEqual(new Set([at(4, 6)]));
-    expect(openAnchors(leaves, [standingAt(160, 224 + DOOR_OPEN_REACH_PX)])).toEqual(new Set());
+    expect(openAnchors(leaves, [standingAt(128, 120)])).toEqual(new Set([at(3, 3)]));
+    expect(openAnchors(leaves, [standingAt(128, 160 + DOOR_OPEN_REACH_PX - 1)])).toEqual(new Set([at(3, 3)]));
+    expect(openAnchors(leaves, [standingAt(128, 160 + DOOR_OPEN_REACH_PX)])).toEqual(new Set());
+    expect(openAnchors(leaves, [standingAt(128, 64 - DOOR_OPEN_REACH_PX + 1)])).toEqual(new Set([at(3, 3)]));
     expect(openAnchors(leaves, [standingAt(300, 300)])).toEqual(new Set());
   });
 
   it('stays shut for an avatar walking past alongside the wall, outside the door span', () => {
-    const leaves = doorLeaves([door(4, 6, 0)], WIDTH);
-    expect(openAnchors(leaves, [standingAt(128 - 1, 6 * 32 - 10)])).toEqual(new Set());
-    expect(openAnchors(leaves, [standingAt(192, 6 * 32 - 10)])).toEqual(new Set());
-    expect(openAnchors(leaves, [standingAt(128, 6 * 32 - 10)])).toEqual(new Set([at(4, 6)]));
-    expect(openAnchors(leaves, [standingAt(191, 6 * 32 - 10)])).toEqual(new Set([at(4, 6)]));
+    expect(openAnchors(leaves, [standingAt(96 - 1, 170)])).toEqual(new Set());
+    expect(openAnchors(leaves, [standingAt(160, 150)])).toEqual(new Set());
+    expect(openAnchors(leaves, [standingAt(96, 150)])).toEqual(new Set([at(3, 3)]));
   });
 
-  it('opens a double door over its whole 3-tile span as one door', () => {
-    const leaves = doorLeaves([doubleDoor(4, 6, 0)], WIDTH);
-    expect(openAnchors(leaves, [standingAt(4 * 32 + 8, 6 * 32 - 10)])).toEqual(new Set([at(4, 6)]));
-    expect(openAnchors(leaves, [standingAt(7 * 32 - 8, 6 * 32 + 10)])).toEqual(new Set([at(4, 6)]));
-    expect(openAnchors(leaves, [standingAt(7 * 32, 6 * 32 - 10)])).toEqual(new Set());
+  it('opens a door in a vertical run for an avatar beside its column', () => {
+    const vertical = doorLeaves([door(11, 4, 90)], WIDTH);
+    expect(openAnchors(vertical, [standingAt(10 * T + 4, 4 * T + 10)])).toEqual(new Set([at(11, 4)]));
+    expect(openAnchors(vertical, [standingAt(10 * T - DOOR_OPEN_REACH_PX, 4 * T + 10)])).toEqual(new Set());
+    expect(openAnchors(vertical, [standingAt(10 * T + 4, 6 * T)])).toEqual(new Set());
   });
 
   it('swings away from the side the avatar comes from, whatever way the door was placed', () => {
     for (const rotation of [0, 180] as const) {
-      const leaves = doorLeaves([door(4, 6, rotation)], WIDTH);
-      const above = openDoorLeaves(leaves, [standingAt(160, 6 * 32 - 10)]).get(at(4, 6));
-      const below = openDoorLeaves(leaves, [standingAt(160, 6 * 32 + 10)]).get(at(4, 6));
+      const turned = doorLeaves([door(3, 3, rotation)], WIDTH);
+      const above = openDoorLeaves(turned, [standingAt(128, 70)]).get(at(3, 3));
+      const below = openDoorLeaves(turned, [standingAt(128, 150)]).get(at(3, 3));
       expect(above).not.toBe(below);
     }
-    const down = doorLeaves([door(4, 6, 0)], WIDTH);
-    expect(openDoorLeaves(down, [standingAt(160, 6 * 32 + 10)]).get(at(4, 6))).toBe('outside');
-    expect(openDoorLeaves(down, [standingAt(160, 6 * 32 - 10)]).get(at(4, 6))).toBe('inside');
+    expect(openDoorLeaves(leaves, [standingAt(128, 150)]).get(at(3, 3))).toBe('outside');
+    expect(openDoorLeaves(leaves, [standingAt(128, 70)]).get(at(3, 3))).toBe('inside');
   });
 
   it('draws the swing the other way round by turning the leaf half a turn', () => {
@@ -254,46 +261,35 @@ describe('officeDoors: open and closed (#223, #233)', () => {
     expect(doorSwingRotation(270, 'outside')).toBe(90);
   });
 
-  it('keeps the swing while the avatar passes the edge line, and drops it when the door closes', () => {
-    const leaves = doorLeaves([door(4, 6, 0)], WIDTH);
-    const first = openDoorLeaves(leaves, [standingAt(160, 6 * 32 - 10)]);
-    const crossing = openDoorLeaves(leaves, [standingAt(160, 6 * 32 + 10)], first);
-    expect(crossing.get(at(4, 6))).toBe(first.get(at(4, 6)));
+  it('keeps the swing while the avatar passes the door line, and drops it when the door closes', () => {
+    const first = openDoorLeaves(leaves, [standingAt(128, 70)]);
+    const crossing = openDoorLeaves(leaves, [standingAt(128, 150)], first);
+    expect(crossing.get(at(3, 3))).toBe(first.get(at(3, 3)));
     expect(openDoorLeaves(leaves, [], crossing).size).toBe(0);
   });
 
-  it('keeps the swing it has when two avatars come from opposite sides, else the first one to open', () => {
-    const leaves = doorLeaves([door(4, 6, 0)], WIDTH);
-    const both = [standingAt(160, 6 * 32 - 10), standingAt(160, 6 * 32 + 10)];
-    const fresh = openDoorLeaves(leaves, both).get(at(4, 6));
-    expect(fresh).toBe(openDoorLeaves(leaves, [both[0]!]).get(at(4, 6)));
-    const kept = openDoorLeaves(leaves, both, new Map([[at(4, 6), fresh === 'inside' ? 'outside' : 'inside']])).get(at(4, 6));
-    expect(kept).not.toBe(fresh);
-  });
-
   it('stays shut for an avatar it is kept shut for, and opens for the next one lined up with it', () => {
-    const leaves = doorLeaves([door(4, 6, 0)], WIDTH);
-    const north = standingAt(160, 6 * 32 - 10);
-    const south = standingAt(160, 6 * 32 + 10);
+    const north = standingAt(128, 70);
+    const south = standingAt(128, 150);
     const shutForNorth = (_leaf: unknown, position: { x: number; y: number }) => position === north;
     expect(openAnchors(leaves, [north], new Map(), shutForNorth)).toEqual(new Set());
-    expect(openDoorLeaves(leaves, [north, south], new Map(), shutForNorth).get(at(4, 6))).toBe(openDoorLeaves(leaves, [south]).get(at(4, 6)));
+    expect(openDoorLeaves(leaves, [north, south], new Map(), shutForNorth).get(at(3, 3))).toBe(openDoorLeaves(leaves, [south]).get(at(3, 3)));
   });
 });
 
 describe('officeDoors: where a door leads (#223)', () => {
-  it('is the middle of the door tile across the edge from the body, along the body', () => {
-    const [leaf] = doorLeaves([door(4, 6, 0)], WIDTH);
-    expect(doorFarSide(leaf!, standingAt(150, 6 * 32 - 10))).toEqual({ x: 150, y: 6 * 32 + 16 });
-    expect(doorFarSide(leaf!, standingAt(150, 6 * 32 + 10))).toEqual({ x: 150, y: 6 * 32 - 16 });
-    const [vertical] = doorLeaves([door(4, 6, 90)], WIDTH);
-    expect(doorFarSide(vertical!, standingAt(4 * 32 - 10, 200))).toEqual({ x: 4 * 32 + 16, y: 200 });
+  it('is the middle of the tile just past the wall on the other side from the body, along the body', () => {
+    const [leaf] = doorLeaves([door(3, 3, 0)], WIDTH);
+    expect(doorFarSide(leaf!, standingAt(110, 150))).toEqual({ x: 110, y: 1.5 * T });
+    expect(doorFarSide(leaf!, standingAt(110, 70))).toEqual({ x: 110, y: 5.5 * T });
+    const [vertical] = doorLeaves([door(11, 4, 90)], WIDTH);
+    expect(doorFarSide(vertical!, standingAt(10 * T + 4, 150))).toEqual({ x: 12.5 * T, y: 150 });
   });
 
   it('is nothing for a body not lined up with the door', () => {
-    const [leaf] = doorLeaves([door(4, 6, 0)], WIDTH);
-    expect(doorFarSide(leaf!, standingAt(128 - 1, 6 * 32 - 10))).toBeNull();
-    expect(doorFarSide(leaf!, standingAt(160, 224 + DOOR_OPEN_REACH_PX))).toBeNull();
+    const [leaf] = doorLeaves([door(3, 3, 0)], WIDTH);
+    expect(doorFarSide(leaf!, standingAt(96 - 1, 120))).toBeNull();
+    expect(doorFarSide(leaf!, standingAt(128, 160 + DOOR_OPEN_REACH_PX))).toBeNull();
   });
 });
 
@@ -370,26 +366,58 @@ describe('officeDoors: the swing (#233)', () => {
   });
 });
 
-describe('officeDoors: the hinge post (#233)', () => {
-  // A wall line along row 6 and one along column 4, posts on every vertex the doors below need.
-  const grid = wallGrid([[4, 6], [5, 6], [6, 6], [7, 6], [4, 7], [4, 8]]);
-
-  it('blocks 16px more past the hinge post of a single door, into its opening, whatever end the hinge is at', () => {
-    // The joint of the post is clipped at the vertex; the stop runs on from there, the wall's thickness across.
-    expect(doorHingeStops([door(4, 6, 0)], grid)).toEqual([{ x: 4 * 32, y: 6 * 32 - 8, w: 16, h: 16 }]);
-    expect(doorHingeStops([door(4, 6, 180)], grid)).toEqual([{ x: 6 * 32 - 16, y: 6 * 32 - 8, w: 16, h: 16 }]);
-    expect(doorHingeStops([door(4, 6, 270)], grid)).toEqual([{ x: 4 * 32 - 8, y: 6 * 32, w: 16, h: 16 }]);
-    expect(doorHingeStops([door(4, 6, 90)], grid)).toEqual([{ x: 4 * 32 - 8, y: 8 * 32 - 16, w: 16, h: 16 }]);
+describe('officeDoors: a door in a vertical run is a tile shorter than in a horizontal one (L41)', () => {
+  it('spans 1 tile for a single door and 2 for a double in a vertical run, and keeps 2 and 3 in a horizontal one', () => {
+    expect([door(3, 3, 0), doubleDoor(3, 3, 180), door(11, 4, 90), doubleDoor(11, 4, 270)].map(doorSpan)).toEqual([2, 3, 1, 2]);
+    expect(doorTiles(door(11, 4, 90), WIDTH)).toEqual([at(11, 4)]);
+    expect(doorEndPosts(doubleDoor(11, 4, 270), WIDTH)).toEqual([at(11, 3), at(11, 6)]);
   });
 
-  it('blocks past both end posts of a double door, which hinges a leaf on each', () => {
-    expect(doorHingeStops([doubleDoor(4, 6, 0)], grid)).toEqual([
-      { x: 4 * 32, y: 6 * 32 - 8, w: 16, h: 16 },
-      { x: 7 * 32 - 16, y: 6 * 32 - 8, w: 16, h: 16 },
+  it('opens the column only on its own tiles and counts only them as its own wall', () => {
+    expect(doorOpenings([door(11, 4, 90), doubleDoor(3, 3, 0)], grid)).toEqual([
+      { axis: 'vertical', tx: 11, ty: 4, span: 1 },
+      { axis: 'horizontal', tx: 3, ty: 3, span: 3 },
+    ]);
+    expect(doorOwnWallTiles(door(11, 4, 90), WIDTH)).toEqual(new Set([at(11, 4)]));
+    expect(doorLeaves([doubleDoor(11, 3, 90)], WIDTH)[0]!.footprint).toEqual({ x: 10, y: 3, w: 3, h: 2 });
+  });
+
+  it('may stand one tile lower in the run, its last tile still above the face', () => {
+    // The run in column 11 ends at row 10, two tiles under row 8: a single door's one tile may be row 8 now, a double's last too.
+    expect(doorOnWall(grid, door(11, 8, 90))).toBe(true);
+    expect(doorOnWall(grid, door(11, 9, 90))).toBe(false);
+    expect(doorOnWall(grid, doubleDoor(11, 7, 90))).toBe(true);
+    expect(doorOnWall(grid, doubleDoor(11, 8, 90))).toBe(false);
+  });
+
+  it('blocks only the open leaf at the span top, where every vertical door hangs it, leaving room for an avatar', () => {
+    const stop = { x: 11 * T, y: 4 * T, w: T, h: 5 };
+    expect(doorHingeStops([door(11, 4, 90)], grid)).toEqual([stop]);
+    expect(doorHingeStops([door(11, 4, 270)], grid)).toEqual([stop]);
+    expect(doorHingeStops([doubleDoor(11, 4, 90)], grid)).toEqual([stop]);
+    expect(T - 5).toBeGreaterThan(physicalBodyRect({ x: 0, y: 0 }).height);
+  });
+});
+
+describe('officeDoors: the hinge stop (#233)', () => {
+  it('blocks the wall and the jamb at both ends of a single door in a horizontal run, leaving a 1.2 tile doorway, the three tiles of the wall across', () => {
+    const sides = [
+      { x: 3 * T, y: 2 * T, w: 13, h: 3 * T },
+      { x: 5 * T - 13, y: 2 * T, w: 13, h: 3 * T },
+    ];
+    expect(doorHingeStops([door(3, 3, 0)], grid)).toEqual(sides);
+    expect(doorHingeStops([door(3, 3, 180)], grid)).toEqual(sides);
+    expect((2 * T - 2 * 13) / T).toBeCloseTo(1.2, 1);
+  });
+
+  it('blocks past both ends of a double door, which hinges a leaf on each', () => {
+    expect(doorHingeStops([doubleDoor(4, 3, 0)], grid)).toEqual([
+      { x: 4 * T, y: 2 * T, w: 16, h: 3 * T },
+      { x: 7 * T - 16, y: 2 * T, w: 16, h: 3 * T },
     ]);
   });
 
-  it('adds nothing for a door that is not on a wall, nor for other decor', () => {
-    expect(doorHingeStops([door(8, 2, 0), { index: at(4, 6), piece: 'chair-wood', rotation: 0 }], grid)).toEqual([]);
+  it('adds nothing for a window, a door that is not on a wall, nor for other decor', () => {
+    expect(doorHingeStops([windowAt(3, 3), door(1, 3, 0), { index: at(4, 6), piece: 'chair-wood', rotation: 0 }], grid)).toEqual([]);
   });
 });

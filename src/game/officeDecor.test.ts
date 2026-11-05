@@ -354,21 +354,23 @@ describe('officeDecor: doors (#223, #233)', () => {
     expect(decorPieceInfo({ kind: 'door', footprint: { w: 0, h: 1 } })).toBeNull();
   });
 
-  it('covers its span along the line and a tile on each side: the top line for 0 and 180, the left line for 90 and 270', () => {
-    expect(decorFootprint({ index: at(4, 6), rotation: 0 }, DOOR, WIDTH)).toEqual({ x: 4, y: 5, w: 2, h: 2 });
-    expect(decorFootprint({ index: at(4, 6), rotation: 180 }, DOOR, WIDTH)).toEqual({ x: 4, y: 5, w: 2, h: 2 });
-    expect(decorFootprint({ index: at(4, 6), rotation: 90 }, DOOR, WIDTH)).toEqual({ x: 3, y: 6, w: 2, h: 2 });
-    expect(decorFootprint({ index: at(4, 6), rotation: 270 }, DOOR, WIDTH)).toEqual({ x: 3, y: 6, w: 2, h: 2 });
-    expect(decorTiles({ index: at(4, 6), rotation: 0 }, DOOR, WIDTH)).toEqual([at(4, 5), at(5, 5), at(4, 6), at(5, 6)]);
+  it('covers its span from its wall tile: the three wall tiles in a horizontal run (0, 180), the column and a tile each side in a vertical one (90, 270)', () => {
+    expect(decorFootprint({ index: at(4, 6), rotation: 0 }, DOOR, WIDTH)).toEqual({ x: 4, y: 5, w: 2, h: 3 });
+    expect(decorFootprint({ index: at(4, 6), rotation: 180 }, DOOR, WIDTH)).toEqual({ x: 4, y: 5, w: 2, h: 3 });
+    // A tile shorter along a vertical run (L41).
+    expect(decorFootprint({ index: at(4, 6), rotation: 90 }, DOOR, WIDTH)).toEqual({ x: 3, y: 6, w: 3, h: 1 });
+    expect(decorFootprint({ index: at(4, 6), rotation: 270 }, DOOR, WIDTH)).toEqual({ x: 3, y: 6, w: 3, h: 1 });
+    expect(decorTiles({ index: at(4, 6), rotation: 0 }, DOOR, WIDTH)).toEqual([at(4, 5), at(5, 5), at(4, 6), at(5, 6), at(4, 7), at(5, 7)]);
   });
 
-  it('covers the three tiles of a double door along the line, and one item holds them all', () => {
-    expect(decorFootprint({ index: at(4, 6), rotation: 0 }, DOUBLE, WIDTH)).toEqual({ x: 4, y: 5, w: 3, h: 2 });
-    expect(decorFootprint({ index: at(4, 6), rotation: 90 }, DOUBLE, WIDTH)).toEqual({ x: 3, y: 6, w: 2, h: 3 });
-    expect(decorFootprint({ index: at(4, 6), rotation: 270 }, DOUBLE, WIDTH)).toEqual({ x: 3, y: 6, w: 2, h: 3 });
+  it('covers the three tiles of a double door along the run, and one item holds them all', () => {
+    expect(decorFootprint({ index: at(4, 6), rotation: 0 }, DOUBLE, WIDTH)).toEqual({ x: 4, y: 5, w: 3, h: 3 });
+    expect(decorFootprint({ index: at(4, 6), rotation: 90 }, DOUBLE, WIDTH)).toEqual({ x: 3, y: 6, w: 3, h: 2 });
+    expect(decorFootprint({ index: at(4, 6), rotation: 270 }, DOUBLE, WIDTH)).toEqual({ x: 3, y: 6, w: 3, h: 2 });
     expect(decorTiles({ index: at(4, 6), rotation: 0 }, DOUBLE, WIDTH)).toEqual([
       at(4, 5), at(5, 5), at(6, 5),
       at(4, 6), at(5, 6), at(6, 6),
+      at(4, 7), at(5, 7), at(6, 7),
     ]);
   });
 

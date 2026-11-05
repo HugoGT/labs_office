@@ -709,6 +709,14 @@ describe('schema.sql: painted terrain walls', () => {
     expect(squashed).toContain(`alter table terrain_walls add constraint terrain_walls_piece_id_check check (piece_id in (${pieces}))`);
   });
 
+  it('deletes every stored glass wall, whose material no longer exists (S17), before the refreshed check would refuse it', () => {
+    expect(WALL_PIECES).not.toContain('wall-glass');
+    const remove = "delete from terrain_walls where piece_id = 'wall-glass';";
+    expect(squashed).toContain(remove);
+    expect(squashed.indexOf(remove)).toBeGreaterThan(squashed.indexOf('alter table terrain_walls drop constraint if exists terrain_walls_piece_id_check'));
+    expect(squashed.indexOf(remove)).toBeLessThan(squashed.indexOf('alter table terrain_walls add constraint terrain_walls_piece_id_check'));
+  });
+
   it('is created after the users it references and outside the one-time grid move, whose grid it never had', () => {
     expect(squashed.indexOf('create table if not exists terrain_walls')).toBeGreaterThan(squashed.indexOf('create table if not exists users'));
     const migration = gridMoveOf(squashed);

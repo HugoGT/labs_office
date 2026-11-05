@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import exportedManifest from '../../public/assets/pack/manifest.json?raw';
-import { SOFA, facingColumn } from './artContract';
+import { SOFA, WALL_FRAMES, facingColumn } from './artContract';
 import {
   chairPreviewFrames,
   sofaPreviewFrames,
@@ -140,7 +140,6 @@ describe('materialCatalogFrom: walls', () => {
       ['wall-brick', 'wall', 'Ladrillo'],
       ['wall-stone', 'wall', 'Piedra'],
       ['wall-plaster', 'wall', 'Yeso'],
-      ['wall-glass', 'wall', 'Vidrio'],
     ]);
     expect(catalog().wall.every((option) => !option.colorable && option.defaultColor === null)).toBe(true);
     expect(catalog().wall[0]!.sheetUrl).toBe('assets/pack/wall/brick.png');
@@ -173,18 +172,19 @@ describe('materialCatalogFrom: plants and room tables (#208)', () => {
 });
 
 describe('materialCatalogFrom: doors (#223, #233)', () => {
-  it('offers every door of the pack, the single and the double one apart, never colorable, for the decor palette', () => {
+  it('offers every door of the pack, the single and the double one apart, and the window, never colorable, for the decor palette', () => {
     expect(catalog().door.map((option) => [option.id, option.kind, option.name, option.colorable, option.sheetUrl])).toEqual([
       ['door-wood', 'door', 'Puerta simple', false, 'assets/pack/door/wood.png'],
       ['door-wood-double', 'door', 'Puerta doble', false, 'assets/pack/door/wood-double.png'],
+      ['door-glass-window', 'door', 'Ventana', false, 'assets/pack/door/glass-window.png'],
     ]);
     expect(catalog().door.every((option) => option.defaultColor === null)).toBe(true);
   });
 
   it('a door previews its closed leaf over the whole span: two tiles wide for a single door, three for a double one, around the anchor', () => {
-    // The 128 x 128 frame has its anchor in the middle of the span (64, 64); the crop is 24 rows across the edge.
-    expect(previewFrame(catalog().door[0]!)).toEqual({ x: 64 - 32, y: 64 - 12, width: 64, height: 24 });
-    expect(previewFrame(catalog().door[1]!)).toEqual({ x: 64 - 48, y: 64 - 12, width: 96, height: 24 });
+    // The 160 x 256 frame has its anchor in the middle of the span (80, 128); the crop is 24 rows across the edge.
+    expect(previewFrame(catalog().door[0]!)).toEqual({ x: 80 - 32, y: 128 - 12, width: 64, height: 24 });
+    expect(previewFrame(catalog().door[1]!)).toEqual({ x: 80 - 48, y: 128 - 12, width: 96, height: 24 });
   });
 });
 
@@ -214,9 +214,8 @@ describe('previewFrame', () => {
     expect(previewFrame(floor)).toEqual({ x: 0, y: 0, width: 96, height: 96 });
   });
 
-  it('a wall previews the joint of a straight east-west run, how a painted line of wall reads', () => {
-    // Frame 1 + mask: east (2) and west (8).
-    expect(previewFrame(catalog().wall[0]!)).toEqual({ x: 11 * 16, y: 0, width: 16, height: 16 });
+  it('a wall previews the face tile of its first variant, the material as a painted wall shows it', () => {
+    expect(previewFrame(catalog().wall[0]!)).toEqual({ x: WALL_FRAMES.face * 32, y: 0, width: 32, height: 32 });
   });
 });
 

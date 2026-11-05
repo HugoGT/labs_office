@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { CharacterContainer } from './characters';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, SPAWN_BLOCK_INDEX, TILE } from './mapData';
-import { DOOR, DOOR_STEPS, doorFrameIndex, doorLeafDepthYs } from './artContract';
+import { DOOR, DOOR_STEPS, DOOR_WALL_TOP, doorFrameIndex, doorSlices, wallFrameIndex } from './artContract';
 import { DOOR_HOLD_MS } from './officeDoors';
 import { withBlock, withWalls } from './officeLayout';
 import { CHAIR_OBJECT_NAME, SOFA_OBJECT_NAME, WALL_OBJECT_NAME } from './mapBuilder';
@@ -620,7 +620,7 @@ describe('OfficeScene: edited terrain', () => {
   });
 
   const lawnTile = 22 * BASE_LAYOUT.width + 67;
-  /** The grid vertex a post on `lawnTile` stands on: the tile's top-left corner. */
+  /** The top-left corner of `lawnTile`: the door tests measure from it. */
   const lawnVertex = { x: 67 * TILE, y: 22 * TILE };
   const wallObjects = (scene: Phaser.Scene) => scene.children.list.filter((child) => child.name === WALL_OBJECT_NAME);
 
@@ -629,131 +629,117 @@ describe('OfficeScene: edited terrain', () => {
     const seen: OfficeEventMap['terrain'][] = [];
     bridge.on('terrain', (payload) => seen.push(payload));
     const before = wallObjects(scene).length;
-    expect(solidAt(scene, lawnVertex.x, lawnVertex.y)).toBe(false);
+    const middle = (tx: number, ty: number) => [tx * TILE + TILE / 2, ty * TILE + TILE / 2] as const;
+    expect(solidAt(scene, ...middle(67, 22))).toBe(false);
 
     const walled = withWalls(BASE_LAYOUT.walls, [{ index: lawnTile, piece: 'wall-brick' }, { index: lawnTile + 1, piece: 'wall-brick' }]);
     handlers.onWalls!(walled);
 
-    // The posts stand on the tiles' top-left vertices: the wall runs along the grid line between them, not through the tile.
-    expect(solidAt(scene, lawnVertex.x, lawnVertex.y)).toBe(true);
-    expect(solidAt(scene, lawnVertex.x + TILE / 2, lawnVertex.y)).toBe(true);
-    expect(solidAt(scene, lawnVertex.x + TILE / 2, lawnVertex.y - 7)).toBe(true);
-    expect(solidAt(scene, lawnVertex.x + TILE / 2, lawnVertex.y + 9)).toBe(false);
-    expect(solidAt(scene, lawn.x, lawn.y)).toBe(false);
-    expect(wallObjects(scene).length).toBeGreaterThan(before);
+    // Each wall stands on its tile and covers the ones above and below it, whole tiles.
+    for (const [tx, ty] of [[67, 21], [67, 22], [67, 23], [68, 21], [68, 23]] as const) expect(solidAt(scene, ...middle(tx, ty)), `${tx},${ty}`).toBe(true);
+    expect(solidAt(scene, 67 * TILE + 1, 21 * TILE + 1)).toBe(true);
+    for (const [tx, ty] of [[67, 20], [67, 24], [66, 22], [69, 22]] as const) expect(solidAt(scene, ...middle(tx, ty)), `${tx},${ty}`).toBe(false);
+    // Three tiles each, drawn as tile sprites.
+    expect(wallObjects(scene).length).toBe(before + 6);
     expect(seen).toEqual([{ blocks: BASE_LAYOUT.blocks, walls: walled, colors: new Map() }]);
 
     handlers.onWalls!(BASE_LAYOUT.walls);
-    await vi.waitFor(() => expect(solidAt(scene, lawnVertex.x, lawnVertex.y)).toBe(false), LOOP_WAIT);
+    await vi.waitFor(() => expect(solidAt(scene, ...middle(67, 22))).toBe(false), LOOP_WAIT);
     expect(wallObjects(scene)).toHaveLength(before);
     // Walls of another map size are not this layout's: ignored.
     handlers.onWalls!([]);
     expect(wallObjects(scene)).toHaveLength(before);
   });
 
-  it('lays the wall placed last over the other where two materials meet, and redraws when only the order changes (#223)', async () => {
+  it('draws each material its own column where two meet, the same whatever the placement order (#223)', async () => {
     const { scene, handlers } = await bootConnected();
-    const walled = withWalls(BASE_LAYOUT.walls, [{ index: lawnTile, piece: 'wall-brick' }, { index: lawnTile + 1, piece: 'wall-glass' }]);
-    // Pieces laid over another material add a fraction of a pixel to their depth: the later joint and the body between the posts.
-    const laidOver = () =>
-      wallObjects(scene)
-        .filter((child) => !Number.isInteger((child as Phaser.GameObjects.Image).depth))
-        .map((child) => (child as Phaser.GameObjects.Image).x)
-        .sort((a, b) => a - b);
+    const walled = withWalls(BASE_LAYOUT.walls, [{ index: lawnTile, piece: 'wall-brick' }, { index: lawnTile + 1, piece: 'wall-plaster' }]);
+    /** The sheet and the frame of every wall tile drawn in columns 67 and 68, by position. */
+    const drawn = () =>
+      (wallObjects(scene) as Phaser.GameObjects.Image[])
+        .filter((image) => image.x >= 67 * TILE && image.x < 69 * TILE)
+        .map((image) => [image.x, image.y, image.texture.key, Number(image.frame.name), image.depth] as const)
+        .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
 
     handlers.onWalls!(walled, [lawnTile, lawnTile + 1]);
-    // The glass post (the east one) and the body between the posts.
-    expect(laidOver()).toEqual([lawnVertex.x + 8, lawnVertex.x + TILE - 8]);
-
-    // Only the order changes: the west post is now the latest, so its joint is laid over the body.
-    handlers.onWalls!(walled, [lawnTile + 1, lawnTile]);
-    expect(laidOver()).toEqual([lawnVertex.x - 8, lawnVertex.x + 8]);
-
-    // A wall of one material is never laid over anything.
-    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 1].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))), [lawnTile]);
-    expect(laidOver()).toHaveLength(0);
-  });
-
-  it('opens the wall edges a door spans for Arcade and the tile helpers, and closes them when the door goes (#223, #233)', async () => {
-    const { scene, handlers } = await bootConnected();
-    const grid = () => (scene as unknown as { grid: { solid: boolean[][] } }).grid;
-    // Posts on vertices 67, 68 and 69 of row 22: two segments of brick wall, the span of one door.
-    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 1, 2].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
-    // Past the 16px hinge stop of the west post (`doorHingeStops`).
-    const doorways = [lawnVertex.x + TILE / 2 + 4, lawnVertex.x + TILE + TILE / 2].map((x) => ({ x, y: lawnVertex.y }));
-    for (const doorway of doorways) expect(solidAt(scene, doorway.x, doorway.y)).toBe(true);
-    const walled = wallObjects(scene).length;
-
-    handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 0 }]);
-
-    // Destroyed static bodies leave the world on its next step.
-    await vi.waitFor(() => expect(solidAt(scene, doorways[1]!.x, doorways[1]!.y)).toBe(false), LOOP_WAIT);
-    for (const doorway of doorways) expect(solidAt(scene, doorway.x, doorway.y)).toBe(false);
-    // The 18px body fits: the passage runs from 16px past the hinge post (west, rotation 0) to the vertex of the other end post.
-    expect(solidAt(scene, lawnVertex.x + 15, lawnVertex.y)).toBe(true);
-    expect(solidAt(scene, lawnVertex.x + 17, lawnVertex.y)).toBe(false);
-    expect(solidAt(scene, lawnVertex.x + 2 * TILE - 1, lawnVertex.y)).toBe(false);
-    // The outer halves of the end posts stay, the jambs of the door merge with them.
-    expect(solidAt(scene, lawnVertex.x - 1, lawnVertex.y)).toBe(true);
-    expect(solidAt(scene, lawnVertex.x + 2 * TILE + 1, lawnVertex.y)).toBe(true);
-    expect([grid().solid[21]![67], grid().solid[22]![67], grid().solid[22]![68], grid().solid[22]![69]]).toEqual([false, false, false, true]);
-    // The two bodies under the door are not drawn, nor the middle post, which only the open edges meet.
-    expect(wallObjects(scene)).toHaveLength(walled - 3);
-
-    handlers.onDecor!([]);
-    for (const doorway of doorways) expect(solidAt(scene, doorway.x, doorway.y)).toBe(true);
-    expect(grid().solid[22]![67]).toBe(true);
-    expect(wallObjects(scene)).toHaveLength(walled);
-  });
-
-  it('opens a door in a gap between two posts with no wall between them, and only there (#233)', async () => {
-    const { scene, handlers } = await bootConnected();
-    // Posts at both ends of the span and none between: a corner or the end of a wall on each side.
-    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 2].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
-    handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 0 }]);
-    const leaf = () => scene.children.getByName(decorObjectName(lawnTile)) as Phaser.GameObjects.Image;
-    await vi.waitFor(() => expect(leaf().texture.key).toBe(artSheetKey('door-wood', 'sheet')), LOOP_WAIT);
-    // The frame is anchored on the middle of the 2-tile span, sorted like the wall body.
-    expect(leaf().x).toBe(lawnVertex.x + TILE - 64);
-    expect(leaf().y).toBe(lawnVertex.y - 64);
-    expect(solidAt(scene, lawnVertex.x + TILE, lawnVertex.y)).toBe(false);
-    expect(solidAt(scene, lawnVertex.x - 1, lawnVertex.y)).toBe(true);
-  });
-
-  it('draws the walls over a door, shut or open, horizontal or vertical: its jambs sort under the posts they merge with (#233)', async () => {
-    const { scene, handlers } = await bootConnected();
-    // A horizontal door on row 22 between posts 67 and 69, and a vertical one down from vertex (67, 24) to (67, 26).
-    const posts = [lawnTile, lawnTile + 2, lawnTile + 2 * BASE_LAYOUT.width, lawnTile + 4 * BASE_LAYOUT.width];
-    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, posts.map((index) => ({ index, piece: 'wall-brick' as const }))));
-    handlers.onDecor!([
-      { index: lawnTile, piece: 'door-wood', rotation: 0 },
-      { index: lawnTile + 2 * BASE_LAYOUT.width, piece: 'door-wood', rotation: 90 },
+    const first = drawn();
+    expect(first.map(([, , key]) => key)).toEqual([...Array(3).fill(artSheetKey('wall-brick', 'sheet')), ...Array(3).fill(artSheetKey('wall-plaster', 'sheet'))]);
+    // Each material ends its own run: both columns take the End frames.
+    expect(first.map(([, , , frame]) => frame)).toEqual([
+      wallFrameIndex('crownEnd', 67),
+      wallFrameIndex('faceEnd', 67),
+      wallFrameIndex('baseEnd', 67),
+      wallFrameIndex('crownEnd', 68),
+      wallFrameIndex('faceEnd', 68),
+      wallFrameIndex('baseEnd', 68),
     ]);
-    const jambs = (index: number) => scene.children.list.filter((child) => child.name === `${decorObjectName(index)}:jamb`) as Phaser.GameObjects.Image[];
-    await vi.waitFor(() => expect(jambs(lawnTile)).toHaveLength(2), LOOP_WAIT);
-    const jointDepth = (ty: number) => worldAssetDepth(ty * TILE + 8);
-    const check = () => {
-      // Under the joint at each end of its span, so the post is drawn over the jamb.
-      expect(jambs(lawnTile).map((jamb) => jamb.depth)).toEqual([jointDepth(22) - 1, jointDepth(22) - 1]);
-      expect(jambs(lawnTile + 2 * BASE_LAYOUT.width).map((jamb) => jamb.depth)).toEqual([jointDepth(24) - 1, jointDepth(26) - 1]);
-    };
-    check();
+    // Every tile sorts by the bottom of its wall, never a fraction past it.
+    expect(new Set(first.map(([, , , , depth]) => depth))).toEqual(new Set([worldAssetDepth(24 * TILE)]));
 
-    // Swung wide open for someone from the north, nothing about the jambs changes.
-    const leaf = () => scene.children.getByName(decorObjectName(lawnTile)) as Phaser.GameObjects.Image;
-    const body = findPlayer(scene).body as Phaser.Physics.Arcade.Body;
-    body.reset(lawnVertex.x + TILE, lawnVertex.y - TILE / 2 - 11);
-    await vi.waitFor(() => expect(Number(leaf().frame.name)).toBe(doorFrameIndex(0, 'start', DOOR_STEPS - 1)), LOOP_WAIT);
-    check();
-    // The joint of the end post is one of the wall pieces, and it sorts over the jamb whatever the swing.
-    const joints = wallObjects(scene).filter((wall) => (wall as Phaser.GameObjects.Image).x === lawnVertex.x - 8 && (wall as Phaser.GameObjects.Image).y === lawnVertex.y - 8) as Phaser.GameObjects.Image[];
-    expect(joints).toHaveLength(1);
-    expect(joints[0]!.depth).toBeGreaterThan(jambs(lawnTile)[0]!.depth);
+    handlers.onWalls!(walled, [lawnTile + 1, lawnTile]);
+    expect(drawn()).toEqual(first);
+  });
+
+  /** A horizontal run on row 22, columns 66..69: a door on `lawnTile` spans columns 67 and 68 between the walls at 66 and 69. */
+  const horizontalRun = () => withWalls(BASE_LAYOUT.walls, [66, 67, 68, 69].map((tx) => ({ index: 22 * BASE_LAYOUT.width + tx, piece: 'wall-brick' as const })));
+  /** A vertical run down column 67, rows 21..`last`: a door on `lawnTile` stands in its dark top. */
+  const verticalRun = (last: number) =>
+    withWalls(BASE_LAYOUT.walls, Array.from({ length: last - 20 }, (_, i) => ({ index: (21 + i) * BASE_LAYOUT.width + 67, piece: 'wall-brick' as const })));
+  /** Body centers just north and just south of the run's wall (rows 21..23). */
+  const northOfWall = 21 * TILE - 4;
+  const southOfWall = 24 * TILE + 4;
+
+  it('lets the player through a door in a horizontal run, base to top, and draws the top tile of the wall over it (S10)', async () => {
+    const { scene, handlers } = await bootConnected();
+    const before = wallObjects(scene).length;
+    handlers.onWalls!(horizontalRun());
+    handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 0 }]);
+    const door = () => scene.children.getByName(decorObjectName(lawnTile)) as Phaser.GameObjects.Image;
+    await vi.waitFor(() => expect(door().texture.key).toBe(artSheetKey('door-wood', 'sheet')), LOOP_WAIT);
+
+    // The door's columns block nothing from the wall's base to its top but the wall and jamb left at each end, 13px:
+    // a 1.2 tile doorway (the old colliders leave on the next physics step).
+    await vi.waitFor(() => expect(solidAt(scene, 68 * TILE, 22 * TILE + 16)).toBe(false), LOOP_WAIT);
+    for (const ty of [21, 22, 23]) {
+      expect(solidAt(scene, 68 * TILE, ty * TILE + 16), `row ${ty}`).toBe(false);
+      expect(solidAt(scene, 67 * TILE + 4, ty * TILE + 16), `west side, row ${ty}`).toBe(true);
+      expect(solidAt(scene, 69 * TILE - 4, ty * TILE + 16), `east side, row ${ty}`).toBe(true);
+      expect(solidAt(scene, 67 * TILE + 15, ty * TILE + 16), `doorway west edge, row ${ty}`).toBe(false);
+      expect(solidAt(scene, 69 * TILE - 15, ty * TILE + 16), `doorway east edge, row ${ty}`).toBe(false);
+      expect(solidAt(scene, 66 * TILE + 16, ty * TILE + 16), `wall beside it, row ${ty}`).toBe(true);
+    }
+    // Its two columns show their top tile whole and, on the two tiles it takes, only the wall left beside it: 4 walls of
+    // 3 tiles, 4 of them cropped to 10px.
+    expect(wallObjects(scene).length).toBe(before + 12);
+    const cropped = wallObjects(scene).filter((wall) => (wall as Phaser.GameObjects.Image).isCropped) as Phaser.GameObjects.Image[];
+    expect(cropped.map((wall) => [wall.x, wall.y, (wall as unknown as { _crop: { width: number } })._crop.width])).toEqual([
+      [67 * TILE, 22 * TILE, 10],
+      [67 * TILE, 23 * TILE, 10],
+      [68 * TILE, 22 * TILE, 10],
+      [68 * TILE, 23 * TILE, 10],
+    ]);
+    // One image, the frame's top on the wall's top, sorted just over the wall.
+    // The wall's top (row 21) falls `DOOR_WALL_TOP` down the frame.
+    expect([door().x - door().displayOriginX, door().y - door().displayOriginY]).toEqual([68 * TILE - DOOR.anchor.x, 21 * TILE - DOOR_WALL_TOP]);
+    expect(door().depth).toBe(worldAssetDepth(24 * TILE + 0.5));
+  });
+
+  it('draws a window over the face of a horizontal run without opening it (S11)', async () => {
+    const { scene, handlers } = await bootConnected();
+    const before = wallObjects(scene).length;
+    handlers.onWalls!(horizontalRun());
+    handlers.onDecor!([{ index: lawnTile, piece: 'door-glass-window', rotation: 0 }]);
+    const window = () => scene.children.getByName(decorObjectName(lawnTile)) as Phaser.GameObjects.Image;
+    await vi.waitFor(() => expect(window().texture.key).toBe(artSheetKey('door-glass-window', 'sheet')), LOOP_WAIT);
+    expect(Number(window().frame.name)).toBe(doorFrameIndex(0, 'start', 0));
+    expect(window().depth).toBe(worldAssetDepth(24 * TILE + 0.5));
+    expect(wallObjects(scene).length).toBe(before + 12);
+    for (const ty of [21, 22, 23]) expect(solidAt(scene, 68 * TILE, ty * TILE + 16), `row ${ty}`).toBe(true);
   });
 
   it('opens a door only for whoever is about to cross it, swinging away from where they come from, and keeps the swing mid-crossing (#223, S14)', async () => {
     const { scene, handlers } = await bootConnected();
-    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 1, 2].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
+    handlers.onWalls!(horizontalRun());
     handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 0 }]);
     const leaf = () => scene.children.getByName(decorObjectName(lawnTile)) as Phaser.GameObjects.Image;
     await vi.waitFor(() => expect(leaf().texture.key).toBe(artSheetKey('door-wood', 'sheet')), LOOP_WAIT);
@@ -763,58 +749,40 @@ describe('OfficeScene: edited terrain', () => {
     // Body centers sit 11px below the network position (`AVATAR_BODY_CENTER_OFFSET`).
     const at = (x: number, centerY: number) => body.reset(x, centerY - 11);
 
-    // Walking along the wall past either end of the span, on the door's own rows, opens nothing.
-    at(lawnVertex.x + 2 * TILE + TILE / 2 + 2, lawnVertex.y - 10);
+    // Walking along the wall past either end of the span opens nothing.
+    at(69 * TILE + TILE / 2, northOfWall);
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(frame()).toBe(doorFrameIndex(0, 'start', 0));
-    at(lawnVertex.x - TILE / 2, lawnVertex.y + 10);
+    at(66 * TILE + TILE / 2, southOfWall);
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(frame()).toBe(doorFrameIndex(0, 'start', 0));
 
-    // Lined up from the north: it swings south, and stays so while the walker crosses the line and goes in.
-    at(middle, lawnVertex.y - 10);
+    // Lined up from the north: it swings south, and stays so while the walker goes through the wall.
+    at(middle, northOfWall);
     await vi.waitFor(() => expect(frame()).toBe(doorFrameIndex(0, 'start', DOOR_STEPS - 1)), LOOP_WAIT);
-    at(middle, lawnVertex.y + 10);
+    at(middle, 23 * TILE + 16);
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(frame()).toBe(doorFrameIndex(0, 'start', DOOR_STEPS - 1));
-    at(middle, lawnVertex.y + 4 * TILE);
+    at(middle, 28 * TILE);
     await vi.waitFor(() => expect(frame()).toBe(doorFrameIndex(0, 'start', 0)), LOOP_WAIT);
 
     // Coming from the south it swings north, not into the walker.
-    at(middle, lawnVertex.y + 10);
+    at(middle, southOfWall);
     await vi.waitFor(() => expect(frame()).toBe(doorFrameIndex(180, 'start', DOOR_STEPS - 1)), LOOP_WAIT);
-    at(middle, lawnVertex.y - 10);
+    at(middle, 21 * TILE + 16);
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(frame()).toBe(doorFrameIndex(180, 'start', DOOR_STEPS - 1));
   });
 
-  it('blocks 16px past the hinge post of a door into its opening, and moves the stop when the door turns its hinge (#233)', async () => {
-    const { scene, handlers } = await bootConnected();
-    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 1, 2].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
-    // Hinged at its west end (rotation 0), on vertex 67; the east end post is on vertex 69.
-    handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 0 }]);
-    const east = lawnVertex.x + 2 * TILE;
-    // Destroyed static bodies leave the world on its next step.
-    await vi.waitFor(() => expect(solidAt(scene, lawnVertex.x + 17, lawnVertex.y)).toBe(false), LOOP_WAIT);
-    expect(solidAt(scene, lawnVertex.x + 15, lawnVertex.y)).toBe(true);
-    expect(solidAt(scene, east - 2, lawnVertex.y)).toBe(false);
-
-    // Turned up (180) it hinges at the east end: the stop goes with it.
-    handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 180 }]);
-    await vi.waitFor(() => expect(solidAt(scene, lawnVertex.x + 2, lawnVertex.y)).toBe(false), LOOP_WAIT);
-    expect(solidAt(scene, east - 15, lawnVertex.y)).toBe(true);
-    expect(solidAt(scene, east - 17, lawnVertex.y)).toBe(false);
-  });
-
   it('keeps the door of a locked space shut for whoever is outside it, and opens it for whoever is inside', async () => {
     const { scene, bridge, handlers } = await bootConnected();
-    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 1, 2].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
+    handlers.onWalls!(horizontalRun());
     handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 0 }]);
     const leaf = () => scene.children.getByName(decorObjectName(lawnTile)) as Phaser.GameObjects.Image;
     await vi.waitFor(() => expect(leaf().texture.key).toBe(artSheetKey('door-wood', 'sheet')), LOOP_WAIT);
     const frame = () => Number(leaf().frame.name);
-    // The room the door leads into, north of its line, locked by someone else.
-    bridge.emitCommand('spacesconfig', { spaces: [{ id: 'sala', name: 'Sala 1', x: lawnVertex.x, y: lawnVertex.y - 4 * TILE, w: 2 * TILE, h: 4 * TILE }], version: 'v1' });
+    // The room the door leads into, north of the wall, locked by someone else.
+    bridge.emitCommand('spacesconfig', { spaces: [{ id: 'sala', name: 'Sala 1', x: lawnVertex.x, y: 17 * TILE, w: 2 * TILE, h: 4 * TILE }], version: 'v1' });
     handlers.onLockedSpaces!(new Map([['sala', 'otra-sesion']]));
     const body = findPlayer(scene).body as Phaser.Physics.Arcade.Body;
     const middle = lawnVertex.x + TILE;
@@ -822,63 +790,29 @@ describe('OfficeScene: edited terrain', () => {
     const at = (x: number, centerY: number) => body.reset(x, centerY - 11);
 
     // The local player and a peer, both outside and lined up with the door: it stays shut.
-    at(middle, lawnVertex.y + 20);
-    handlers.onAdd(remoteSnapshot({ sessionId: 'peer-door', x: middle - 8, y: lawnVertex.y + 9 }));
+    at(middle, southOfWall);
+    handlers.onAdd(remoteSnapshot({ sessionId: 'peer-door', x: middle - 8, y: 23 * TILE + 16 - 11 }));
     await new Promise((resolve) => setTimeout(resolve, 150));
     expect(frame()).toBe(doorFrameIndex(0, 'start', 0));
 
     // Whoever is inside opens it on the way out, swung south, away from them.
-    at(middle, lawnVertex.y - 10);
+    at(middle, northOfWall);
     await vi.waitFor(() => expect(frame()).toBe(doorFrameIndex(0, 'start', DOOR_STEPS - 1)), LOOP_WAIT);
   });
 
-  it('draws a double door from the pack as one item over its 3-tile span, opening while an avatar passes and closing after (#233)', async () => {
+  it('swings a door in a horizontal run through the frames between closed and open, always sorted just over its wall (#233, S10)', async () => {
     const { scene, handlers } = await bootConnected();
-    // End posts on vertices 67 and 70 of row 22, the wall between them.
-    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 1, 2, 3].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
-    handlers.onDecor!([{ index: lawnTile, piece: 'door-wood-double', rotation: 0 }]);
-    const leaf = () => scene.children.getByName(decorObjectName(lawnTile)) as Phaser.GameObjects.Image;
-    await vi.waitFor(() => expect(leaf().texture.key).toBe(artSheetKey('door-wood-double', 'sheet')), LOOP_WAIT);
-    const frame = () => Number(leaf().frame.name);
-    const closed = doorFrameIndex(0, 'start', 0);
-    // Anchored on the middle of the 3-tile span, sorted like the wall body.
-    expect(leaf().x).toBe(lawnVertex.x + (3 * TILE) / 2 - 64);
-    expect(leaf().y).toBe(lawnVertex.y - 64);
-    await vi.waitFor(() => expect(frame()).toBe(closed), LOOP_WAIT);
-    // The last tile of the span, short of the 16px stop of the east hinge.
-    await vi.waitFor(() => expect(solidAt(scene, lawnVertex.x + 2 * TILE + 8, lawnVertex.y)).toBe(false), LOOP_WAIT);
-
-    // A remote avatar in the doorway of the last tile of the span opens the whole door, swung south for whoever comes from the north.
-    handlers.onAdd(remoteSnapshot({ sessionId: 'peer-door', x: lawnVertex.x + 2 * TILE + TILE / 2, y: lawnVertex.y - 11 }));
-    await vi.waitFor(() => expect(frame()).toBe(doorFrameIndex(0, 'start', DOOR_STEPS - 1)), LOOP_WAIT);
-    handlers.onRemove('peer-door');
-    await vi.waitFor(() => expect(frame()).toBe(closed), LOOP_WAIT);
-
-    // So does the local player from the south (swung north), and stepping away closes it again.
-    const body = findPlayer(scene).body as Phaser.Physics.Arcade.Body;
-    body.reset(lawnVertex.x + TILE / 2, lawnVertex.y + TILE / 2 - 11);
-    await vi.waitFor(() => expect(frame()).toBe(doorFrameIndex(180, 'start', DOOR_STEPS - 1)), LOOP_WAIT);
-    body.reset(lawnVertex.x + TILE / 2, lawnVertex.y + 5 * TILE);
-    await vi.waitFor(() => expect(frame()).toBe(closed), LOOP_WAIT);
-  });
-
-  it('swings a door through the frames between closed and open, each sorted by the lowest pixel of its leaf (#233)', async () => {
-    const { scene, handlers } = await bootConnected();
-    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 2].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
+    handlers.onWalls!(horizontalRun());
     handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 0 }]);
     const leaf = () => scene.children.getByName(decorObjectName(lawnTile)) as Phaser.GameObjects.Image;
     await vi.waitFor(() => expect(leaf().texture.key).toBe(artSheetKey('door-wood', 'sheet')), LOOP_WAIT);
-    const edge = { col: lawnVertex.x / TILE, row: lawnVertex.y / TILE, axis: 'horizontal' } as const;
-    const depthAt = (step: number) => worldAssetDepth(doorLeafDepthYs(edge, 'door-wood', 0, 'start', step)[0]);
-    // Shut, it sorts by its closed leaf.
-    expect(leaf().depth).toBeCloseTo(depthAt(0));
 
     // Every frame of the swing, as drawn: its image and the depth it carries.
     const drawn: { frame: number; depth: number }[] = [];
     const record = () => drawn.push({ frame: Number(leaf().frame.name), depth: leaf().depth });
     scene.events.on(Phaser.Scenes.Events.POST_UPDATE, record);
     const body = findPlayer(scene).body as Phaser.Physics.Arcade.Body;
-    body.reset(lawnVertex.x + TILE, lawnVertex.y - TILE / 2 - 11);
+    body.reset(lawnVertex.x + TILE, northOfWall - 11);
     await vi.waitFor(() => expect(Number(leaf().frame.name)).toBe(doorFrameIndex(0, 'start', DOOR_STEPS - 1)), LOOP_WAIT);
     scene.events.off(Phaser.Scenes.Events.POST_UPDATE, record);
 
@@ -886,13 +820,12 @@ describe('OfficeScene: edited terrain', () => {
     const steps = drawn.map(({ frame }) => frame / DOOR.columns).filter((step, i, all) => i === 0 || step !== all[i - 1]);
     expect(steps).toEqual(expect.arrayContaining([1, 2]));
     expect(steps).toEqual([...steps].sort((a, b) => a - b));
-    // And each frame sorts by the leaf it shows: it grows as the leaf swings down.
-    for (const { frame, depth } of drawn) expect(depth, `frame ${frame}`).toBeCloseTo(depthAt(frame / DOOR.columns));
+    for (const { frame, depth } of drawn) expect(depth, `frame ${frame}`).toBe(worldAssetDepth(24 * TILE + 0.5));
   });
 
   it('hinges a single door at the end its turn puts it at, shut and swung, whichever side it opens to (#233)', async () => {
     const { scene, handlers } = await bootConnected();
-    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 2].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
+    handlers.onWalls!(horizontalRun());
     // Turned up (180): hinged at the east end.
     handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 180 }]);
     const leaf = () => scene.children.getByName(decorObjectName(lawnTile)) as Phaser.GameObjects.Image;
@@ -900,108 +833,114 @@ describe('OfficeScene: edited terrain', () => {
     expect(Number(leaf().frame.name)).toBe(doorFrameIndex(180, 'end', 0));
     // For someone from the north it swings south, still hinged at the east end.
     const body = findPlayer(scene).body as Phaser.Physics.Arcade.Body;
-    body.reset(lawnVertex.x + TILE, lawnVertex.y - TILE / 2 - 11);
+    body.reset(lawnVertex.x + TILE, northOfWall - 11);
     await vi.waitFor(() => expect(Number(leaf().frame.name)).toBe(doorFrameIndex(0, 'end', DOOR_STEPS - 1)), LOOP_WAIT);
   });
 
   it('keeps a fully open door open for a moment after the avatar leaves, then closes it through the frames between (#233)', async () => {
     const { scene, handlers } = await bootConnected();
-    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 2].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
+    handlers.onWalls!(horizontalRun());
     handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 0 }]);
     const leaf = () => scene.children.getByName(decorObjectName(lawnTile)) as Phaser.GameObjects.Image;
     await vi.waitFor(() => expect(leaf().texture.key).toBe(artSheetKey('door-wood', 'sheet')), LOOP_WAIT);
     const frame = () => Number(leaf().frame.name);
     const open = doorFrameIndex(0, 'start', DOOR_STEPS - 1);
     const body = findPlayer(scene).body as Phaser.Physics.Arcade.Body;
-    body.reset(lawnVertex.x + TILE, lawnVertex.y - TILE / 2 - 11);
+    body.reset(lawnVertex.x + TILE, northOfWall - 11);
     await vi.waitFor(() => expect(frame()).toBe(open), LOOP_WAIT);
 
     // Out of range: it stays wide open while the hold runs (well under DOOR_HOLD_MS), and only then starts to close.
-    body.reset(lawnVertex.x + TILE, lawnVertex.y + 5 * TILE);
+    body.reset(lawnVertex.x + TILE, 28 * TILE);
     await new Promise((resolve) => setTimeout(resolve, DOOR_HOLD_MS / 3));
     expect(frame()).toBe(open);
     await vi.waitFor(() => expect(frame()).toBe(doorFrameIndex(0, 'start', 0)), LOOP_WAIT);
   });
 
-  it('draws an avatar standing past a swung leaf in front of it, even inside the span of a vertical door (#233)', async () => {
+  it('takes the dark top of a vertical run away where a door stands and lets the player across it (S9)', async () => {
     const { scene, handlers } = await bootConnected();
-    // A vertical door of 2 tiles on the line through the lawn vertex: its posts at the vertex and two rows below.
-    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 2 * BASE_LAYOUT.width].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
+    const before = wallObjects(scene).length;
+    handlers.onWalls!(verticalRun(25));
     handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 270 }]);
-    const leaf = () => scene.children.getByName(decorObjectName(lawnTile)) as Phaser.GameObjects.Image;
-    await vi.waitFor(() => expect(leaf().texture.key).toBe(artSheetKey('door-wood', 'sheet')), LOOP_WAIT);
+    await vi.waitFor(() => expect((scene.children.getByName(decorObjectName(lawnTile)) as Phaser.GameObjects.Image).texture.key).toBe(artSheetKey('door-wood', 'sheet')), LOOP_WAIT);
+    // The run covers rows 20..26: seven tiles, less the door's one (a tile shorter in a vertical run, L41).
+    expect(wallObjects(scene).length).toBe(before + 6);
+    const drawnRows = (wallObjects(scene) as Phaser.GameObjects.Image[]).filter((image) => image.x === 67 * TILE).map((image) => image.y / TILE);
+    expect(drawnRows).not.toContain(22);
+    expect(drawnRows).toContain(23);
+    // The base right over the door is drawn without its floor line, under the door's frame and shadow (L43).
+    const cropped = (wallObjects(scene) as Phaser.GameObjects.Image[]).filter((image) => image.isCropped);
+    expect(cropped.map((image) => [image.x / TILE, image.y / TILE, (image as unknown as { _crop: { height: number } })._crop.height])).toEqual([[67, 21, TILE - 2]]);
+    // Across the door's tile past the open leaf at its top, nothing blocks (once the old colliders leave); above and below it, the run does.
+    await vi.waitFor(() => expect(solidAt(scene, 67 * TILE + 16, 22 * TILE + 16)).toBe(false), LOOP_WAIT);
+    expect(solidAt(scene, 67 * TILE + 16, 22 * TILE + 2)).toBe(true);
+    expect(solidAt(scene, 67 * TILE + 16, 21 * TILE + 16)).toBe(true);
+    expect(solidAt(scene, 67 * TILE + 16, 23 * TILE + 16)).toBe(true);
+  });
+
+  it('draws an avatar standing past a swung leaf in front of it, even inside the span of a vertical door, and the door line over it (#233, S14)', async () => {
+    const { scene, handlers } = await bootConnected();
+    // A vertical door of 1 tile (L41) in the dark top of a run down column 67: row 22.
+    handlers.onWalls!(verticalRun(25));
+    handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 270 }]);
+    const crops = () => scene.children.list.filter((child) => child.name === decorObjectName(lawnTile)) as Phaser.GameObjects.Image[];
+    await vi.waitFor(() => expect(crops().map((crop) => crop.texture.key)).toEqual(Array(4).fill(artSheetKey('door-wood', 'sheet'))), LOOP_WAIT);
+    // The column over the span, the column along it, the leaf left and right of it: one frame, cut apart (listed by depth).
+    const depths = (step: number, piece = 'door-wood') => doorSlices(22, piece, step).map(({ depthY }) => worldAssetDepth(depthY)).sort((a, b) => a - b);
+    expect(crops().every((crop) => crop.isCropped && Number(crop.frame.name) === doorFrameIndex(270, 'start', 0))).toBe(true);
+    expect(crops().map((crop) => crop.depth).sort((a, b) => a - b)).toEqual(depths(0));
     const player = findPlayer(scene);
     const body = player.body as Phaser.Physics.Arcade.Body;
-    const south = lawnVertex.y + 40;
+    const south = lawnVertex.y + 24;
 
-    // Comes from the west, so the leaf swings east; then crosses the line and stands in the doorway, below the leaf's hinge.
-    body.reset(lawnVertex.x - TILE / 2, south - 11);
-    await vi.waitFor(() => expect(Number(leaf().frame.name)).toBe(doorFrameIndex(90, 'start', DOOR_STEPS - 1)), LOOP_WAIT);
-    body.reset(lawnVertex.x + TILE / 2, south - 11);
+    // Comes from the west, so the leaf swings east; then stands in the doorway, below the leaf's hinge.
+    body.reset(66 * TILE + TILE / 2, south - 11);
+    await vi.waitFor(() => expect(crops().map((crop) => Number(crop.frame.name))).toEqual(Array(4).fill(doorFrameIndex(90, 'start', DOOR_STEPS - 1))), LOOP_WAIT);
+    body.reset(67 * TILE + TILE / 2, south - 11);
     await new Promise((resolve) => setTimeout(resolve, 100));
-    expect(Number(leaf().frame.name)).toBe(doorFrameIndex(90, 'start', DOOR_STEPS - 1));
+    expect(Number(crops()[0]!.frame.name)).toBe(doorFrameIndex(90, 'start', DOOR_STEPS - 1));
 
-    const edge = { col: lawnVertex.x / TILE, row: lawnVertex.y / TILE, axis: 'vertical' } as const;
-    // The leaf hangs from the hinge at the north end: it sorts there, well above the avatar's feet, so the avatar is drawn over it.
-    expect(leaf().depth).toBeCloseTo(worldAssetDepth(doorLeafDepthYs(edge, 'door-wood', 90, 'start', DOOR_STEPS - 1)[0]));
-    expect(leaf().depth).toBeLessThan(player.depth);
+    // Every crop switched its depth with the frame; the leaf hangs from the hinge at the north end, well above the avatar's feet.
+    expect(crops().map((crop) => crop.depth).sort((a, b) => a - b)).toEqual(depths(DOOR_STEPS - 1));
+    const [over, along, west, east] = doorSlices(22, 'door-wood', DOOR_STEPS - 1).map(({ depthY }) => worldAssetDepth(depthY));
+    expect(west).toBeLessThan(player.depth);
+    expect(east).toBeLessThan(player.depth);
+    expect(over).toBeLessThan(player.depth);
+    // The door line and the ceiling's shadow along the span are drawn over whoever crosses it.
+    expect(along).toBeGreaterThan(player.depth);
   });
 
   it('sorts the two leaves of a vertical double door apart, so the north one never covers an avatar standing below it', async () => {
     const { scene, handlers } = await bootConnected();
-    // A vertical double door of 3 tiles on the line through the lawn vertex: its posts at the vertex and three rows below.
-    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 3 * BASE_LAYOUT.width].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
+    // A vertical double door of 2 tiles (L41) in the dark top of a run down column 67: rows 22 and 23.
+    handlers.onWalls!(verticalRun(26));
     handlers.onDecor!([{ index: lawnTile, piece: 'door-wood-double', rotation: 270 }]);
-    const leaves = () => scene.children.list.filter((child) => child.name === decorObjectName(lawnTile)) as Phaser.GameObjects.Image[];
-    await vi.waitFor(() => expect(leaves().map((leaf) => leaf.texture.key)).toEqual([artSheetKey('door-wood-double', 'sheet'), artSheetKey('door-wood-double', 'sheet')]), LOOP_WAIT);
+    const crops = () => scene.children.list.filter((child) => child.name === decorObjectName(lawnTile)) as Phaser.GameObjects.Image[];
+    await vi.waitFor(() => expect(crops().map((crop) => crop.texture.key)).toEqual(Array(6).fill(artSheetKey('door-wood-double', 'sheet'))), LOOP_WAIT);
     const player = findPlayer(scene);
     const body = player.body as Phaser.Physics.Arcade.Body;
     const south = lawnVertex.y + 40;
 
     // Comes from the west, so both leaves swing east; then stands in the doorway just below the north leaf.
-    body.reset(lawnVertex.x - TILE / 2, south - 11);
-    await vi.waitFor(() => expect(Number(leaves()[0].frame.name)).toBe(doorFrameIndex(90, 'start', DOOR_STEPS - 1)), LOOP_WAIT);
-    body.reset(lawnVertex.x + TILE / 2, south - 11);
+    body.reset(66 * TILE + TILE / 2, south - 11);
+    await vi.waitFor(() => expect(Number(crops()[0]!.frame.name)).toBe(doorFrameIndex(90, 'start', DOOR_STEPS - 1)), LOOP_WAIT);
+    body.reset(67 * TILE + TILE / 2, south - 11);
     await new Promise((resolve) => setTimeout(resolve, 100));
 
-    const edge = { col: lawnVertex.x / TILE, row: lawnVertex.y / TILE, axis: 'vertical' } as const;
-    const [north, southLeaf] = doorLeafDepthYs(edge, 'door-wood-double', 90, 'start', DOOR_STEPS - 1).map(worldAssetDepth);
-    expect(leaves().map((leaf) => leaf.depth)).toEqual([north, southLeaf]);
-    // The north leaf hangs from its hinge above the avatar's feet; the south one, from the far end of the span, below them.
-    expect(leaves()[0].depth).toBeLessThan(player.depth);
-    expect(leaves()[1].depth).toBeGreaterThan(player.depth);
-  });
-
-  it('never bars a door: the body and the path walk through it, open or shut (#223, #233)', async () => {
-    const { scene, handlers } = await bootConnected();
-    handlers.onWalls!(withWalls(BASE_LAYOUT.walls, [0, 1, 2].map((dx) => ({ index: lawnTile + dx, piece: 'wall-brick' as const }))));
-    handlers.onDecor!([{ index: lawnTile, piece: 'door-wood', rotation: 0 }]);
-    const leaf = () => scene.children.getByName(decorObjectName(lawnTile)) as Phaser.GameObjects.Image;
-    await vi.waitFor(() => expect(leaf().texture.key).toBe(artSheetKey('door-wood', 'sheet')), LOOP_WAIT);
-    const walk = scene as unknown as { startWalk(goal: { x: number; y: number }): boolean; autoWalk?: unknown; walkWorld(): { rects: readonly { x: number; y: number; w: number; h: number }[] } };
-    const body = findPlayer(scene).body as Phaser.Physics.Arcade.Body;
-    const doorway = { x: lawnVertex.x + TILE, y: lawnVertex.y };
-    const north = { x: doorway.x, y: lawnVertex.y - TILE / 2 - 11 };
-    const south = { x: doorway.x, y: lawnVertex.y + TILE / 2 - 11 };
-
-    // Shut: nobody is next to it, and the span is open ground.
-    await vi.waitFor(() => expect(solidAt(scene, doorway.x, doorway.y)).toBe(false), LOOP_WAIT);
-    expect(leaf().isTinted).toBe(false);
-    // Open, for the one next to it: still open ground, and the path plans through it.
-    body.reset(north.x, north.y);
-    await vi.waitFor(() => expect(Number(leaf().frame.name)).toBe(doorFrameIndex(0, 'start', DOOR_STEPS - 1)), LOOP_WAIT);
-    expect(solidAt(scene, doorway.x, doorway.y)).toBe(false);
-    expect(walk.startWalk(south)).toBe(true);
-    walk.autoWalk = undefined;
-    // The only rectangles in the path's world are the walls' own: none spans the door.
-    expect(walk.walkWorld().rects.some((rect) => rect.x <= doorway.x && doorway.x < rect.x + rect.w && rect.y <= doorway.y && doorway.y < rect.y + rect.h)).toBe(false);
+    const expected = doorSlices(22, 'door-wood-double', DOOR_STEPS - 1).map(({ depthY }) => worldAssetDepth(depthY));
+    expect(crops().map((crop) => crop.depth).sort((a, b) => a - b)).toEqual([...expected].sort((a, b) => a - b));
+    // The north leaf hangs from its hinge above the avatar's feet; the south one, from the lower post under the wall, below them.
+    const [, , northWest, northEast, southWest, southEast] = expected;
+    expect(northWest).toBeLessThan(player.depth);
+    expect(northEast).toBeLessThan(player.depth);
+    expect(southWest).toBeGreaterThan(player.depth);
+    expect(southEast).toBeGreaterThan(player.depth);
   });
 
   it('draws pending walls for the editor without colliding with them, and drops them when it closes', async () => {
     const { scene, bridge } = await bootConnected();
     const before = wallObjects(scene).length;
 
-    bridge.emitCommand('terrainedit', { brush: { kind: 'wall', piece: 'wall-glass' }, previewWalls: [{ index: lawnTile, piece: 'wall-glass' }, { index: lawnTile + 1, piece: 'wall-glass' }] });
+    bridge.emitCommand('terrainedit', { brush: { kind: 'wall', piece: 'wall-plaster' }, previewWalls: [{ index: lawnTile, piece: 'wall-plaster' }, { index: lawnTile + 1, piece: 'wall-plaster' }] });
 
     expect(wallObjects(scene).length).toBeGreaterThan(before);
     expect(solidAt(scene, lawnVertex.x, lawnVertex.y)).toBe(false);

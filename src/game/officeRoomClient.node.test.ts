@@ -847,7 +847,8 @@ describe('connectOfficeRoom: chosen character (art migration, step 5)', () => {
 
 describe('connectOfficeRoom: seats (art migration, step 6)', () => {
   const CHAIR = BASE_MAP_SEATS[0];
-  const NEXT_TO_CHAIR = { x: CHAIR.tx * TILE + 16, y: (CHAIR.ty - 1) * TILE + 16 };
+  // The tile left of the chair, body centered on it: the one above the chair is the room's top wall.
+  const NEXT_TO_CHAIR = { x: (CHAIR.tx - 1) * TILE + 16, y: CHAIR.ty * TILE + 5 };
 
   it('sendSit asks for a seat; peers see it in their snapshots and the sitter through onLocalSeat', async () => {
     const watcher = recorder();
@@ -870,7 +871,7 @@ describe('connectOfficeRoom: seats (art migration, step 6)', () => {
 
   it('sendLock locks the space the sender stands in; everyone gets who locked it, and sendUnlock lifts it', async () => {
     await server.shutdown();
-    const room = { id: 'sala', slug: 'sala', name: 'Sala', x: CHAIR.tx, y: CHAIR.ty - 1, w: 1, h: 1, capacity: null };
+    const room = { id: 'sala', slug: 'sala', name: 'Sala', x: CHAIR.tx - 1, y: CHAIR.ty, w: 1, h: 1, capacity: null };
     server = createOfficeServer({ spaces: createMemorySpaces({ seed: [room] }) });
     endpoint = `ws://localhost:${await server.listen(0)}`;
     const watched: ReadonlyMap<string, string>[] = [];
@@ -929,14 +930,14 @@ describe('connectOfficeRoom: seats (art migration, step 6)', () => {
   it('reports the painted walls on the first sync and every wall edit after it', async () => {
     await server.shutdown();
     const { BASE_LAYOUT: layout } = await import('./officeLayout.ts');
-    server = createOfficeServer({ layout, seats: [], terrain: createMemoryTerrain([], [[7, 'wall-glass']]) });
+    server = createOfficeServer({ layout, seats: [], terrain: createMemoryTerrain([], [[7, 'wall-plaster']]) });
     endpoint = `ws://localhost:${await server.listen(0)}`;
     const seen: (readonly (string | null)[])[] = [];
     await connect('Ana', { ...recorder().handlers, onWalls: (walls) => seen.push(walls) });
 
     await waitFor(() => seen.length > 0);
     expect(seen[0]).toHaveLength(layout.width * layout.height);
-    expect(seen[0]![7]).toBe('wall-glass');
+    expect(seen[0]![7]).toBe('wall-plaster');
 
     await server.terrain.setWalls([{ index: 8, piece: 'wall-brick' }, { index: 7, piece: null }], null, async () => ({ placements: [], players: [] }));
     await waitFor(() => seen.at(-1)?.[8] === 'wall-brick');
@@ -946,7 +947,7 @@ describe('connectOfficeRoom: seats (art migration, step 6)', () => {
   it('reports the placement order of the walls with them, the latest last (#223)', async () => {
     await server.shutdown();
     const { BASE_LAYOUT: layout } = await import('./officeLayout.ts');
-    server = createOfficeServer({ layout, seats: [], terrain: createMemoryTerrain([], [[9, 'wall-glass'], [7, 'wall-stone']]) });
+    server = createOfficeServer({ layout, seats: [], terrain: createMemoryTerrain([], [[9, 'wall-plaster'], [7, 'wall-stone']]) });
     endpoint = `ws://localhost:${await server.listen(0)}`;
     const orders: (readonly number[] | undefined)[] = [];
     await connect('Ana', { ...recorder().handlers, onWalls: (_walls, order) => orders.push(order) });

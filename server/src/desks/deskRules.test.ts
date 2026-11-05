@@ -190,7 +190,7 @@ describe('los errores de dominio son tipos y no textos', () => {
 });
 
 describe('deskCoversWall', () => {
-  /** A 10x8 grid of vertices; a post stands on the top-left corner of its tile. */
+  /** A 10x8 grid of tiles; a wall stands on its tile and covers the ones above and below it. */
   const WIDTH = 10;
   const grid = (...tiles: (readonly [number, number])[]) => {
     const walls: (string | null)[] = new Array(WIDTH * 8).fill(null);
@@ -198,32 +198,33 @@ describe('deskCoversWall', () => {
     return { width: WIDTH, walls };
   };
 
-  it('is true when a wall rectangle overlaps the 3x3 footprint, on its edges and corners included', () => {
+  it('is true when any of the three tiles of a wall falls inside the 3x3 footprint, corners included', () => {
+    // The wall on (5, 4) covers (5, 3), (5, 4) and (5, 5).
     const walls = grid([5, 4]);
 
-    // The post's 16px joint straddles the grid lines through vertex (5, 4).
     expect(deskCoversWall({ x: 5, y: 4 }, walls)).toBe(true);
-    expect(deskCoversWall({ x: 3, y: 2 }, walls)).toBe(true);
+    expect(deskCoversWall({ x: 3, y: 1 }, walls)).toBe(true);
     expect(deskCoversWall({ x: 4, y: 3 }, walls)).toBe(true);
-    expect(deskCoversWall({ x: 2, y: 4 }, walls)).toBe(true);
+    expect(deskCoversWall({ x: 3, y: 5 }, walls)).toBe(true);
     expect(deskCoversWall({ x: 5, y: 1 }, walls)).toBe(true);
-    expect(deskCoversWall({ x: 2, y: 1 }, walls)).toBe(true);
   });
 
-  it('is false when the wall stands a whole tile away from the footprint', () => {
+  it('is false when the footprint only touches the wall tiles from beside, above or below', () => {
     const walls = grid([5, 4]);
 
     expect(deskCoversWall({ x: 6, y: 4 }, walls)).toBe(false);
-    expect(deskCoversWall({ x: 1, y: 4 }, walls)).toBe(false);
-    expect(deskCoversWall({ x: 5, y: 5 }, walls)).toBe(false);
+    expect(deskCoversWall({ x: 2, y: 4 }, walls)).toBe(false);
+    expect(deskCoversWall({ x: 5, y: 6 }, walls)).toBe(false);
     expect(deskCoversWall({ x: 5, y: 0 }, walls)).toBe(false);
   });
 
-  it('reads posts on the edges of the grid, and nothing past them', () => {
-    // Row major: vertex (0, 5) follows vertex (9, 4) in the array; each stands where it is.
+  it('reads walls on the edges of the grid, and nothing past them', () => {
+    // Row major: tile (0, 5) follows tile (9, 4) in the array; each stands where it is.
     expect(deskCoversWall({ x: 7, y: 2 }, grid([9, 4], [0, 5]))).toBe(true);
-    expect(deskCoversWall({ x: 8, y: 5 }, grid([9, 4], [0, 5]))).toBe(false);
-    expect(deskCoversWall({ x: 8, y: 6 }, grid([0, 7]))).toBe(false);
+    expect(deskCoversWall({ x: 1, y: 4 }, grid([9, 4], [0, 5]))).toBe(false);
+    // A wall on the bottom row is clipped to the map: it still covers its own tile and the one above.
+    expect(deskCoversWall({ x: 0, y: 5 }, grid([0, 7]))).toBe(true);
+    expect(deskCoversWall({ x: 0, y: 3 }, grid([0, 7]))).toBe(false);
     expect(deskCoversWall({ x: 20, y: 20 }, grid([5, 4]))).toBe(false);
   });
 

@@ -135,7 +135,7 @@ describe('art pack manifest', () => {
   it('registers the characters, furniture, floors, walls, the terrain tileset and the map props', () => {
     const count = (kind: string): number => manifest.pieces.filter((piece) => piece.kind === kind).length;
     const kinds = ['character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door', 'sofa'];
-    expect(kinds.map(count)).toEqual([18, 9, 6, 9, 4, 1, 3, 1, 1, 1, 4, 2, 4]);
+    expect(kinds.map(count)).toEqual([18, 9, 6, 9, 3, 1, 3, 1, 1, 1, 4, 3, 4]);
   });
 
   it('uses stable ids derived from the generators, unique and prefixed by kind', () => {
@@ -148,7 +148,7 @@ describe('art pack manifest', () => {
         'chair-wood',
         'desk-painted',
         'floor-plain',
-        'wall-glass',
+        'wall-plaster',
         'floor-dirt',
         'floor-sand',
         'floor-cobblestone',
@@ -171,6 +171,8 @@ describe('art pack manifest', () => {
         'desk-curved',
       ]),
     );
+    // S17: the glass wall material was removed; the pack no longer offers it.
+    expect(manifest.pieces.filter((piece) => piece.kind === 'wall').map((piece) => piece.id)).toEqual(['wall-brick', 'wall-stone', 'wall-plaster']);
   });
 
   it('names defaults that exist in the pack', () => {
@@ -244,14 +246,16 @@ describe('art pack manifest', () => {
     }
   });
 
-  it('registers a single and a double wooden door (#233): two sheets of door frames, anchored on the middle of their span', () => {
+  it('registers a single and a double wooden door (#233) and a glass window (tile walls): three sheets of door frames, anchored on the middle of their span', () => {
     const doors = manifest.pieces.filter((piece) => piece.kind === 'door');
-    expect(doors.map((door) => door.id)).toEqual(['door-wood', 'door-wood-double']);
+    expect(doors.map((door) => door.id)).toEqual(['door-wood', 'door-wood-double', 'door-glass-window']);
+    expect(doors[2]).toMatchObject({ name: 'Ventana', material: 'glass', variant: 'window', anchor: DOOR.anchor, footprint: { w: 2, h: 1 } });
     expect(doors[0]).toMatchObject({ name: 'Puerta simple', material: 'wood', variant: 'single', anchor: DOOR.anchor, footprint: { w: 2, h: 1 } });
     expect(doors[1]).toMatchObject({ name: 'Puerta doble', material: 'wood', variant: 'double', anchor: DOOR.anchor, footprint: { w: 3, h: 1 } });
     expect(doors.map((door) => door.files.map((file) => [file.path, file.role, file.imageKind, file.width, file.height]))).toEqual([
-      [['door/wood.png', 'sheet', 'door', 512, 1024]],
-      [['door/wood-double.png', 'sheet', 'door', 512, 1024]],
+      [['door/wood.png', 'sheet', 'door', 640, 2048]],
+      [['door/wood-double.png', 'sheet', 'door', 640, 2048]],
+      [['door/glass-window.png', 'sheet', 'door', 640, 2048]],
     ]);
   });
 

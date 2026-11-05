@@ -180,7 +180,7 @@ describe('TerrainPalette: uploaded floors (S13)', () => {
 });
 
 describe('WallPalette', () => {
-  const WALL_NAMES = ['Ladrillo', 'Piedra', 'Yeso', 'Vidrio'];
+  const WALL_NAMES = ['Ladrillo', 'Piedra', 'Yeso'];
 
   it('offers every wall by its Spanish name, as title and accessible name but no text, and no eraser, none pressed while a floor or nothing is picked', () => {
     const { rerender } = render(<WallPalette value={null} onPick={() => {}} walls={catalog.wall} preview={noPreview()} />);
@@ -204,8 +204,8 @@ describe('WallPalette', () => {
     const { rerender } = render(<WallPalette value={{ kind: 'wall', piece: 'wall-stone' }} onPick={onPick} walls={catalog.wall} preview={noPreview()} />);
 
     expect(screen.getByRole('button', { name: 'Piedra' })).toHaveAttribute('aria-pressed', 'true');
-    await userEvent.click(screen.getByRole('button', { name: 'Vidrio' }));
-    expect(onPick.mock.calls).toEqual([['wall-glass']]);
+    await userEvent.click(screen.getByRole('button', { name: 'Yeso' }));
+    expect(onPick.mock.calls).toEqual([['wall-plaster']]);
 
     // The wall eraser picked is no wall of this palette.
     rerender(<WallPalette value={{ kind: 'wall', piece: null }} onPick={onPick} walls={catalog.wall} preview={noPreview()} />);
@@ -216,7 +216,7 @@ describe('WallPalette', () => {
     const preview = noPreview();
     const { unmount } = render(<WallPalette value={null} onPick={() => {}} walls={catalog.wall} preview={preview} />);
     await waitFor(() => expect(preview.sheet).toHaveBeenCalledWith(expect.objectContaining({ id: 'wall-plaster' }), null));
-    expect(preview.sheet).toHaveBeenCalledTimes(4);
+    expect(preview.sheet).toHaveBeenCalledTimes(3);
     unmount();
 
     render(<WallPalette value={null} onPick={() => {}} walls={null} preview={noPreview()} disabled />);

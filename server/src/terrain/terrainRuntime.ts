@@ -26,10 +26,11 @@
  * one.
  *
  * Doors (#223) are decor items too, but they do change the snapshot: each
- * one opens the wall edge it stands on (`doorOpenings`), so every snapshot
- * this runtime builds passes the doors of the layer it holds, and a decor
- * edit that changes the doors rebuilds it. The posts at a door's ends may
- * not change while the door stands.
+ * one opens the wall it stands in (`doorOpenings`), so every snapshot this
+ * runtime builds passes the doors of the layer it holds, and a decor edit
+ * that changes the doors rebuilds it. The walls a door or window needs
+ * (`doorPosts`) may not be removed while it stands; a door or window placed
+ * over another replaces it (S6), and the wall under one that goes stays.
  *
  * Blocks of a colorable material may carry a color (#222). It is part of the
  * block edit: saved in the same `saveBlocks` as the material, published with
@@ -83,7 +84,7 @@ import {
   type DecorTileRect,
 } from '../../../src/game/officeDecor.ts';
 import { deskOverChairLimit, displacedDeskTables } from '../../../src/game/deskDecorRules.ts';
-import { doorOpenings, doorPostSet, doorShoulders, isDoorPiece, wallsUnderLeftDoors } from '../../../src/game/officeDoors.ts';
+import { doorOpenings, doorPostSet, doorsLeftOffWall, doorsReplacedBy, isDoorPiece } from '../../../src/game/officeDoors.ts';
 import { carriedDecor, onAreaOutline, replacedDecor } from '../../../src/game/areaCarry.ts';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY } from '../../../src/game/mapData.ts';
 import type { TerrainStore } from './terrainPort.ts';
@@ -278,13 +279,13 @@ export function createTerrainRuntime({
   /** The painted posts in placement order, oldest first (#223); the layout's own posts are not listed. */
   let wallOrder: readonly number[] = [];
   let decor: readonly DecorItem[] = [];
-  /** The one way the runtime builds a snapshot: the doors of `items` open their wall edges. */
+  /** The one way the runtime builds a snapshot: the doors of `items` open the walls they stand in. */
   const snapshotOf = (
     nextBlocks: readonly LayoutMaterial[],
     nextWalls: readonly (string | null)[],
     items: readonly DecorItem[] = decor,
     nextOrder: readonly number[] = wallOrder,
-  ): TerrainSnapshot => terrainSnapshot(layout, nextBlocks, nextWalls, doorOpenings(items, layout.width), nextOrder);
+  ): TerrainSnapshot => terrainSnapshot(layout, nextBlocks, nextWalls, doorOpenings(items, { width: layout.width, height: layout.height, walls: nextWalls }), nextOrder);
   let snapshot = snapshotOf(blocks, walls);
   let catalog = new Map<string, DecorCatalogPiece>();
   let queue: Promise<unknown> = Promise.resolve();
@@ -306,18 +307,18 @@ export function createTerrainRuntime({
   }
 
   /**
-   * The posts around the `voided` blocks that `next` leaves with void on
-   * every tile their footprint touches (#217): nothing to stand on. A post on
-   * the border of what remains keeps its ground on one side and stays.
+   * The walls around the `voided` blocks that `next` leaves with void on
+   * every tile they cover (#217): nothing to stand on. A wall on the border
+   * of what remains keeps ground under one of its tiles and stays.
    */
   function floatingPosts(voided: readonly number[], next: TerrainSnapshot): number[] {
     const { width, height } = layout;
     const posts = new Set<number>();
     for (const block of voided) {
       const { tx, ty, w, h } = blockTileRect(width, block);
-      // Every vertex on or inside the block's outline; the grid has none past the map's last column or row.
-      for (let y = ty; y <= Math.min(ty + h, height - 1); y += 1) {
-        for (let x = tx; x <= Math.min(tx + w, width - 1); x += 1) {
+      // Every wall that covers a tile of the block: its columns, from the row above it to the row below it.
+      for (let y = Math.max(ty - 1, 0); y <= Math.min(ty + h, height - 1); y += 1) {
+        for (let x = tx; x <= Math.min(tx + w - 1, width - 1); x += 1) {
           const post = y * width + x;
           if (walls[post] == null || posts.has(post)) continue;
           if (wallPostTiles(layout, post).every((tile) => next.materials[tile] === 'void')) posts.add(post);
@@ -400,32 +401,23 @@ export function createTerrainRuntime({
     if (changed.length === 0) return walls;
     const placed = changed.flatMap(({ index, piece }) => (piece === null ? [] : [index]));
     const removed = changed.flatMap(({ index, piece }) => (piece === null ? [index] : []));
-    // A door's end post may be repainted (the door stays on it) but not removed.
+    // A wall a door or window needs may be repainted (the door stays on it) but not removed.
     const doorPosts = doorPostSet(decor, layout.width);
-    // Repainting a post that already stands covers nothing new, yet its footprint touches the tiles of the
-    // door beside it, which a new post could not: standing posts are checked without the doors' own tiles.
+    // Repainting a wall that already stands covers nothing new, yet its footprint touches the tiles of the
+    // door standing in it, which a new wall could not: standing walls are checked without the doors' own tiles.
     const standing = placed.filter((index) => walls[index] != null);
     const fresh = placed.filter((index) => walls[index] == null);
     const guards = placed.length > 0 ? await protections() : { placements: [], players: [] };
     const doorTiles = new Set(decor.flatMap((item) => (isDoorPiece(item.piece) ? decorTiles(item, decorInfo(item.piece), layout.width) : [])));
     const guarded = protectedTiles();
     const withoutDoors = new Set([...guarded].filter((tile) => !doorTiles.has(tile)));
-    // A new post straight across a door's end may touch that door's own tiles: it ends a wall against the
-    // door's end post, beside the doorway (#233). Any other post of a door's tiles stands in the doorway or its swing.
-    const beside = new Map<number, Set<number>>();
-    for (const item of decor) {
-      if (!isDoorPiece(item.piece)) continue;
-      const tiles = decorTiles(item, decorInfo(item.piece), layout.width);
-      for (const post of doorShoulders(item, layout.width, layout.height)) beside.set(post, new Set([...(beside.get(post) ?? []), ...tiles]));
-    }
-    let conflict = findWallConflict(fresh.filter((index) => !beside.has(index)), layout, guarded, guards, removed, doorPosts);
-    for (const index of fresh.filter((post) => beside.has(post))) {
-      const own = beside.get(index)!;
-      conflict ??= findWallConflict([index], layout, new Set([...guarded].filter((tile) => !own.has(tile))), guards);
-    }
+    // A new wall may not touch a door's tiles: it would stand in the doorway, its swing or on the wall it cuts.
+    let conflict = findWallConflict(fresh, layout, guarded, guards, removed, doorPosts);
     conflict ??= findWallConflict(standing, layout, withoutDoors, guards);
     if (conflict !== null) throw new TerrainProtectedError(conflict);
     const next = withWalls(walls, changed);
+    // Nor may it take away the rest of the run a vertical door stands on (its face below it).
+    if (doorsLeftOffWall(decor, { width: layout.width, height: layout.height, walls }, next)) throw new TerrainProtectedError('placement');
     // A placed or repainted post becomes the latest, the order the store keeps by `updated_at`.
     const nextOrder = withWallOrder(wallOrder, walls, changed);
     const nextSnapshot = snapshotOf(blocks, next, decor, nextOrder);
@@ -483,6 +475,9 @@ export function createTerrainRuntime({
     }
     const placedInOrder = changed.flatMap((edit) => (edit.item === null ? [] : [decorEditKey(edit)]));
     let next = withDecor(decor, changed);
+    // A door or window placed over another replaces it in the same save (S6); the wall under it stays.
+    const placedItems = next.filter((item) => placedInOrder.includes(decorItemKey(item)));
+    next = withDecor(next, doorsReplacedBy(next, placedItems, layout.width).map((index) => ({ index, item: null })));
     const deskAreas = desks === undefined ? [] : await desks();
     if (deskAreas.length > 0) {
       // One desk table per desk: the ones a placement displaces leave in the same save. A floor key is its anchor.
@@ -499,17 +494,10 @@ export function createTerrainRuntime({
     if (conflict !== null) throw new TerrainProtectedError(conflict);
     const saved = decorChanges(decor, next);
     if (saved.length === 0) return decor;
-    // A door that goes takes the wall that stood behind it along, so it does not come back (#233).
-    const erased = wallsUnderLeftDoors(decor, next, walls, layout.width).map((index): WallEdit => ({ index, piece: null }));
-    const nextWalls = erased.length === 0 ? walls : withWalls(walls, erased);
-    const nextOrder = erased.length === 0 ? wallOrder : withWallOrder(wallOrder, walls, erased);
-    const openings = (items: readonly DecorItem[]): string => JSON.stringify(doorOpenings(items, layout.width));
-    const nextSnapshot = erased.length === 0 && openings(next) === openings(decor) ? snapshot : snapshotOf(blocks, nextWalls, next, nextOrder);
-    // The walls first: a failure after them leaves the door standing over a wall it hides, never a door gone with its wall back.
-    if (erased.length > 0) await store.saveWalls(erased, actorId);
+    // A door that goes leaves its wall whole: the wall it stood in was never taken away (tile walls).
+    const openings = (items: readonly DecorItem[]): string => JSON.stringify(doorOpenings(items, { width: layout.width, height: layout.height, walls }));
+    const nextSnapshot = openings(next) === openings(decor) ? snapshot : snapshotOf(blocks, walls, next);
     await store.saveDecor(saved, actorId);
-    walls = nextWalls;
-    wallOrder = nextOrder;
     decor = next;
     snapshot = nextSnapshot;
     for (const listener of listeners) listener(blocks);
@@ -556,9 +544,6 @@ export function createTerrainRuntime({
     // A carried top item that stood across onto a surface left behind falls instead of stopping the move,
     // like one left behind whose surface went (#121).
     const nextDecor = withDecor(moved, fallenTopItems(decor, moved, decorInfo, width).map(removalOf));
-    // A replaced door takes the wall behind it along, like the eraser (#233); a carried post stays.
-    const landed = new Set(placedPosts);
-    for (const post of wallsUnderLeftDoors(replaced, nextDecor, lifted, width)) if (!landed.has(post)) lifted[post] = null;
     const wallEdits = lifted.flatMap((piece, index): WallEdit[] => (piece === walls[index] ? [] : [{ index, piece: piece as WallPieceId | null }]));
     const nextWalls = withWalls(walls, wallEdits);
     const nextOrder = withWallOrder(wallOrder, walls, wallEdits);

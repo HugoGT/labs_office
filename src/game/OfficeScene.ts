@@ -1,5 +1,5 @@
 import Phaser from 'phaser';
-import { WALL, doorFrameIndex, doorLeafDepthYs, doorHingeOf, doorPlacement, doorSlices, propPlacement, tableFrameIndex, type ArtFacing, type ArtPiece, type GridEdge, type Point } from './artContract';
+import { DOOR, DOOR_FRONT, WINDOW_FRONT, doorAxisOf, doorFrameIndex, doorVariantOf, doorHingeOf, doorPlacement, doorSlices, propPlacement, tableFrameIndex, type ArtFacing, type ArtPiece, type Point } from './artContract';
 import { artUploadsManifestUrl, findPiece, type ArtAppearance } from './artPack';
 import { artCustomCharactersUrl } from './customCharacterArt';
 import { ArtPackLoader } from './artPackLoader';
@@ -39,7 +39,7 @@ import { SPACE_SHADE_ALPHA, SPACE_SHADE_NAME, shadeAround, shadeKey } from './sp
 import { tableFacing, tableFloorRect } from './deskTable';
 import { decorChairFacing, decorChairs, decorFootprint, decorLayerOf, decorRotationFor, decorSeats, encodeOfficeDecor, isDecorChairPiece, isDecorSofaPiece, withDecor, type DecorEdit, type DecorItem, type DecorLayer, type DecorTileRect } from './officeDecor';
 import { deskSurface, onTopGround, tableSurface, type DecorSurface } from './decorTop';
-import { doorEdge, doorHingeStops, doorLeaves, doorOpenings, doorSpan, doorStepOf, doorSwingRotation, keptSwings, moveDoors, openDoorLeaves, type DoorLeaf, type DoorMotion } from './officeDoors';
+import { doorHingeStops, doorLeaves, doorOpenings, doorSpan, doorStepOf, doorSwingRotation, isWindowPiece, keptSwings, moveDoors, openDoorLeaves, type DoorLeaf, type DoorMotion } from './officeDoors';
 import { deskEntryRefused, isOnDesk } from './deskDecorRules';
 import { lockedBehindDoor, lockedDoorAhead, lockedSpaceEntered } from './spaceLocks';
 import type { OfficeDesk } from './desksPort';
@@ -1862,53 +1862,70 @@ export class OfficeScene extends Phaser.Scene {
   }
 
   /**
-   * A door of the decor layer (#223, #233): its leaves and jambs on the grid
-   * line it opens (`doorEdge`). Each leaf sorts by its lowest pixel; each jamb
-   * is its own crop of the same frame, sorted under the post joint it merges
-   * with (`doorSlices`), so the walls are always drawn over the door.
+   * A door or window of the decor layer (#223, #233, tile walls). In a
+   * horizontal wall run it is seen from the front (`DOOR_FRONT`,
+   * `WINDOW_FRONT`): one image sorted just over the wall it stands in
+   * (`doorLook`), so whoever walks through the doorway is drawn behind its
+   * frame. In a vertical run a door stands like the walls (S14), cut into
+   * crops of the same frame sorted apart (`doorSlices`): the column over its
+   * span, the column along it and the leaves beside it.
    */
   private drawDoor(item: DecorItem): Phaser.GameObjects.GameObject[] {
-    const edge = doorEdge(item, this.layout.width);
+    const tx = item.index % this.layout.width;
+    const ty = Math.floor(item.index / this.layout.width);
+    const axis = doorAxisOf(item.rotation);
     const span = doorSpan(item);
     const leaf = this.doorLeaves.get(item.index);
     const sheet = this.artSheet({ materialId: item.piece, color: null }, 'door', this.redrawDecor);
+    const name = decorObjectName(item.index);
+    const { frame, depthYs } = this.doorLook(item, leaf?.rotation ?? item.rotation);
     if (sheet !== null) {
-      const placement = doorPlacement(edge, span);
-      const { frame, depthYs } = this.doorLook(item, leaf?.rotation ?? item.rotation, edge);
-      const slices = doorSlices(edge, item.piece);
-      const name = decorObjectName(item.index);
-      const crop = (image: Phaser.GameObjects.Image, { x, y, width, height }: { x: number; y: number; width: number; height: number }) => image.setCrop(x, y, width, height);
-      // The jambs are the same in every frame of the swing, so they keep the one they were drawn with.
+      const placement = doorPlacement(axis, tx, ty, span);
+      if (axis === 'horizontal') return [putArtSprite(this, sheet.key, { ...placement, frame }, worldAssetDepth(depthYs[0]!)).setName(name)];
+      // Every crop shows the same frame; the swing switches their frame and depth together (`animateDoors`).
+      return doorSlices(ty, item.piece, 0).map(({ crop: { x, y, width, height } }, i) =>
+        putArtSprite(this, sheet.key, { ...placement, frame }, worldAssetDepth(depthYs[i]!)).setName(name).setCrop(x, y, width, height),
+      );
+    }
+    if (axis === 'vertical') {
       return [
-        ...slices.leaves.map((rect, i) => crop(putArtSprite(this, sheet.key, { ...placement, frame }, worldAssetDepth(depthYs[i])).setName(name), rect)),
-        ...slices.jambs.map(({ crop: rect, depthY: jambDepthY }) => crop(putArtSprite(this, sheet.key, { ...placement, frame }, worldAssetDepth(jambDepthY)).setName(`${name}:jamb`), rect)),
+        this.add
+          .rectangle((tx + 0.5) * TILE, (ty + span / 2) * TILE, DOOR_PLACEHOLDER_THICKNESS, span * TILE, ART_FALLBACK_COLOR, ART_FALLBACK_ALPHA)
+          .setDepth(worldAssetDepth((ty + span) * TILE))
+          .setName(name),
       ];
     }
-    const horizontal = edge.axis === 'horizontal';
-    const x = horizontal ? (edge.col + span / 2) * TILE : edge.col * TILE;
-    const y = horizontal ? edge.row * TILE : (edge.row + span / 2) * TILE;
+    // The wall's top is the frame's top (`doorPlacement`): a door takes its bottom two tiles, a window its glass.
+    const front = isWindowPiece(item.piece) ? WINDOW_FRONT : DOOR_FRONT;
+    const width = DOOR.variants[doorVariantOf(item.piece)].frontWidth;
+    const frameTop = doorPlacement(axis, tx, ty, span).y;
+    const top = frameTop + front.top;
+    const bottom = frameTop + front.bottom;
     return [
       this.add
-        .rectangle(x, y, horizontal ? span * TILE : DOOR_PLACEHOLDER_THICKNESS, horizontal ? DOOR_PLACEHOLDER_THICKNESS : span * TILE, ART_FALLBACK_COLOR, ART_FALLBACK_ALPHA)
-        // The bottom of the wall body it replaces: half a wall below the edge's middle either way.
-        .setDepth(worldAssetDepth(y + WALL.thickness / 2))
-        .setName(decorObjectName(item.index)),
+        .rectangle((tx + span / 2) * TILE, (top + bottom) / 2, width, bottom - top, ART_FALLBACK_COLOR, ART_FALLBACK_ALPHA)
+        .setDepth(worldAssetDepth(depthYs[0]!))
+        .setName(name),
     ];
   }
 
   /**
-   * The frame a door shows and the depth each leaf sorts by: its swing so
-   * far, turned away from the avatar that opened it (S14), and the lowest
-   * pixel of each leaf in that frame (`doorLeafDepthYs`), so an avatar below
-   * a swung leaf walks in front of it.
+   * The frame a door shows and the depth each of its images sorts by: its
+   * swing so far, turned away from the avatar that opened it (S14). In a
+   * horizontal run the one image sorts half a pixel under the bottom of the
+   * wall it stands in, over the wall's own tiles; in a vertical run one depth
+   * per crop (`doorSlices`), each leaf's by its lowest pixel in that frame, so
+   * an avatar below a swung leaf walks in front of it. A window never swings.
    */
-  private doorLook(item: Pick<DecorItem, 'index' | 'piece'>, rotation: DecorItem['rotation'], edge: GridEdge): { frame: number; depthYs: number[] } {
+  private doorLook(item: Pick<DecorItem, 'index' | 'piece'>, rotation: DecorItem['rotation']): { frame: number; depthYs: number[] } {
+    const ty = Math.floor(item.index / this.layout.width);
     const motion = this.doorMotion.get(item.index);
     const step = motion === undefined ? 0 : doorStepOf(motion.progress);
     const turned = doorSwingRotation(rotation, motion?.swing ?? 'inside');
     // The hinge stays where the door was turned to, whichever side it swings to.
     const hinge = doorHingeOf(item.piece, rotation);
-    return { frame: doorFrameIndex(turned, hinge, step), depthYs: doorLeafDepthYs(edge, item.piece, turned, hinge, step) };
+    const depthYs = doorAxisOf(rotation) === 'horizontal' ? [(ty + 2) * TILE + 0.5] : doorSlices(ty, item.piece, step).map(({ depthY }) => depthY);
+    return { frame: doorFrameIndex(turned, hinge, step), depthYs };
   }
 
   /**
@@ -1936,10 +1953,10 @@ export class OfficeScene extends Phaser.Scene {
     for (const [index, images] of this.doorImages) {
       const leaf = this.doorLeaves.get(index);
       if (leaf === undefined) continue;
-      const { frame, depthYs } = this.doorLook(leaf, leaf.rotation, leaf.edge);
+      const { frame, depthYs } = this.doorLook(leaf, leaf.rotation);
       images.forEach((image, i) => {
         if (image.frame.name !== String(frame)) image.setFrame(frame);
-        const depth = worldAssetDepth(depthYs[i]);
+        const depth = worldAssetDepth(depthYs[i] ?? depthYs[0]!);
         if (image.depth !== depth) image.setDepth(depth);
       });
     }
@@ -2297,7 +2314,7 @@ export class OfficeScene extends Phaser.Scene {
 
   /** What the doors change in the walls: the edges they open and their hinge stops. */
   private doorWalls(): string {
-    return JSON.stringify([doorOpenings(this.officeDecor, this.layout.width), doorHingeStops(this.officeDecor, this.terrain)]);
+    return JSON.stringify([doorOpenings(this.officeDecor, this.terrain), doorHingeStops(this.officeDecor, this.terrain)]);
   }
 
   /**
@@ -2306,7 +2323,7 @@ export class OfficeScene extends Phaser.Scene {
    * The decor editor's pending edits never collide, so they open nothing.
    */
   private terrainOf(blocks: readonly LayoutMaterial[], walls: readonly (string | null)[]): TerrainSnapshot {
-    return terrainSnapshot(this.layout, blocks, walls, doorOpenings(this.officeDecor, this.layout.width), this.terrainWallOrder);
+    return terrainSnapshot(this.layout, blocks, walls, doorOpenings(this.officeDecor, { width: this.layout.width, height: this.layout.height, walls }), this.terrainWallOrder);
   }
 
   /**
@@ -2318,7 +2335,7 @@ export class OfficeScene extends Phaser.Scene {
     const walls = this.wallPreview === null ? this.terrainWalls : withWalls(this.terrainWalls, this.wallPreview);
     // The pending paints are the latest posts, as they will be once saved.
     const wallOrder = this.wallPreview === null ? this.terrainWallOrder : withWallOrder(this.terrainWallOrder, this.terrainWalls, this.wallPreview);
-    const openings = doorOpenings(this.officeDecor, this.layout.width);
+    const openings = doorOpenings(this.officeDecor, { width: this.layout.width, height: this.layout.height, walls });
     this.wallObjects = placeWalls(this, { width: this.layout.width, height: this.layout.height, walls, openings, wallOrder }, this.art);
   }
 

@@ -11,7 +11,7 @@ Guide PNGs for drawing a piece that passes the upload checks. There is one templ
 | `floor.png` | floor `sheet` | 96x96 | 32x32 | 3 x 3 |
 | `plant.png` | plant `sheet` | 32x48 | 32x48 | 1 x 1 |
 | `table.png` | room table `sheet` | 512x256 | 256x256 | 2 x 1 |
-| `door.png` | door `sheet` | 512x1024 | 128x128 | 4 x 8 |
+| `door.png` | door `sheet` | 640x2048 | 160x256 | 4 x 8 |
 
 ## How to use a template
 
@@ -43,7 +43,7 @@ The labels follow the contract's order. Draw each frame in the cell that has its
 - **Floor**: frame `row * 3 + col` is a 32x32 tile of one 96x96 motif. The whole sheet must tile seamlessly and be fully opaque.
 - **Plant**: one frame.
 - **Room table**: two columns, `HORIZONTAL` and `VERTICAL`. The dashed line is the largest table (7x5 tiles, or 5x7 standing vertical); a smaller table keeps the same anchor and states its own footprint in tiles when it is contributed. The top stays above the anchor row.
-- **Door**: one column per rotation (`0` opens down, `90` right, `180` up, `270` left) and four rows per hinge (`START`, then `END`), from `STEP 0` closed to `STEP 3` open. The anchor is the middle of the span on the wall line; draw a single door in the middle of the frame. Only single doors can be contributed.
+- **Door**: one column per rotation (`0` opens down, `90` right, `180` up, `270` left) and four rows per hinge (`START`, then `END`), from `STEP 0` closed to `STEP 3` open. The anchor is the middle of the span; draw a single door in the middle of the frame. Columns `90` and `270` (vertical wall runs) span a tile fewer along the run (one tile for a single door) and stand like the walls, height straight up: the frame's box two tiles over the span's top, its post down to the floor, the leaves swinging out beside the column, the column shaded by the ceiling; columns `0` and `180` (horizontal wall runs) are seen from the front, filling the bottom two tiles of the wall, whose top is 64px down the frame. Sheets drawn for the old 128x128 frames (512x1024) are refused. Only single doors can be contributed.
 
 ## Rules the template cannot show
 

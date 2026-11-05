@@ -126,25 +126,34 @@ describe('pgTerrain', () => {
   it('loads every stored wall by tile, skipping a row it cannot read', async () => {
     const pool = fakePool([
       { tile_index: 3, piece_id: 'wall-brick' },
-      { tile_index: 40, piece_id: 'wall-glass' },
+      { tile_index: 40, piece_id: 'wall-plaster' },
       { tile_index: 'x', piece_id: 'wall-stone' },
       { tile_index: 7, piece_id: 'hedge-boxwood' },
     ]);
 
     const walls = await createPgTerrain(pool).loadWalls();
 
-    expect(new Map(walls)).toEqual(new Map([[3, 'wall-brick'], [40, 'wall-glass']]));
+    expect(new Map(walls)).toEqual(new Map([[3, 'wall-brick'], [40, 'wall-plaster']]));
     expect(squash(pool.queries[0]!.text)).toBe('select tile_index, piece_id from terrain_walls order by updated_at, tile_index');
+  });
+
+  it('skips a stored glass wall: that material no longer exists (S17)', async () => {
+    const pool = fakePool([
+      { tile_index: 40, piece_id: 'wall-glass' },
+      { tile_index: 3, piece_id: 'wall-brick' },
+    ]);
+
+    expect([...(await createPgTerrain(pool).loadWalls())]).toEqual([[3, 'wall-brick']]);
   });
 
   it('loads the walls in placement order: the order the query returns them, oldest first (#223)', async () => {
     const pool = fakePool([
-      { tile_index: 40, piece_id: 'wall-glass' },
+      { tile_index: 40, piece_id: 'wall-plaster' },
       { tile_index: 3, piece_id: 'wall-brick' },
       { tile_index: 9, piece_id: 'wall-stone' },
     ]);
 
-    expect([...(await createPgTerrain(pool).loadWalls())]).toEqual([[40, 'wall-glass'], [3, 'wall-brick'], [9, 'wall-stone']]);
+    expect([...(await createPgTerrain(pool).loadWalls())]).toEqual([[40, 'wall-plaster'], [3, 'wall-brick'], [9, 'wall-stone']]);
   });
 
   it('places and removes a whole wall batch in one atomic statement', async () => {
@@ -263,7 +272,7 @@ describe('pgTerrain', () => {
     const pool = fakePool();
 
     await createPgTerrain(pool).saveWallsAndDecor(
-      [{ index: 3, piece: null }, { index: 7, piece: 'wall-glass' }],
+      [{ index: 3, piece: null }, { index: 7, piece: 'wall-plaster' }],
       [{ index: 4, item: null }, { index: 8, item: { piece: 'desk-painted', rotation: 90, color: '#c83c3c' } }, { index: 8, item: { piece: 'plant-bonsai', rotation: 0 } }, { index: 9, item: null, layer: 'top' }],
       'user-1',
     );
@@ -277,7 +286,7 @@ describe('pgTerrain', () => {
     expect(sql).toContain('insert into office_decor (tile_index, layer, piece_id, rotation, color, updated_by) select index, layer, piece, rotation, color, $3::uuid from decor_entries where piece is not null');
     expect(sql).toContain('on conflict (tile_index, layer) do update set piece_id = excluded.piece_id');
     expect(pool.queries[0]!.values).toEqual([
-      JSON.stringify([{ index: 3, piece: null }, { index: 7, piece: 'wall-glass' }]),
+      JSON.stringify([{ index: 3, piece: null }, { index: 7, piece: 'wall-plaster' }]),
       JSON.stringify([
         { index: 4, layer: 'floor', piece: null, rotation: null, color: null },
         { index: 8, layer: 'floor', piece: 'desk-painted', rotation: 90, color: '#c83c3c' },

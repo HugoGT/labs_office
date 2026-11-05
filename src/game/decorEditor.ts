@@ -30,8 +30,8 @@ import {
   type DecorRotation,
   type DecorTileRect,
 } from './officeDecor';
-import { doorOnWall, wallTilesAfter } from './officeDoors';
-import type { GridEdge } from './artContract';
+import { doorOnWall, doorOwnWallTiles, doorsReplacedBy, wallTilesAfter } from './officeDoors';
+import type { WallOpening } from './officeLayout';
 import { tileAreaRect, type TileRect } from './terrainGrid';
 
 /**
@@ -147,8 +147,8 @@ export interface DecorGround {
   readonly walkable: readonly boolean[];
   readonly wallTiles: readonly boolean[];
   readonly walls?: readonly (string | null)[];
-  /** The edges the live doors open (`TerrainSnapshot.openings`), none when absent. */
-  readonly openings?: readonly GridEdge[];
+  /** The openings the live doors make (`TerrainSnapshot.openings`), none when absent. */
+  readonly openings?: readonly WallOpening[];
 }
 
 /** The side of a desk, in tiles: what the desk scope may decorate. */
@@ -182,11 +182,11 @@ export function decorBrushTarget(index: number, brush: DecorBrush, width: number
  * (`deskOverChairLimit`); a desk table is never refused for another one on
  * the desk, which it replaces.
  *
- * A door (#223, #233) is the room's door rule: its span between two wall
- * posts of any material, one at each end (`doorOnWall`), the tiles on both
- * sides of it on walkable ground and free of other items. The tiles a wall
- * touches do not count for it (its own posts touch them), and it never goes
- * in a desk.
+ * A door or window (#223, #233, tile walls) is the room's door rule: it
+ * stands in a wall run between two walls (`doorOnWall`), its footprint on
+ * walkable ground and free of other items, the doors and windows it replaces
+ * (`doorsReplacedBy`, S6) aside. Its own wall does not count among the walls
+ * it must keep off (`doorOwnWallTiles`), and it never goes in a desk.
  *
  * A top piece (#121) is the room's top rule (`findDecorConflict`): its whole
  * footprint on the desk tables and room tables the click leaves, off every
@@ -209,17 +209,25 @@ export function decorPlacementAllowed(
   const layer = decorLayerOf(brush.piece);
   const onLayer = items.filter((item) => decorLayerOf(item.piece) === layer);
   const ignored = brush.from ?? index;
-  const taken = new Set(onLayer.filter((item) => item.index !== ignored).flatMap((item) => decorTiles(item, infoOf(item.piece), ground.width)));
+  // The doors and windows a door brush replaces leave with the click (S6): their tiles are free for it.
+  const replaced = new Set(door ? doorsReplacedBy(onLayer, [{ index, rotation: brush.rotation, piece: brush.piece }], ground.width) : []);
+  const taken = new Set(
+    onLayer.filter((item) => item.index !== ignored && !replaced.has(item.index)).flatMap((item) => decorTiles(item, infoOf(item.piece), ground.width)),
+  );
   if (brush.from !== undefined && index !== brush.from && onLayer.some((item) => item.index === index)) return false;
   const placed: DecorEdit = { index, item: { piece: brush.piece, rotation: brush.rotation } };
   const leaving: DecorEdit = layer === 'top' ? { index: brush.from ?? index, item: null, layer } : { index: brush.from ?? index, item: null };
-  const after = withDecor(items, brush.from === undefined || brush.from === index ? [placed] : [leaving, placed]);
+  const after = withDecor(items, [
+    ...(brush.from === undefined || brush.from === index ? [placed] : [leaving, placed]),
+    ...[...replaced].map((anchor): DecorEdit => ({ index: anchor, item: null })),
+  ]);
   if (layer === 'top') return topItemSupported({ index, rotation: brush.rotation, piece: brush.piece }, after, infoOf, ground.width) && rectTiles(target, ground.width).every((tile) => !taken.has(tile));
   const floorOf = (layerItems: readonly DecorItem[]): DecorItem[] => layerItems.filter((item) => decorLayerOf(item.piece) === 'floor');
   if (desks.length > 0 && deskOverChairLimit(floorOf(items), floorOf(after), [index], infoOf, desks, ground.width) !== null) return false;
   // A door this brush replaces or moves closes its wall again (`wallTilesAfter`, the room's rule too).
-  const wallTiles = door ? ground.wallTiles : wallTilesAfter(ground, after);
-  return rectTiles(target, ground.width).every((tile) => ground.walkable[tile] === true && (door || wallTiles[tile] !== true) && !taken.has(tile));
+  const wallTiles = wallTilesAfter(ground, after);
+  const own = door ? doorOwnWallTiles({ index, rotation: brush.rotation, piece: brush.piece }, ground.width) : new Set<number>();
+  return rectTiles(target, ground.width).every((tile) => ground.walkable[tile] === true && (own.has(tile) || wallTiles[tile] !== true) && !taken.has(tile));
 }
 
 /**

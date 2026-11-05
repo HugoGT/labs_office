@@ -24,7 +24,7 @@ import {
   DOOR,
   SOFA,
   facingColumn,
-  wallFrameIndex,
+  WALL_FRAMES,
   type ArtChairPiece,
   type ArtDeskPiece,
   type ArtDoorPiece,
@@ -197,7 +197,7 @@ export function previewFrame(option: MaterialOption): PreviewFrame {
   }
   if (option.kind === 'wall') {
     const { frame } = ART_IMAGE_SPECS.wall;
-    return { x: frame.width * wallFrameIndex({ piece: 'joint', mask: 2 | 8 }), y: 0, width: frame.width, height: frame.height };
+    return { x: frame.width * WALL_FRAMES.face, y: 0, width: frame.width, height: frame.height };
   }
   if (option.kind === 'floor') {
     const { frame, columns, rows } = ART_IMAGE_SPECS.floor;
