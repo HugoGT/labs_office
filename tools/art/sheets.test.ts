@@ -10,7 +10,6 @@ import {
   DOOR,
   DOOR_HINGES,
   DOOR_STEPS,
-  DOOR_VARIANTS,
   FLOOR,
   FLOOR_MOTIF_SIZE,
   HEDGE,
@@ -63,7 +62,7 @@ import { WALK_FRAME_COUNT } from '../../src/art/walkCycle.ts';
 import { wallColumn, wallFrame } from './domain/wallColumns.ts';
 import { WALL_MATERIALS } from './domain/wallMap.ts';
 import { crop } from './imageOps.ts';
-import { DOOR_MATERIALS, doorSprite } from './domain/doors.ts';
+import { DOOR_PIECES, doorSprite } from './domain/doors.ts';
 import { bridgeSprite, hedgeSprite, PLANT_KINDS, plantSprite, TREE_KINDS, treeSprite } from './domain/props.ts';
 import { ROOM_TABLES, roomTableSprite } from './domain/tables.ts';
 import { decalTile, TERRAIN_EDGES, terrainBankTile, terrainEdgeTile, terrainVoidCapTile, terrainVoidEdgeTile } from './domain/terrainTiles.ts';
@@ -87,6 +86,15 @@ import {
 
 function pixels(image: PixelBuffer): number[] {
   return Array.from(image.data);
+}
+
+/**
+ * Bytes first: a deep compare per frame is what outran the 5 s timeout on a slow runner (#314).
+ * Only a mismatch pays for the deep compare, so a failure still shows the pixels that differ.
+ */
+function expectSamePixels(actual: PixelBuffer, expected: PixelBuffer, label: string): void {
+  const bytes = ({ data }: PixelBuffer): Buffer => Buffer.from(data.buffer, data.byteOffset, data.byteLength);
+  if (!bytes(actual).equals(bytes(expected))) expect(pixels(actual), label).toEqual(pixels(expected));
 }
 
 describe('generators and contract', () => {
@@ -303,26 +311,24 @@ describe('terrain tileset sheet', () => {
           for (const mask of [1, 6, 9, 15]) {
             const drawn = tile(terrainTileIndex(material, mask, phase, variant));
             // Built floors only fill variant 0: their square edges have no other shape.
-            if (organic || variant === 0) expect(pixels(drawn), `${label} mask ${mask}`).toEqual(pixels(terrainEdgeTile(material, mask, phase, variant)));
+            if (organic || variant === 0) expectSamePixels(drawn, terrainEdgeTile(material, mask, phase, variant), `${label} mask ${mask}`);
             else expect(drawn.countOpaque(), `${label} mask ${mask}`).toBe(0);
           }
         }
       }
     }
-    for (const decal of TERRAIN_DECALS) expect(pixels(tile(terrainDecalIndex(decal))), decal).toEqual(pixels(decalTile(decal)));
+    for (const decal of TERRAIN_DECALS) expectSamePixels(tile(terrainDecalIndex(decal)), decalTile(decal), decal);
     for (let column = TERRAIN_DECALS.length; column < TERRAIN_TILESET.columns; column += 1) {
       expect(tile(terrainDecalIndex(TERRAIN_DECALS[0]!) + column).countOpaque()).toBe(0);
     }
     expect(tile(terrainBankIndex(1) - 1).countOpaque(), 'bank mask 0').toBe(0);
-    for (let mask = 1; mask < TERRAIN_MASKS; mask += 1) expect(pixels(tile(terrainBankIndex(mask))), `bank ${mask}`).toEqual(pixels(terrainBankTile(mask)));
+    for (let mask = 1; mask < TERRAIN_MASKS; mask += 1) expectSamePixels(tile(terrainBankIndex(mask)), terrainBankTile(mask), `bank ${mask}`);
     expect(tile(terrainVoidCapIndex(1) - 1).countOpaque(), 'void cap mask 0').toBe(0);
-    for (let mask = 1; mask < TERRAIN_MASKS; mask += 1) expect(pixels(tile(terrainVoidCapIndex(mask))), `void cap ${mask}`).toEqual(pixels(terrainVoidCapTile(mask)));
+    for (let mask = 1; mask < TERRAIN_MASKS; mask += 1) expectSamePixels(tile(terrainVoidCapIndex(mask)), terrainVoidCapTile(mask), `void cap ${mask}`);
     for (const material of TERRAIN_ORGANIC_MATERIALS) {
       for (const phase of [0, 4, 8]) {
         for (const { mask, voidMask } of TERRAIN_VOID_EDGE_COMBOS) {
-          expect(pixels(tile(terrainVoidEdgeIndex(material, mask, voidMask, phase))), `${material} ${mask}/${voidMask} ${phase}`).toEqual(
-            pixels(terrainVoidEdgeTile(material, mask, voidMask, phase)),
-          );
+          expectSamePixels(tile(terrainVoidEdgeIndex(material, mask, voidMask, phase)), terrainVoidEdgeTile(material, mask, voidMask, phase), `${material} ${mask}/${voidMask} ${phase}`);
         }
       }
     }
@@ -460,18 +466,16 @@ describe('prop sheets', () => {
 
 describe('door sheets (#223, #233)', () => {
   it('validates against the contract and holds each rotation, hinge and swing step at its frame index, for both variants', () => {
-    for (const material of DOOR_MATERIALS) {
-      for (const variant of DOOR_VARIANTS) {
-        const sheet = doorSheet(material, variant);
-        expect([sheet.width, sheet.height], `${material} ${variant}`).toEqual([640, 2048]);
-        expect(validateArtImage('door', sheet), `${material} ${variant}`).toEqual([]);
-        for (const rotation of [0, 90, 180, 270] as const) {
-          for (const hinge of DOOR_HINGES) {
-            for (let open = 0; open < DOOR_STEPS; open += 1) {
-              const frame = tileOf(sheet, doorFrameIndex(rotation, hinge, open), DOOR.columns, DOOR.frame.width, DOOR.frame.height);
-              // Byte equality: a deep compare of 160x256 frames, 96 of them, outruns the test's timeout.
-              expect(Buffer.from(frame.data).equals(Buffer.from(doorSprite(material, variant, rotation, hinge, open).data)), `${variant} ${rotation} ${hinge} ${open}`).toBe(true);
-            }
+    // Only the pieces the pack ships: the other material and variant pairs never reach a sheet (#314).
+    for (const { material, variant } of DOOR_PIECES) {
+      const sheet = doorSheet(material, variant);
+      expect([sheet.width, sheet.height], `${material} ${variant}`).toEqual([640, 2048]);
+      expect(validateArtImage('door', sheet), `${material} ${variant}`).toEqual([]);
+      for (const rotation of [0, 90, 180, 270] as const) {
+        for (const hinge of DOOR_HINGES) {
+          for (let open = 0; open < DOOR_STEPS; open += 1) {
+            const frame = tileOf(sheet, doorFrameIndex(rotation, hinge, open), DOOR.columns, DOOR.frame.width, DOOR.frame.height);
+            expectSamePixels(frame, doorSprite(material, variant, rotation, hinge, open), `${material} ${variant} ${rotation} ${hinge} ${open}`);
           }
         }
       }
