@@ -284,7 +284,6 @@ export function BottomBar({
             sections={micSections}
             disabled={audioDisabled}
             disabledTitle={audioTitle}
-            align="start"
           />
         </span>
         <span className={styles.split}>

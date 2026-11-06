@@ -268,6 +268,36 @@ describe('HUD layout: microphone device caret (#284)', () => {
       cleanup();
     }
   });
+
+  it('opens leftwards from its caret, the same side as the camera menu (#306)', async () => {
+    await page.viewport(WIDE, 800);
+    renderBar();
+    const caret = screen.getByRole('button', { name: 'Opciones de micrófono' });
+
+    await userEvent.click(caret);
+
+    const menu = box(screen.getByRole('menu', { name: 'Opciones de micrófono' }));
+    expect(menu.right).toBeCloseTo(box(caret).right, 0);
+    expect(menu.left).toBeLessThan(box(caret).left);
+  });
+
+  it('gives way just enough to stay on screen when long names would cut it on the left (#306)', async () => {
+    const longName = 'Predeterminado - Micrófono de matriz digital (Realtek(R) High Definition Audio)';
+    for (const width of [360, 390, 480]) {
+      await page.viewport(width, 800);
+      renderBar({
+        devices: { audioinput: [{ deviceId: 'default', label: longName }], audiooutput: [], videoinput: [] },
+        selectedDevices: { audioinput: 'default', audiooutput: null, videoinput: null },
+      });
+
+      await userEvent.click(screen.getByRole('button', { name: 'Opciones de micrófono' }));
+
+      const menu = box(screen.getByRole('menu', { name: 'Opciones de micrófono' }));
+      expect(menu.left).toBeCloseTo(16, 0);
+      expect(menu.right).toBeLessThanOrEqual(width);
+      cleanup();
+    }
+  });
 });
 
 describe('HUD layout: sidebar toggle (#90)', () => {
