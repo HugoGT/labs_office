@@ -422,6 +422,7 @@ export function OfficeShell({
     audioBlocked,
     audioReconnecting,
     connectionQuality,
+    audioLost,
     speakers,
     toggleMic,
     toggleCam,
@@ -937,6 +938,7 @@ export function OfficeShell({
         audioAvailable={audioAvailable}
         audioReconnecting={audioReconnecting}
         connectionQuality={connectionQuality}
+        audioLost={audioLost}
         recording={recording}
         room={place === null ? null : placeLabel(place)}
         presence={presence}

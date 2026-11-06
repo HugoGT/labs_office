@@ -18,8 +18,11 @@ import { createOfficeBridge } from '../game/officeBridge';
 // Same cast as `livekitRoom.browser.test.ts`: the `vitest/browser` type
 // re-export does not resolve with a single provider installed, the runtime
 // value does exist.
-const { page } = vitestBrowser as unknown as {
+const { page, userEvent: realInput } = vitestBrowser as unknown as {
   page: { viewport(width: number, height: number): Promise<void> };
+  // Real CDP input: `:focus-visible` only reacts to what the browser itself
+  // sees, never to the DOM events Testing Library dispatches.
+  userEvent: { click(element: Element): Promise<void>; keyboard(text: string): Promise<void> };
 };
 
 /**
@@ -267,6 +270,108 @@ describe('HUD layout: microphone device caret (#284)', () => {
       for (const item of screen.getAllByRole('menuitemradio')) expect(hitAtCenter(item)).toBe(item);
       cleanup();
     }
+  });
+
+  it('opens leftwards from its caret, the same side as the camera menu (#306)', async () => {
+    await page.viewport(WIDE, 800);
+    renderBar();
+    const caret = screen.getByRole('button', { name: 'Opciones de micrófono' });
+
+    await userEvent.click(caret);
+
+    const menu = box(screen.getByRole('menu', { name: 'Opciones de micrófono' }));
+    expect(menu.right).toBeCloseTo(box(caret).right, 0);
+    expect(menu.left).toBeLessThan(box(caret).left);
+  });
+
+  it('gives way just enough to stay on screen when long names would cut it on the left (#306)', async () => {
+    const longName = 'Predeterminado - Micrófono de matriz digital (Realtek(R) High Definition Audio)';
+    for (const width of [360, 390, 480]) {
+      await page.viewport(width, 800);
+      renderBar({
+        devices: { audioinput: [{ deviceId: 'default', label: longName }], audiooutput: [], videoinput: [] },
+        selectedDevices: { audioinput: 'default', audiooutput: null, videoinput: null },
+      });
+
+      await userEvent.click(screen.getByRole('button', { name: 'Opciones de micrófono' }));
+
+      const menu = box(screen.getByRole('menu', { name: 'Opciones de micrófono' }));
+      expect(menu.left).toBeCloseTo(16, 0);
+      expect(menu.right).toBeLessThanOrEqual(width);
+      cleanup();
+    }
+  });
+});
+
+describe('HUD layout: focus ring of the call buttons (#305)', () => {
+  it('reproduces the ring: a key press after a click turns the click focus into keyboard focus', async () => {
+    await page.viewport(WIDE, 800);
+    renderBar();
+    const mic = screen.getByRole('button', { name: /Mic/ });
+
+    await realInput.click(mic);
+    expect(document.activeElement).toBe(mic);
+    expect(mic.matches(':focus-visible')).toBe(false);
+
+    // Any key but a movement one: the bar has no reason to step in.
+    await realInput.keyboard('{Shift}');
+
+    expect(mic.matches(':focus-visible')).toBe(true);
+  });
+
+  it.each(['w', 'a', 's', 'd', '{ArrowUp}', '{ArrowDown}', '{ArrowLeft}', '{ArrowRight}'])(
+    'moving with %s drops the ring from the button just clicked',
+    async (key) => {
+      await page.viewport(WIDE, 800);
+      renderBar();
+      const camera = screen.getByRole('button', { name: /Cámara/ });
+
+      await realInput.click(camera);
+      await realInput.keyboard(key);
+
+      expect(document.activeElement).not.toBe(camera);
+      expect(camera.matches(':focus-visible')).toBe(false);
+    },
+  );
+
+  it('the game still gets the whole key press: Phaser listens on window, past the released button', async () => {
+    await page.viewport(WIDE, 800);
+    renderBar();
+    const seen: string[] = [];
+    const record = (event: KeyboardEvent) => seen.push(`${event.type}:${event.key}`);
+    window.addEventListener('keydown', record);
+    window.addEventListener('keyup', record);
+
+    await realInput.click(screen.getByRole('button', { name: /Mic/ }));
+    await realInput.keyboard('w');
+
+    window.removeEventListener('keydown', record);
+    window.removeEventListener('keyup', record);
+    expect(seen).toEqual(['keydown:w', 'keyup:w']);
+  });
+
+  it('Tab still carries the ring to the next control, so keyboard navigation keeps its indicator', async () => {
+    await page.viewport(WIDE, 800);
+    renderBar();
+    const mic = screen.getByRole('button', { name: /Mic/ });
+
+    await realInput.click(mic);
+    await realInput.keyboard('{Tab}');
+
+    const caret = screen.getByRole('button', { name: 'Opciones de micrófono' });
+    expect(document.activeElement).toBe(caret);
+    expect(caret.matches(':focus-visible')).toBe(true);
+  });
+
+  it('moving after Tab drops the ring too', async () => {
+    await page.viewport(WIDE, 800);
+    renderBar();
+    await realInput.click(screen.getByRole('button', { name: /Mic/ }));
+    await realInput.keyboard('{Tab}');
+
+    await realInput.keyboard('d');
+
+    expect(document.activeElement).toBe(document.body);
   });
 });
 

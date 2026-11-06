@@ -1,5 +1,8 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
 import styles from './MediaMenu.module.css';
+
+/** The HUD's side gutter: as close to the screen edge as a menu gets. */
+const SCREEN_GUTTER = 16;
 
 export interface MediaMenuOption {
   value: string;
@@ -25,8 +28,6 @@ export interface MediaMenuProps {
   /** Same as the button next to it: no LiveKit, or "No molestar". */
   disabled: boolean;
   disabledTitle?: string;
-  /** Which edge of the caret the menu lines up with; `end` opens it leftwards. */
-  align?: 'start' | 'end';
 }
 
 /**
@@ -35,11 +36,22 @@ export interface MediaMenuProps {
  * section's `onSelect`. Closes on a pick, Escape (focus back to the caret)
  * and a click outside (focus stays where it went).
  */
-export function MediaMenu({ label, sections, disabled, disabledTitle, align = 'end' }: MediaMenuProps) {
+export function MediaMenu({ label, sections, disabled, disabledTitle }: MediaMenuProps) {
   const [open, setOpen] = useState(false);
   const caretRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const menuId = useId();
+
+  // Every menu opens leftwards from its caret (#306). A caret near the left
+  // edge of a narrow screen cannot fit long device names that way, so the menu
+  // gives way by just what is missing, before it paints.
+  useLayoutEffect(() => {
+    const menu = menuRef.current;
+    if (!open || !menu) return;
+    menu.style.translate = '';
+    const missing = SCREEN_GUTTER - menu.getBoundingClientRect().left;
+    if (missing > 0) menu.style.translate = `${missing}px`;
+  }, [open, sections]);
 
   useEffect(() => {
     if (!open) return;
@@ -110,7 +122,7 @@ export function MediaMenu({ label, sections, disabled, disabledTitle, align = 'e
         <div
           ref={menuRef}
           id={menuId}
-          className={`${styles.menu} ${align === 'start' ? styles.alignStart : ''}`}
+          className={styles.menu}
           role="menu"
           aria-label={label}
           onKeyDown={moveFocus}
