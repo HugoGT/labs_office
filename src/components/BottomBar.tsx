@@ -1,3 +1,4 @@
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import type { CameraFilter } from '../game/cameraFilter';
 import type { ConnectionQualityLevel } from '../game/livekitRoom';
 import { NO_DEVICES, type DeviceKind, type DeviceLists } from '../game/mediaDevices';
@@ -173,6 +174,23 @@ const PRESENCE_TITLE = {
   denied: 'La oficina rechazó tu acceso: vuelve a iniciar sesión',
 } as const;
 
+/** The keys `OfficeScene` walks with; a capital W is still a W. */
+const MOVEMENT_KEYS = new Set(['w', 'a', 's', 'd', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']);
+
+/**
+ * Whoever walks is no longer using the bar, so its button lets the focus go
+ * (#305): a key press after a click makes the browser treat that focus as
+ * keyboard focus and draw the ring. Tab never gets here, so real keyboard
+ * navigation keeps its indicator. Only the focus goes: nothing fires or changes.
+ * An open menu keeps it, because there the arrows walk the options.
+ */
+function releaseFocusOnMove(event: ReactKeyboardEvent<HTMLDivElement>): void {
+  const key = event.key.length === 1 ? event.key.toLowerCase() : event.key;
+  if (!MOVEMENT_KEYS.has(key)) return;
+  const { target } = event;
+  if (target instanceof HTMLButtonElement && !target.closest('[role="menu"], [aria-expanded="true"]')) target.blur();
+}
+
 /**
  * Barra inferior: mic/camara/grabar + estado de audio, portada de `#bar`
  * (`index.html`, `app.js:516-571`). Puramente presentacional (D3): no recibe
@@ -247,7 +265,7 @@ export function BottomBar({
     // Three sibling blocks placed by the CSS grid: one row on wide screens
     // (identity, controls and indicators side by side, #87), two on narrow
     // ones. The height never depends on how much the indicators say (#67).
-    <div className={styles.bar} ref={barRef}>
+    <div className={styles.bar} ref={barRef} onKeyDown={releaseFocusOnMove}>
       <div className={styles.me} role="group" aria-label="Identidad">
         <span className={styles.meDot} style={{ background: statusCssColor(status) }} />{' '}
         {playerName}

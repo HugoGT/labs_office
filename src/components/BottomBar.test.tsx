@@ -290,6 +290,91 @@ describe('BottomBar: degradacion cuando LiveKit no esta disponible', () => {
   });
 });
 
+describe('BottomBar: moving releases the focus of its buttons (#305)', () => {
+  it('only takes the focus: the button neither fires nor changes, and a later click still works', async () => {
+    const user = userEvent.setup();
+    const { onToggleMic } = renderBar();
+    const mic = screen.getByRole('button', { name: /Mic/ });
+    await user.click(mic);
+    expect(onToggleMic).toHaveBeenCalledTimes(1);
+
+    await user.keyboard('w');
+
+    expect(mic).not.toHaveFocus();
+    expect(onToggleMic).toHaveBeenCalledTimes(1);
+    expect(mic).toHaveAttribute('aria-pressed', 'true');
+    await user.click(mic);
+    expect(onToggleMic).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the focus on any key that does not move the avatar', async () => {
+    const user = userEvent.setup();
+    renderBar();
+    const mic = screen.getByRole('button', { name: /Mic/ });
+    await user.click(mic);
+
+    await user.keyboard('x');
+
+    expect(mic).toHaveFocus();
+  });
+
+  it('leaves the status select alone: its arrows change the status', async () => {
+    const user = userEvent.setup();
+    renderBar();
+    const select = screen.getByRole('combobox', { name: 'Mi estado' });
+    select.focus();
+
+    await user.keyboard('{ArrowDown}');
+
+    expect(select).toHaveFocus();
+  });
+
+  it('leaves an open menu alone: its arrows walk the options', async () => {
+    const user = userEvent.setup();
+    renderBar({
+      devices: {
+        audioinput: [
+          { deviceId: 'a', label: 'Uno' },
+          { deviceId: 'b', label: 'Dos' },
+        ],
+        audiooutput: [],
+        videoinput: [],
+      },
+      selectedDevices: { audioinput: 'a', audiooutput: null, videoinput: null },
+    });
+    await user.click(screen.getByRole('button', { name: 'Opciones de micrófono' }));
+
+    await user.keyboard('{ArrowDown}');
+
+    expect(screen.getByRole('menuitemradio', { name: 'Dos' })).toHaveFocus();
+  });
+
+  it('leaves a caret with its menu open alone: nothing inside took the focus yet', async () => {
+    const user = userEvent.setup();
+    renderBar();
+    const caret = screen.getByRole('button', { name: 'Opciones de micrófono' });
+    await user.click(caret);
+    expect(caret).toHaveAttribute('aria-expanded', 'true');
+
+    await user.keyboard('w');
+
+    expect(caret).toHaveFocus();
+  });
+
+  it('leaves buttons outside the bar alone', async () => {
+    const user = userEvent.setup();
+    renderBar();
+    const outside = document.createElement('button');
+    document.body.append(outside);
+    outside.focus();
+
+    await user.keyboard('w');
+
+    expect(outside).toHaveFocus();
+    outside.remove();
+  });
+});
+
 describe('BottomBar: audio reconnecting (#283)', () => {
   it('says the audio is coming back, so a short outage is not unexplained silence', () => {
     renderBar({ presence: { online: true, peers: 0, state: 'connected', canRetry: true }, audioReconnecting: true });
