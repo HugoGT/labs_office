@@ -48,6 +48,14 @@ async function fillCharacter(user: ReturnType<typeof userEvent.setup>): Promise<
   await user.upload(screen.getByLabelText(/Sentado/), png('seated.png'));
 }
 
+// The component reads each upload with FileReader after user.upload resolves,
+// so the button turns enabled a moment later; slow CI runners lose that race.
+async function sendWhenReady(user: ReturnType<typeof userEvent.setup>): Promise<void> {
+  const send = screen.getByRole('button', { name: 'Enviar a revisión' });
+  await waitFor(() => expect(send).toBeEnabled());
+  await user.click(send);
+}
+
 describe('ArtContributionSection (#122)', () => {
   it('offers every kind a user may contribute, with the rights statement word for word', async () => {
     render(<ArtContributionSection contributions={fakePort()} />);
@@ -102,10 +110,7 @@ describe('ArtContributionSection (#122)', () => {
     render(<ArtContributionSection contributions={port} />);
 
     await fillCharacter(user);
-    const send = screen.getByRole('button', { name: 'Enviar a revisión' });
-
-    expect(send).toBeEnabled();
-    await user.click(send);
+    await sendWhenReady(user);
 
     await waitFor(() => expect(port.submit).toHaveBeenCalledTimes(1));
     expect(port.submit).toHaveBeenCalledWith({
@@ -127,7 +132,7 @@ describe('ArtContributionSection (#122)', () => {
     await user.selectOptions(screen.getByLabelText('Tipo'), 'plant');
     await user.type(screen.getByLabelText('Nombre'), 'Helecho');
     await user.upload(screen.getByLabelText(/Hoja/), png('sheet.png'));
-    await user.click(screen.getByRole('button', { name: 'Enviar a revisión' }));
+    await sendWhenReady(user);
 
     await waitFor(() => expect(port.submit).toHaveBeenCalledWith({ kind: 'plant', name: 'Helecho', rightsAccepted: true, files: { sheet: PNG_BASE64 } }));
   });
@@ -146,7 +151,7 @@ describe('ArtContributionSection (#122)', () => {
     expect(screen.getByRole('option', { name: label })).toBeInTheDocument();
     await user.type(screen.getByLabelText('Nombre'), name);
     await user.upload(screen.getByLabelText(/Hoja/), png('sheet.png'));
-    await user.click(screen.getByRole('button', { name: 'Enviar a revisión' }));
+    await sendWhenReady(user);
 
     await waitFor(() => expect(port.submit).toHaveBeenCalledWith({ kind, name, rightsAccepted: true, files: { sheet: PNG_BASE64 } }));
   });
@@ -165,7 +170,7 @@ describe('ArtContributionSection (#122)', () => {
     await user.clear(screen.getByLabelText('Alto'));
     await user.type(screen.getByLabelText('Alto'), '3');
     await user.upload(screen.getByLabelText(/Hoja/), png('sheet.png'));
-    await user.click(screen.getByRole('button', { name: 'Enviar a revisión' }));
+    await sendWhenReady(user);
 
     await waitFor(() =>
       expect(port.submit).toHaveBeenCalledWith({
@@ -193,7 +198,7 @@ describe('ArtContributionSection (#122)', () => {
     render(<ArtContributionSection contributions={fakePort()} />);
 
     await fillCharacter(user);
-    expect(screen.getByRole('button', { name: 'Enviar a revisión' })).toBeEnabled();
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Enviar a revisión' })).toBeEnabled());
     await user.click(screen.getByRole('checkbox', { name: RIGHTS_STATEMENT }));
 
     expect(screen.getByRole('button', { name: 'Enviar a revisión' })).toBeDisabled();
@@ -220,7 +225,7 @@ describe('ArtContributionSection (#122)', () => {
     render(<ArtContributionSection contributions={fakePort([], { submit: vi.fn(async () => Promise.reject(new AdminError(code))) })} />);
 
     await fillCharacter(user);
-    await user.click(screen.getByRole('button', { name: 'Enviar a revisión' }));
+    await sendWhenReady(user);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(message);
   });
