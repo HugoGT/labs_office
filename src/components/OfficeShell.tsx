@@ -463,6 +463,11 @@ export function OfficeShell({
     bridge.emitCommand('speakers', { sessionIds: [...speakers] });
   }, [bridge, speakers]);
 
+  // The minimap is a Phaser camera, so it follows the share by command (#304).
+  useEffect(() => {
+    bridge.emitCommand('hideminimap', { hidden: screenShareOn });
+  }, [bridge, screenShareOn]);
+
   function handleChangeStatus(next: PresenceStatus): void {
     setStatus(next);
     bridge.emitCommand('setStatus', { status: next });
@@ -874,8 +879,9 @@ export function OfficeShell({
         deskHover.dismiss();
         callPeer(sessionId, name);
       }}
-      onCharacter={characterPort === null ? undefined : () => openSidebarSection('character')}
-      onDecorate={() => openSidebarSection('decor')}
+      // Both open a section of the sidebar, which sharing hides (#304).
+      onCharacter={characterPort === null || screenShareOn ? undefined : () => openSidebarSection('character')}
+      onDecorate={screenShareOn ? undefined : () => openSidebarSection('decor')}
       onLeave={() => {
         deskHover.dismiss();
         void leaveDesk(hoveredDesk.label);
@@ -887,6 +893,9 @@ export function OfficeShell({
 
   // `contents` keeps the fixed children placed and stacked as if unwrapped.
   const rightRailStyle = { display: hudHidden ? 'none' : 'contents' } as const;
+  // Sharing hides only the sidebar and the minimap (#304): not `hudHidden`, which also takes
+  // the zoom and exit controls and the desk banner, and means an editor holds the map.
+  const sidebarStyle = { display: hudHidden || screenShareOn ? 'none' : 'contents' } as const;
 
   return (
     <div id="office-shell">
@@ -902,7 +911,7 @@ export function OfficeShell({
       />
       <ContextMenu menu={menu} onAction={handleMenuAction} onClose={closeMenu} />
       {deskBanner}
-      <div style={rightRailStyle}>
+      <div style={sidebarStyle}>
         <OfficeSidebar
           self={rosterSelf}
           peers={rosterPeers}

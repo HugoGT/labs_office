@@ -19,7 +19,8 @@ export interface DeskBannerProps {
   onCall: (sessionId: string, name: string) => void;
   /** Opens "Mi personaje"; without it (no character editor) the button is left out. */
   onCharacter?: () => void;
-  onDecorate: () => void;
+  /** Opens "Decoración"; without it (the sidebar is hidden, #304) the button is left out. */
+  onDecorate?: () => void;
   onLeave: () => void;
   onPointerEnter: () => void;
   onPointerLeave: () => void;
@@ -83,9 +84,11 @@ export function DeskBanner({
                   <CharacterIcon />
                 </button>
               )}
-              <button type="button" className={styles.action} aria-label="Decorar" title="Decorar" onClick={onDecorate}>
-                <DecorateIcon />
-              </button>
+              {onDecorate !== undefined && (
+                <button type="button" className={styles.action} aria-label="Decorar" title="Decorar" onClick={onDecorate}>
+                  <DecorateIcon />
+                </button>
+              )}
               <button type="button" className={styles.action} aria-label="Dejar escritorio" title="Dejar escritorio" onClick={onLeave}>
                 <LeaveIcon />
               </button>

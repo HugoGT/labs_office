@@ -97,6 +97,17 @@ describe('createOfficeBridge', () => {
     expect(onSpeakers.mock.calls).toEqual([[{ sessionIds: ['sess-a'] }]]);
   });
 
+  it('hands a scene that starts mid-share the hidden minimap, or it would draw it (#304)', async () => {
+    const bridge = createOfficeBridge();
+    bridge.emitCommand('hideminimap', { hidden: true });
+
+    const onHide = vi.fn();
+    bridge.onCommand('hideminimap', onHide);
+
+    await Promise.resolve();
+    expect(onHide.mock.calls).toEqual([[{ hidden: true }]]);
+  });
+
   it('a newer emit before the replay wins, and an unsubscribed handler gets nothing (#144)', async () => {
     const bridge = createOfficeBridge();
     bridge.emitCommand('spacesconfig', { spaces: [], version: 'old' });

@@ -86,6 +86,13 @@ describe('DeskBanner', () => {
     expect(screen.getByRole('button', { name: 'Decorar' })).toBeInTheDocument();
   });
 
+  it('the own desk leaves out Decorar when nothing can open it (#304)', () => {
+    renderBanner(MINE, { onDecorate: undefined });
+
+    expect(screen.queryByRole('button', { name: 'Decorar' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Dejar escritorio' })).toBeInTheDocument();
+  });
+
   it("someone else's desk offers only the call", async () => {
     const props = renderBanner(TAKEN);
 

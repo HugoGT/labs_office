@@ -1898,6 +1898,95 @@ describe('OfficeShell: right rail while painting terrain', () => {
   });
 });
 
+describe('OfficeShell: while sharing the screen (#304)', () => {
+  const sidebar = () => screen.getByRole('complementary', { name: 'Personas', hidden: true });
+  const sharing = (on: boolean) =>
+    useProximityAudioMock.mockReturnValue(proximityAudio({ audioAvailable: true, screenShareAvailable: true, screenShareOn: on }));
+
+  it('hides the sidebar while the own screen is published and brings it back afterwards', () => {
+    sharing(false);
+    const { rerender } = render(<OfficeShell onLeaveOffice={vi.fn()} />);
+    expect(sidebar()).toBeVisible();
+
+    sharing(true);
+    rerender(<OfficeShell onLeaveOffice={vi.fn()} />);
+    expect(sidebar()).not.toBeVisible();
+
+    // Also how a capture cut by the browser arrives: `screenShareOn` goes false.
+    sharing(false);
+    rerender(<OfficeShell onLeaveOffice={vi.fn()} />);
+    expect(sidebar()).toBeVisible();
+  });
+
+  it('keeps the bottom bar, with its stop button, and the zoom and exit controls', async () => {
+    const onToggleScreenShare = vi.fn();
+    useProximityAudioMock.mockReturnValue(
+      proximityAudio({ audioAvailable: true, screenShareAvailable: true, screenShareOn: true, toggleScreenShare: onToggleScreenShare }),
+    );
+    render(<OfficeShell onLeaveOffice={vi.fn()} />);
+
+    const stop = screen.getByRole('button', { name: '🖥️ Dejar de compartir' });
+    expect(stop).toBeVisible();
+    expect(stop).toBeEnabled();
+    await userEvent.click(stop);
+    expect(onToggleScreenShare).toHaveBeenCalledTimes(1);
+
+    expect(screen.getByRole('group', { name: 'Zoom del mapa' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Salir' })).toBeVisible();
+  });
+
+  it('leaves the sidebar hidden for an editor that still holds the map when the share ends', () => {
+    sharing(true);
+    const { rerender } = render(<OfficeShell onLeaveOffice={vi.fn()} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    act(() => bridge.emitCommand('terrainedit', { brush: { kind: 'floor', material: 'grass' } }));
+
+    sharing(false);
+    rerender(<OfficeShell onLeaveOffice={vi.fn()} />);
+    expect(sidebar()).not.toBeVisible();
+
+    act(() => bridge.emitCommand('terrainedit', null));
+    expect(sidebar()).toBeVisible();
+  });
+
+  it('tells the scene, which draws the minimap', () => {
+    sharing(false);
+    const { rerender } = render(<OfficeShell onLeaveOffice={vi.fn()} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    const commands: { hidden: boolean }[] = [];
+    bridge.onCommand('hideminimap', (command) => commands.push(command));
+
+    sharing(true);
+    rerender(<OfficeShell onLeaveOffice={vi.fn()} />);
+    sharing(false);
+    rerender(<OfficeShell onLeaveOffice={vi.fn()} />);
+
+    expect(commands).toEqual([{ hidden: true }, { hidden: false }]);
+  });
+
+  it('the own desk banner stops offering what opens the hidden sidebar, and offers it again afterwards', async () => {
+    vi.mocked(fetchOfficeDesks).mockResolvedValue([
+      { id: 'id-mesa', label: 'Mesa 4', x: 320, y: 384, w: 96, h: 96, occupant: { id: 'id-ana', displayName: 'Ana Torres' }, mine: true },
+    ]);
+    const session = { displayName: 'Ana Torres', getIdToken: async () => 'id-token' };
+    sharing(true);
+    const { rerender } = render(<OfficeShell session={session} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalled());
+    await act(async () => {});
+    act(() => bridge.emit('deskhover', { deskId: 'id-mesa', x: 200, y: 150 }));
+
+    expect(screen.getByRole('button', { name: 'Dejar escritorio' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Decorar' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Mi personaje' })).not.toBeInTheDocument();
+
+    sharing(false);
+    rerender(<OfficeShell session={session} />);
+    expect(screen.getByRole('button', { name: 'Decorar' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mi personaje' })).toBeInTheDocument();
+  });
+});
+
 describe('OfficeShell: meeting rooms (#282)', () => {
   const SELF = 'ses-me';
 

@@ -265,6 +265,33 @@ describe('walking speed ramp in real Phaser frames (#145)', () => {
     expect(minimap.visible).toBe(true);
   });
 
+  it('hides the minimap while the own screen is shared, and shows it again afterwards (#304)', async () => {
+    const { scene, bridge } = await movementArena();
+    const minimap = scene.cameras.cameras[1]!;
+
+    bridge.emitCommand('hideminimap', { hidden: true });
+    expect(minimap.visible).toBe(false);
+    bridge.emitCommand('hideminimap', { hidden: false });
+    expect(minimap.visible).toBe(true);
+  });
+
+  it('keeps the minimap hidden until both a share and a brush let go of it, in either order (#304)', async () => {
+    const { scene, bridge } = await movementArena();
+    const minimap = scene.cameras.cameras[1]!;
+    const brush = { brush: { kind: 'floor', material: 'grass' } } as const;
+
+    bridge.emitCommand('hideminimap', { hidden: true });
+    bridge.emitCommand('terrainedit', brush);
+    bridge.emitCommand('terrainedit', null);
+    expect(minimap.visible).toBe(false);
+
+    bridge.emitCommand('terrainedit', brush);
+    bridge.emitCommand('hideminimap', { hidden: false });
+    expect(minimap.visible).toBe(false);
+    bridge.emitCommand('terrainedit', null);
+    expect(minimap.visible).toBe(true);
+  });
+
   it('keeps the space outlines of every editor off the minimap, where they are noise (#216)', async () => {
     const { scene, bridge } = await movementArena();
     const [main, minimap] = [scene.cameras.cameras[0]!, scene.cameras.cameras[1]!];
