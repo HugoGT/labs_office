@@ -150,30 +150,17 @@ function glare(point: SurfacePoint, color: Rgba): Rgba {
 const STEEL = makeRamp('#a6b0ba');
 const STEEL_FRAME = makeRamp('#6a7480');
 
-/** Brushed steel: faint lines along the top, and a lit rim. */
-function brushed(point: SurfacePoint, color: Rgba): Rgba {
-  return point.face === 'top' && point.row % 3 === 1 && point.col > 0 ? mixRgba(color, STEEL.shadow, 0.25) : color;
-}
-
 const WALNUT = makeRamp('#8c5a36');
 const BRASS = makeRamp('#d9b25a');
-
-/** Wood grain along the length of the top, in broken lines. */
-function grain(point: SurfacePoint, color: Rgba): Rgba {
-  if (point.face !== 'top') return color;
-  const line = Math.floor(point.u * 0.55 + 20) % 3 === 0;
-  const broken = Math.floor(Math.abs(point.v) / 5 + Math.floor(point.u)) % 4 === 0;
-  return line && !broken ? mixRgba(color, WALNUT.shadow, 0.45) : color;
-}
 
 function look(material: 'glass' | 'metal' | 'wood' | 'painted', color: string): TableLook {
   switch (material) {
     case 'glass':
       return { top: GLASS, frame: CHROME, pull: CHROME, glass: true, topShade: glare };
     case 'metal':
-      return { top: STEEL, frame: STEEL_FRAME, pull: STEEL, glass: false, topShade: brushed };
+      return { top: STEEL, frame: STEEL_FRAME, pull: STEEL, glass: false };
     case 'wood':
-      return { top: WALNUT, frame: WALNUT, pull: BRASS, glass: false, topShade: grain };
+      return { top: WALNUT, frame: WALNUT, pull: BRASS, glass: false };
     case 'painted':
       return { top: makeRamp(color), frame: makeRamp(color), pull: CHROME, glass: false };
   }
@@ -227,31 +214,17 @@ const CURVED_HALF_DEPTH = HALF_DEPTH + Math.round(6 * GROWTH);
 
 /**
  * A curved wooden desk, as seen from above: its far corners rounded off in a wide arc and, at the
- * middle of the sitter's side, a half circle cut into the top where the chair rolls in, ringed by a
- * rounded rim like half a donut. Built as one slab per model row (boxes are axis aligned), each slab as wide as
- * the shape there, so it reads the same from every facing.
+ * middle of the sitter's side, a half circle cut into the top where the chair rolls in. Built as
+ * one slab per model row (boxes are axis aligned), each slab as wide as the shape there, so it
+ * reads the same from every facing.
  */
 function curvedDeskModel(halfWidth: number): FurnitureModel {
   // Turned sideways the long side is drawn longer (DEPTH_SCALE), so the arcs along it stretch too.
   const stretch = halfWidth / HALF_LENGTH_PX;
   const corner = Math.round(14 * GROWTH);
   const notch = Math.round(11 * GROWTH);
-  const ring = Math.round(4 * GROWTH);
   const front = -HALF_DEPTH;
   const back = CURVED_HALF_DEPTH;
-  // How far a point sits from the notch's middle, in notch radii (v squeezed back by the stretch).
-  const fromNotch = (point: SurfacePoint): number => Math.hypot((point.u - front) / notch, point.v / stretch / notch);
-  const shade = (point: SurfacePoint, color: Rgba): Rgba => {
-    if (point.face !== 'top') return color;
-    // The half-ring around the notch: a rounded rim, lit on its inner edge and shaded where it falls away outside.
-    const ringAt = fromNotch(point);
-    if (ringAt < (notch + ring) / notch) {
-      const t = (ringAt - 1) / (ring / notch);
-      return t < 0.3 ? TERRACOTTA.light : t < 0.75 ? mixRgba(TERRACOTTA.base, TERRACOTTA.light, 0.35) : TERRACOTTA.shadow;
-    }
-    const grain = Math.floor(point.u * 0.55 + 20) % 3 === 0 && Math.floor(Math.abs(point.v) / 6 + point.u) % 4 !== 0;
-    return grain ? mixRgba(color, TERRACOTTA.shadow, 0.3) : color;
-  };
   const top: Box[] = [];
   for (let u = front; u < back; u += 1) {
     const middle = u + 0.5;
@@ -261,7 +234,7 @@ function curvedDeskModel(halfWidth: number): FurnitureModel {
     // Front notch: a half circle of radius `notch` around the middle of the sitter's edge.
     const fromFront = middle - front;
     const open = fromFront < notch ? Math.round(notch * stretch * Math.sqrt(1 - (fromFront / notch) ** 2)) : 0;
-    const slab = { u: [u, u + 1] as Span, y: [TOP_UNDER, TABLE_HEIGHT] as Span, ramp: TERRACOTTA, top: 'base', side: 'shadow', shade } as const;
+    const slab = { u: [u, u + 1] as Span, y: [TOP_UNDER, TABLE_HEIGHT] as Span, ramp: TERRACOTTA, top: 'base', side: 'shadow' } as const;
     if (open === 0) top.push({ ...slab, v: [-half, half] });
     else top.push({ ...slab, v: [-half, -open] }, { ...slab, v: [open, half] });
   }

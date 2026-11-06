@@ -4,7 +4,8 @@ import { PixelBuffer } from '../../../src/art/pixelBuffer.ts';
 import { FACINGS } from '../../../src/art/seating.ts';
 import { DESK } from '../../../src/game/artContract.ts';
 import { TABLE_DEPTH_PX, TABLE_LONG_SIDE_PX, tableFloorRect } from '../../../src/game/deskTable.ts';
-import { DEFAULT_GAMER_LIGHT, DEFAULT_TABLE_COLOR, TABLE_MATERIALS, tableSprite } from './tables.ts';
+import { DEFAULT_GAMER_LIGHT, DEFAULT_TABLE_COLOR, TABLE_HEIGHT, TABLE_MATERIALS, tableSprite } from './tables.ts';
+import { floorPoint } from './furnitureModel.ts';
 
 const luma = (p: { r: number; g: number; b: number }): number => p.r * 0.3 + p.g * 0.59 + p.b * 0.11;
 
@@ -227,4 +228,36 @@ test('the curved desk rounds off its far corners and opens a half-ring at the fr
   };
   const down = tableSprite('curved', 'down').image;
   assert.ok(firstOpaque(down, down.width / 2) - firstOpaque(down, down.width / 4) >= 4, 'curved: the half-ring is cut into the sitter side');
+});
+
+test('the wood, metal and curved desks have one flat color on their tops, with no lines', () => {
+  // Past the curved desk's front half-ring on the far side, clear of the rims of every top.
+  const SAMPLE = { wood: -10, metal: -10, curved: 6 } as const;
+  for (const [material, firstU] of Object.entries(SAMPLE) as ['wood' | 'metal' | 'curved', number][]) {
+    for (const facing of FACINGS) {
+      const { image, center } = tableSprite(material, facing);
+      const colors = new Set<string>();
+      for (let u = firstU; u <= 10; u += 1) {
+        for (let v = -30; v <= 30; v += 1) {
+          const point = floorPoint(facing, u, v);
+          const { r, g, b } = image.getPixel(center.x + point.x, center.y + point.y - TABLE_HEIGHT);
+          colors.add(`${r},${g},${b}`);
+        }
+      }
+      assert.equal(colors.size, 1, `${material} ${facing}: ${[...colors].join(' ')}`);
+    }
+  }
+});
+
+test('nothing on the curved desk is brighter than its flat top: the half-ring is only a cut, with no lit rim', () => {
+  for (const facing of FACINGS) {
+    const { image, center } = tableSprite('curved', facing);
+    const point = floorPoint(facing, 8, 0);
+    const flat = luma(image.getPixel(center.x + point.x, center.y + point.y - TABLE_HEIGHT));
+    for (let y = 0; y < image.height; y += 1) {
+      for (let x = 0; x < image.width; x += 1) {
+        if (image.alphaAt(x, y) === 255) assert.ok(luma(image.getPixel(x, y)) <= flat, `curved ${facing}: (${x}, ${y}) is brighter than the top`);
+      }
+    }
+  }
 });
