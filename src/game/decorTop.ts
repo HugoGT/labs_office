@@ -8,7 +8,7 @@
  * modules only.
  */
 
-import { tableFloorRect, type TableRotation } from './deskTable.ts';
+import { tableAnchor, tableDrop, tableFloorRect, type TableRotation } from './deskTable.ts';
 import type { DecorTileRect } from './officeDecor.ts';
 
 /**
@@ -23,31 +23,33 @@ const TILE_PX = 32;
 
 /**
  * The top of a surface in world pixels: `front`, the floor y under the front
- * edge of its top, and `depthY`, the y the surface sorts by.
+ * edge of its top, `depthY`, the y the surface sorts by, and `drop`, how far
+ * below its tile footprint it is drawn.
  */
 export interface DecorSurface {
   readonly front: number;
   readonly depthY: number;
+  readonly drop: number;
 }
 
 /**
  * A desk table anchored on `index`: its front edge on its art's ground point
- * (`ground`, the facing's floor point under the front edge, relative to the
- * anchor on the middle of its middle tile, the y `deskPlacement` sorts it by),
+ * (`ground`, the facing's floor point under the front edge, relative to its
+ * anchor, `tableAnchor`, the y `deskPlacement` sorts it by),
  * or, while its sheet is not loaded, on the edge of the floor its top covers
  * (`tableFloorRect`), the y its placeholder sorts by.
  */
 export function deskSurface(index: number, rotation: TableRotation, width: number, ground: { readonly y: number } | null): DecorSurface {
-  const anchorY = (Math.floor(index / width) + 0.5) * TILE_PX;
+  const anchorY = tableAnchor(index % width, Math.floor(index / width), TILE_PX, rotation).y;
   const floor = tableFloorRect(rotation);
   const front = anchorY + (ground === null ? floor.y + floor.h : ground.y);
-  return { front, depthY: front };
+  return { front, depthY: front, drop: tableDrop(rotation) };
 }
 
 /** A room table on its footprint (`decorFootprint`, in tiles): its top covers it, so its front edge is the footprint's bottom, its depth too (`propPlacement`). */
 export function tableSurface(rect: DecorTileRect): DecorSurface {
   const front = (rect.y + rect.h) * TILE_PX;
-  return { front, depthY: front };
+  return { front, depthY: front, drop: 0 };
 }
 
 /**
@@ -56,13 +58,14 @@ export function tableSurface(rect: DecorTileRect): DecorSurface {
  * bottom of its footprint and the surfaces under it. It stands on the front
  * edge of the surface top (the art draws its base a pixel above its anchor,
  * so the base sits just behind that edge), or on its own tile where that tile
- * ends first (the upper tiles of a desk table along a column), lifted by the
- * surface height. Over several surfaces the one further forward counts; with
+ * ends first (the upper tiles of a desk table along a column), lowered with
+ * the surface (`drop`) and lifted by the surface height. Over several surfaces the one further forward counts; with
  * none (a stored row with no surface left under it) it stands on the floor
  * of its footprint, drawn as before the layers.
  */
 export function onTopGround(footprintBottom: number, surfaces: readonly DecorSurface[]): { y: number; depthY: number } {
   if (surfaces.length === 0) return { y: footprintBottom, depthY: footprintBottom };
   const front = Math.max(...surfaces.map((surface) => surface.front));
-  return { y: Math.min(footprintBottom, front) - SURFACE_HEIGHT_PX, depthY: Math.max(...surfaces.map((surface) => surface.depthY)) };
+  const tileEnd = footprintBottom + Math.max(...surfaces.map((surface) => surface.drop));
+  return { y: Math.min(tileEnd, front) - SURFACE_HEIGHT_PX, depthY: Math.max(...surfaces.map((surface) => surface.depthY)) };
 }

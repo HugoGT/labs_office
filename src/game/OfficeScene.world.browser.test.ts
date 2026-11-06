@@ -1314,19 +1314,20 @@ describe('OfficeScene: the office decor layer (#208)', () => {
     return scene.physics.world.staticBodies.getArray().some((body) => body.hitTest(x, y));
   }
 
-  it('draws a desk table 1:1 centered on its middle tile, in the column of its facing', async () => {
+  it('draws a desk table 1:1 below the middle of its middle tile by its facing, in the column of its facing', async () => {
     const { scene, handlers } = await bootConnected();
     handlers.onDecor!([
       { index: at(11, 12), piece: 'desk-wood', rotation: 180 },
       { index: at(22, 13), piece: 'desk-glass', rotation: 90 },
+      { index: at(30, 14), piece: 'desk-wood', rotation: 0 },
     ]);
 
     await vi.waitFor(() => {
       const top = image(scene, at(11, 12));
-      // The anchor (48, 60) of a 96x104 cell on the middle of tile (11, 12).
+      // The anchor (48, 60) of a 96x104 cell 13px below the middle of tile (11, 12).
       expect({ x: top?.x, y: top?.y, w: top?.displayWidth, h: top?.displayHeight, frame: Number(top?.frame.name) }).toEqual({
         x: 11.5 * TILE - 48,
-        y: 12.5 * TILE - 60,
+        y: 12.5 * TILE + 13 - 60,
         w: 96,
         h: 104,
         frame: 0,
@@ -1334,7 +1335,10 @@ describe('OfficeScene: the office decor layer (#208)', () => {
       const side = image(scene, at(22, 13));
       expect(side?.texture.key).toBe(artSheetKey('desk-glass', 'sheet'));
       // Turned right: the pack's fourth column.
-      expect({ x: side?.x, y: side?.y, frame: Number(side?.frame.name) }).toEqual({ x: 22.5 * TILE - 48, y: 13.5 * TILE - 60, frame: 3 });
+      expect({ x: side?.x, y: side?.y, frame: Number(side?.frame.name) }).toEqual({ x: 22.5 * TILE - 48, y: 13.5 * TILE + 13 - 60, frame: 3 });
+      // Facing down it stands half a tile below.
+      const down = image(scene, at(30, 14));
+      expect({ x: down?.x, y: down?.y }).toEqual({ x: 30.5 * TILE - 48, y: 14.5 * TILE + 16 - 60 });
     }, LOOP_WAIT);
   });
 

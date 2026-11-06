@@ -70,13 +70,15 @@ const LEG_U: Span = [HALF_DEPTH - 3, HALF_DEPTH - 1];
 const CHAIR_ROWS_PAST_EDGE = 3;
 const SIDE_CHAIR_U = -(HALF_DEPTH + 7 + 2);
 
+type TopShade = (point: SurfacePoint, color: Rgba) => Rgba;
+
 interface TableLook {
   readonly top: Ramp;
   readonly frame: Ramp;
   readonly pull: Ramp;
   /** Glass lets the floor and the legs show through its top and panel. */
   readonly glass: boolean;
-  readonly topShade?: (point: SurfacePoint, color: Rgba) => Rgba;
+  readonly topShade?: TopShade;
 }
 
 function mirrorU(box: Box): Box {
@@ -150,30 +152,53 @@ function glare(point: SurfacePoint, color: Rgba): Rgba {
 const STEEL = makeRamp('#a6b0ba');
 const STEEL_FRAME = makeRamp('#6a7480');
 
-/** Brushed steel: faint lines along the top, and a lit rim. */
-function brushed(point: SurfacePoint, color: Rgba): Rgba {
-  return point.face === 'top' && point.row % 3 === 1 && point.col > 0 ? mixRgba(color, STEEL.shadow, 0.25) : color;
+/** How far a line on a top goes from the main color toward its shadow: barely, so the top reads almost flat. */
+const TOP_LINE_TINT = 0.12;
+
+function isSideways(facing: Facing): boolean {
+  return facing === 'left' || facing === 'right';
+}
+
+/**
+ * A top pixel's model coordinates as a horizontal desk spaces them. DEPTH_SCALE shortens the screen
+ * along `u` facing up or down and along `v` facing left or right, so without this the same lines
+ * come out of uneven thickness and in shorter pieces on a vertical desk.
+ */
+function linePoint(point: SurfacePoint, facing: Facing): { u: number; v: number } {
+  return isSideways(facing) ? { u: point.u / DEPTH_SCALE, v: point.v * DEPTH_SCALE } : { u: point.u, v: point.v };
+}
+
+/** Brushed steel: faint lines along the length of the top, and a lit rim. */
+function brushed(facing: Facing): TopShade {
+  return (point, color) => {
+    if (point.face !== 'top') return color;
+    const [across, along] = isSideways(facing) ? [point.col, point.row] : [point.row, point.col];
+    return across % 3 === 1 && along > 0 ? mixRgba(color, STEEL.shadow, TOP_LINE_TINT) : color;
+  };
 }
 
 const WALNUT = makeRamp('#8c5a36');
 const BRASS = makeRamp('#d9b25a');
 
 /** Wood grain along the length of the top, in broken lines. */
-function grain(point: SurfacePoint, color: Rgba): Rgba {
-  if (point.face !== 'top') return color;
-  const line = Math.floor(point.u * 0.55 + 20) % 3 === 0;
-  const broken = Math.floor(Math.abs(point.v) / 5 + Math.floor(point.u)) % 4 === 0;
-  return line && !broken ? mixRgba(color, WALNUT.shadow, 0.45) : color;
+function grain(facing: Facing): TopShade {
+  return (point, color) => {
+    if (point.face !== 'top') return color;
+    const { u, v } = linePoint(point, facing);
+    const line = Math.floor(u * 0.55 + 20) % 3 === 0;
+    const broken = Math.floor(Math.abs(v) / 5 + Math.floor(u)) % 4 === 0;
+    return line && !broken ? mixRgba(color, WALNUT.shadow, TOP_LINE_TINT) : color;
+  };
 }
 
-function look(material: 'glass' | 'metal' | 'wood' | 'painted', color: string): TableLook {
+function look(material: 'glass' | 'metal' | 'wood' | 'painted', color: string, facing: Facing): TableLook {
   switch (material) {
     case 'glass':
       return { top: GLASS, frame: CHROME, pull: CHROME, glass: true, topShade: glare };
     case 'metal':
-      return { top: STEEL, frame: STEEL_FRAME, pull: STEEL, glass: false, topShade: brushed };
+      return { top: STEEL, frame: STEEL_FRAME, pull: STEEL, glass: false, topShade: brushed(facing) };
     case 'wood':
-      return { top: WALNUT, frame: WALNUT, pull: BRASS, glass: false, topShade: grain };
+      return { top: WALNUT, frame: WALNUT, pull: BRASS, glass: false, topShade: grain(facing) };
     case 'painted':
       return { top: makeRamp(color), frame: makeRamp(color), pull: CHROME, glass: false };
   }
@@ -231,7 +256,7 @@ const CURVED_HALF_DEPTH = HALF_DEPTH + Math.round(6 * GROWTH);
  * rounded rim like half a donut. Built as one slab per model row (boxes are axis aligned), each slab as wide as
  * the shape there, so it reads the same from every facing.
  */
-function curvedDeskModel(halfWidth: number): FurnitureModel {
+function curvedDeskModel(halfWidth: number, facing: Facing): FurnitureModel {
   // Turned sideways the long side is drawn longer (DEPTH_SCALE), so the arcs along it stretch too.
   const stretch = halfWidth / HALF_LENGTH_PX;
   const corner = Math.round(14 * GROWTH);
@@ -249,8 +274,9 @@ function curvedDeskModel(halfWidth: number): FurnitureModel {
       const t = (ringAt - 1) / (ring / notch);
       return t < 0.3 ? TERRACOTTA.light : t < 0.75 ? mixRgba(TERRACOTTA.base, TERRACOTTA.light, 0.35) : TERRACOTTA.shadow;
     }
-    const grain = Math.floor(point.u * 0.55 + 20) % 3 === 0 && Math.floor(Math.abs(point.v) / 6 + point.u) % 4 !== 0;
-    return grain ? mixRgba(color, TERRACOTTA.shadow, 0.3) : color;
+    const { u, v } = linePoint(point, facing);
+    const grain = Math.floor(u * 0.55 + 20) % 3 === 0 && Math.floor(Math.abs(v) / 6 + u) % 4 !== 0;
+    return grain ? mixRgba(color, TERRACOTTA.shadow, TOP_LINE_TINT) : color;
   };
   const top: Box[] = [];
   for (let u = front; u < back; u += 1) {
@@ -286,7 +312,7 @@ export function tableSprite(material: TableMaterial, facing: Facing, color?: str
   if (cached) return cached;
   const halfWidth = halfWidthFor(facing);
   const model =
-    material === 'gamer' ? gamerDeskModel(painted, halfWidth) : material === 'curved' ? curvedDeskModel(halfWidth) : tableModel(look(material, painted), halfWidth);
+    material === 'gamer' ? gamerDeskModel(painted, halfWidth) : material === 'curved' ? curvedDeskModel(halfWidth, facing) : tableModel(look(material, painted, facing), halfWidth);
   const { back, origin } = renderFurniture(model, facing, 192);
   // The curved desk's top runs deeper on the far side; its front edge, where people sit, is the others'.
   const spans = floorSpans(facing, [-HALF_DEPTH, material === 'curved' ? CURVED_HALF_DEPTH : HALF_DEPTH], [-halfWidth, halfWidth]);

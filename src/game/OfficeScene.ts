@@ -38,7 +38,7 @@ import {
 } from './depthLayers';
 import { deskAt, deskZoneName } from './deskLayout';
 import { SPACE_SHADE_ALPHA, SPACE_SHADE_NAME, shadeAround, shadeKey } from './spaceFocus';
-import { tableFacing, tableFloorRect } from './deskTable';
+import { tableAnchor, tableFacing, tableFloorRect } from './deskTable';
 import { decorChairFacing, decorChairs, decorFootprint, decorLayerOf, decorRotationFor, decorSeats, encodeOfficeDecor, isDecorChairPiece, isDecorSofaPiece, withDecor, type DecorEdit, type DecorItem, type DecorLayer, type DecorTileRect } from './officeDecor';
 import { deskSurface, onTopGround, tableSurface, type DecorSurface } from './decorTop';
 import { doorHingeStops, doorLeaves, doorOpenings, doorSpan, doorStepOf, doorSwingRotation, isWindowPiece, keptSwings, moveDoors, openDoorLeaves, type DoorLeaf, type DoorMotion } from './officeDoors';
@@ -1818,7 +1818,7 @@ export class OfficeScene extends Phaser.Scene {
     const dy = lift === null ? 0 : lift.y - footprintBottom;
     const depthOf = (depthY: number): number => (lift === null ? worldAssetDepth(depthY) : onTopDepth(lift.depthY));
     if (kind === 'desk') {
-      const anchor = { x: ((item.index % width) + 0.5) * TILE, y: (Math.floor(item.index / width) + 0.5) * TILE };
+      const anchor = tableAnchor(item.index % width, Math.floor(item.index / width), TILE, item.rotation);
       // A painted desk table in its own color; without one, its manifest default (the exported sheet).
       const sheet = this.artSheet({ materialId: item.piece, color: item.color ?? null }, 'desk', this.redrawDecor);
       if (sheet === null || sheet.piece.kind !== 'desk') {

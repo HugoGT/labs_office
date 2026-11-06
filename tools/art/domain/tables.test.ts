@@ -4,7 +4,8 @@ import { PixelBuffer } from '../../../src/art/pixelBuffer.ts';
 import { FACINGS } from '../../../src/art/seating.ts';
 import { DESK } from '../../../src/game/artContract.ts';
 import { TABLE_DEPTH_PX, TABLE_LONG_SIDE_PX, tableFloorRect } from '../../../src/game/deskTable.ts';
-import { DEFAULT_GAMER_LIGHT, DEFAULT_TABLE_COLOR, TABLE_MATERIALS, tableSprite } from './tables.ts';
+import { DEFAULT_GAMER_LIGHT, DEFAULT_TABLE_COLOR, TABLE_HEIGHT, TABLE_MATERIALS, tableSprite } from './tables.ts';
+import { floorPoint } from './furnitureModel.ts';
 
 const luma = (p: { r: number; g: number; b: number }): number => p.r * 0.3 + p.g * 0.59 + p.b * 0.11;
 
@@ -227,4 +228,66 @@ test('the curved desk rounds off its far corners and opens a half-ring at the fr
   };
   const down = tableSprite('curved', 'down').image;
   assert.ok(firstOpaque(down, down.width / 2) - firstOpaque(down, down.width / 4) >= 4, 'curved: the half-ring is cut into the sitter side');
+});
+
+/**
+ * The screen pixels of a stretch of a desk top, by column and row: past the curved desk's half-ring
+ * on the far side (`firstU`), clear of the rims of every top.
+ */
+function topPixels(material: 'wood' | 'metal' | 'curved', facing: (typeof FACINGS)[number]): Map<string, string> {
+  const firstU = material === 'curved' ? 6 : -10;
+  const { image, center } = tableSprite(material, facing);
+  const pixels = new Map<string, string>();
+  for (let u = firstU; u <= 10; u += 0.25) {
+    for (let v = -30; v <= 30; v += 0.25) {
+      const point = floorPoint(facing, u, v);
+      const [x, y] = [center.x + point.x, center.y + point.y - TABLE_HEIGHT];
+      const { r, g, b } = image.getPixel(x, y);
+      pixels.set(`${x},${y}`, `${r},${g},${b}`);
+    }
+  }
+  return pixels;
+}
+
+function mostCommon(values: Iterable<string>): string {
+  const counts = new Map<string, number>();
+  for (const value of values) counts.set(value, (counts.get(value) ?? 0) + 1);
+  return [...counts].sort((a, b) => b[1] - a[1])[0]![0];
+}
+
+const LINED = ['wood', 'metal', 'curved'] as const;
+
+test('the lines on the wood, metal and curved desk tops stay, almost in the main color, in every facing', () => {
+  for (const material of LINED) {
+    for (const facing of FACINGS) {
+      const pixels = topPixels(material, facing);
+      const main = mostCommon(pixels.values()).split(',').map(Number);
+      const colors = new Set(pixels.values());
+      assert.ok(colors.size >= 2, `${material} ${facing}: no lines left`);
+      for (const color of colors) {
+        const channels = color.split(',').map(Number);
+        channels.forEach((channel, i) => assert.ok(Math.abs(channel - main[i]!) <= 8, `${material} ${facing}: ${color} is far from ${main.join()}`));
+      }
+    }
+  }
+});
+
+test('the lines of a vertical desk run along its length, one pixel thick, like the horizontal ones', () => {
+  for (const material of LINED) {
+    for (const facing of ['left', 'right'] as const) {
+      const pixels = topPixels(material, facing);
+      const main = mostCommon(pixels.values());
+      const isLine = (x: number, y: number): boolean => pixels.has(`${x},${y}`) && pixels.get(`${x},${y}`) !== main;
+      let longest = 0;
+      for (const key of pixels.keys()) {
+        const [x, y] = key.split(',').map(Number) as [number, number];
+        if (!isLine(x, y)) continue;
+        assert.ok(!isLine(x + 1, y), `${material} ${facing}: the line at (${x}, ${y}) is thicker than a pixel, or crosses the desk`);
+        let run = 1;
+        while (isLine(x, y + run)) run += 1;
+        longest = Math.max(longest, run);
+      }
+      assert.ok(longest >= 4, `${material} ${facing}: its longest line is ${longest} rows`);
+    }
+  }
 });
