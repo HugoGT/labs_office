@@ -36,6 +36,7 @@ import {
   nextDecorRotation,
   withDecor,
   type DecorItem,
+  type DecorRotation,
   type DecorPieceInfo,
 } from './officeDecor';
 
@@ -439,6 +440,53 @@ describe('officeDecor: sofas', () => {
     ]);
     // The chairs alone, as `decorChairs` draws them, are what they were.
     expect(decorChairs(items)).toEqual([{ index: at(4, 5), piece: 'chair-wood', facing: 'right' }]);
+  });
+});
+
+describe('officeDecor: the rug layer', () => {
+  const rugInfo = decorInfoFromPieceId;
+
+  it('puts rugs on a layer of their own, keyed apart from the floor and the top', () => {
+    expect(decorLayerOf('rug-grass')).toBe('rug');
+    const key = decorItemKey({ index: 41, piece: 'rug-woven' });
+    expect(key).toBe(decorKey(41, 'rug'));
+    expect([decorKey(41, 'floor'), decorKey(41, 'top')]).not.toContain(key);
+    expect(decorKeyLayer(key)).toBe('rug');
+    expect(decorKeyIndex(key)).toBe(41);
+  });
+
+  it('hangs 3x2 from its anchor toward its turn: down, right, up or left of a desk centre', () => {
+    // Anchored at the centre (5,5) of the desk (4,4)-(6,6): each turn covers two rows or columns of it.
+    const rug = (rotation: DecorRotation) => decorFootprint({ index: at(5, 5), rotation }, rugInfo('rug-stone'), WIDTH);
+    expect(rugInfo('rug-stone')).toEqual({ kind: 'rug', footprint: { w: 3, h: 2 } });
+    expect(rug(0)).toEqual({ x: 4, y: 5, w: 3, h: 2 });
+    expect(rug(90)).toEqual({ x: 5, y: 4, w: 2, h: 3 });
+    expect(rug(180)).toEqual({ x: 4, y: 4, w: 3, h: 2 });
+    expect(rug(270)).toEqual({ x: 4, y: 4, w: 2, h: 3 });
+    expect(decorRotationsOf('rug')).toEqual([0, 90, 180, 270]);
+    expect(decorRotationFor('rug', 270)).toBe(270);
+  });
+
+  it('turns with the wheel like a chair: down, left, up, right', () => {
+    expect(nextDecorRotation(0, 1, 'rug')).toBe(270);
+    expect(nextDecorRotation(270, 1, 'rug')).toBe(180);
+    expect(nextDecorRotation(180, 1, 'rug')).toBe(90);
+    expect(nextDecorRotation(90, 1, 'rug')).toBe(0);
+    expect(nextDecorRotation(0, -1, 'rug')).toBe(90);
+  });
+
+  it('lets a desk table and a rug share an anchor, the rug first, and a click picks the furniture over the rug', () => {
+    const rug: DecorItem = { index: at(5, 5), piece: 'rug-grass', rotation: 0 };
+    const desk: DecorItem = { index: at(5, 5), piece: 'desk-wood', rotation: 0 };
+    expect(decodeOfficeDecor(encodeOfficeDecor([desk, rug]), WIDTH * WIDTH)).toEqual([rug, desk]);
+    const info = (piece: string) => (piece === 'desk-wood' ? { kind: 'desk' as const, footprint: { w: 3, h: 1 } } : rugInfo(piece));
+    expect(decorItemCovering([rug, desk], info, WIDTH, at(5, 5))).toBe(desk);
+    expect(decorItemCovering([rug, desk], info, WIDTH, at(5, 6))).toBe(rug);
+  });
+
+  it('removes a rug by naming its layer', () => {
+    const rug: DecorItem = { index: at(5, 5), piece: 'rug-grass', rotation: 0 };
+    expect(diffDecor([rug], [])).toEqual([{ index: at(5, 5), item: null, layer: 'rug' }]);
   });
 });
 

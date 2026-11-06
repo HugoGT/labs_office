@@ -160,6 +160,11 @@ describe('useLayoutEditor (#74, PR3c)', () => {
     await waitFor(() => expect(desks.createDesk).toHaveBeenCalledWith({ x: 7, y: 8 }));
     await waitFor(() => expect(refreshDesks).toHaveBeenCalledTimes(1));
     expect(refreshSpaces).toHaveBeenCalledTimes(1);
+
+    // The turn the wheel gave the rug's preview goes with the desk.
+    act(() => result.current.startCreate());
+    act(() => bridge.emit('layoutplace', { tx: 12, ty: 8, valid: true, rugRotation: 270 }));
+    await waitFor(() => expect(desks.createDesk).toHaveBeenLastCalledWith({ x: 12, y: 8, rugRotation: 270 }));
     await waitFor(() => expect(result.current.state).toEqual({ tag: 'idle', kind: 'desk' }));
   });
 

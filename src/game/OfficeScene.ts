@@ -29,6 +29,8 @@ import {
 import { mergeColliderRects } from './colliderMerge';
 import {
   DESK_ZONE_DEPTH,
+  LAYOUT_GHOST_DEPTH,
+  RUG_DEPTH,
   MINIMAP_MARKER_DEPTH,
   SPACE_SHADE_DEPTH,
   onTopDepth,
@@ -40,7 +42,7 @@ import { tableFacing, tableFloorRect } from './deskTable';
 import { decorChairFacing, decorChairs, decorFootprint, decorLayerOf, decorRotationFor, decorSeats, encodeOfficeDecor, isDecorChairPiece, isDecorSofaPiece, withDecor, type DecorEdit, type DecorItem, type DecorLayer, type DecorTileRect } from './officeDecor';
 import { deskSurface, onTopGround, tableSurface, type DecorSurface } from './decorTop';
 import { doorHingeStops, doorLeaves, doorOpenings, doorSpan, doorStepOf, doorSwingRotation, isWindowPiece, keptSwings, moveDoors, openDoorLeaves, type DoorLeaf, type DoorMotion } from './officeDoors';
-import { deskEntryRefused, isOnDesk } from './deskDecorRules';
+import { DEFAULT_DESK_RUG, deskEntryRefused, isOnDesk } from './deskDecorRules';
 import { lockedBehindDoor, lockedDoorAhead, lockedSpaceEntered } from './spaceLocks';
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT } from './hudLayout';
@@ -156,6 +158,9 @@ import { AVATAR_KEYS, PLAYER_TEXTURE, avatarTextureKey, createOfficeTextures } f
 export const OFFICE_SCENE_KEY = 'office';
 
 const PLAYER_SPEED = 230;
+/** The new desk's rug on its placement preview: see-through enough to tell it from a placed one. */
+const LAYOUT_RUG_PREVIEW_NAME = 'layout-edit:rug';
+const LAYOUT_RUG_PREVIEW_ALPHA = 0.8;
 /** `Pointer.button` of the secondary (right) mouse button. */
 const RIGHT_BUTTON = 2;
 // Below both the 14px body height and Arcade's 4px overlap bias, even at the top speed.
@@ -170,6 +175,7 @@ const FOLLOW_LERP = 0.12;
  * piece (#121) shares its anchor with the desk table under it.
  */
 export function decorObjectName(index: number, layer: DecorLayer = 'floor'): string {
+  if (layer === 'rug') return `decor:rug:${index}`;
   return layer === 'top' ? `decor:top:${index}` : `decor:${index}`;
 }
 const ART_FALLBACK_COLOR = 0x6b7280;
@@ -756,8 +762,9 @@ export class OfficeScene extends Phaser.Scene {
       minimap: this.minimapCamera,
       bridge: this.bridge,
       store: this.options.zoomStore,
-      // #207: a picked chair, desk table or room table turns with the wheel instead (`DecorEditLayer`).
-      wheelSuppressed: () => this.decorEditLayer?.holdsWheel() ?? false,
+      // #207: a picked chair, desk table or room table turns with the wheel instead (`DecorEditLayer`),
+      // and so does the rug of a desk being created (`LayoutEditLayer`).
+      wheelSuppressed: () => (this.decorEditLayer?.holdsWheel() ?? false) || (this.layoutEditLayer?.holdsWheel() ?? false),
     });
     // #53: despues de `setupInput` (comparte `this.input`, mismo momento en
     // que `layoutEditLayer` se crea mas abajo).
@@ -822,6 +829,12 @@ export class OfficeScene extends Phaser.Scene {
         items: () => this.officeDecor,
         infoOf: (piece) => decorInfoFromManifest(this.art.manifest)(piece),
         width: this.layout.width,
+      },
+      // A desk being created shows the grass rug it gets, over the ghost's tint.
+      rug: {
+        draw: (rect, rotation) =>
+          this.drawRug({ index: 0, piece: DEFAULT_DESK_RUG, rotation }, rect, LAYOUT_RUG_PREVIEW_NAME).map((object) =>
+            (object as Phaser.GameObjects.Sprite).setDepth(LAYOUT_GHOST_DEPTH + 0.5).setAlpha(LAYOUT_RUG_PREVIEW_ALPHA)),
       },
     });
     this.unsubscribeLayoutEdit = this.bridge.onCommand('layoutedit', (command) => {
@@ -1809,6 +1822,7 @@ export class OfficeScene extends Phaser.Scene {
       return [putArtSprite(this, sheet.key, placement, worldAssetDepth(placement.depthY)).setName(decorObjectName(item.index))];
     }
     if (kind === 'door') return this.drawDoor(item);
+    if (kind === 'rug') return this.drawRug(item, rect, name);
     const propKind = kind === 'table' ? 'table' : kind === 'tree' ? 'tree' : 'plant';
     // A tree in its own leaf color; without one, its manifest default (the exported sheet).
     const sheet = this.artSheet({ materialId: item.piece, color: kind === 'tree' ? (item.color ?? null) : null }, propKind, this.redrawDecor);
@@ -1827,6 +1841,25 @@ export class OfficeScene extends Phaser.Scene {
     // A plant turned 180 is its mirror (#121): one frame, flipped about its anchor's column, the middle of its frame.
     if (sheet.piece.kind === 'plant' && decorRotationFor('plant', item.rotation) === 180) sprite.setFlipX(true);
     return [sprite];
+  }
+
+  /**
+   * A desk rug, flat under every other piece (`RUG_DEPTH`): its sheet's
+   * horizontal or vertical frame on its footprint, in its own color when it
+   * takes one, or a placeholder over the footprint until the sheet loads.
+   */
+  private drawRug(item: DecorItem, rect: DecorTileRect, name: string): Phaser.GameObjects.GameObject[] {
+    const sheet = this.artSheet({ materialId: item.piece, color: item.color ?? null }, 'rug', this.redrawDecor);
+    if (sheet === null || sheet.piece.kind !== 'rug') {
+      return [
+        this.add
+          .rectangle((rect.x + rect.w / 2) * TILE, (rect.y + rect.h / 2) * TILE, rect.w * TILE, rect.h * TILE, ART_FALLBACK_COLOR, ART_FALLBACK_ALPHA)
+          .setDepth(RUG_DEPTH)
+          .setName(name),
+      ];
+    }
+    const placement = propPlacement({ anchor: sheet.piece.anchor, footprint: { w: rect.w, h: rect.h } }, rect.x, rect.y);
+    return [putArtSprite(this, sheet.key, { ...placement, frame: tableFrameIndex(item.rotation) }, RUG_DEPTH).setName(name)];
   }
 
   /**

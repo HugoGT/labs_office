@@ -743,7 +743,7 @@ describe('terrain dual grid over void', () => {
 
 describe('map props', () => {
   it('registers a piece kind for the tileset and each prop, with a fixed frame per image kind', () => {
-    expect(ART_PIECE_KINDS).toEqual(['character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door', 'sofa']);
+    expect(ART_PIECE_KINDS).toEqual(['character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door', 'sofa', 'rug']);
     expect(TREE.frame).toEqual({ width: 64, height: 96 });
     expect(PLANT.frame).toEqual({ width: 32, height: 48 });
     expect(sheetSize(BRIDGE)).toEqual({ width: 256, height: 128 });

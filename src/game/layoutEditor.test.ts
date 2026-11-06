@@ -20,6 +20,14 @@ describe('whole office block placement', () => {
     expect(toLayoutEditCommand({ tag: 'placing', kind: 'room', mode: 'create' }, { items: [], placingSize: { w: 9, h: 9 } })?.placing).toMatchObject({ snap: 'block' });
     expect(toLayoutEditCommand({ tag: 'placing', kind: 'desk', mode: 'create' }, { items: [], placingSize: { w: 3, h: 3 } })?.placing).not.toHaveProperty('snap');
   });
+
+  it('previews the rug of a new desk only: not while moving a desk nor placing a room', () => {
+    const placing = (kind: 'desk' | 'room', mode: 'create' | 'move') =>
+      toLayoutEditCommand(mode === 'create' ? { tag: 'placing', kind, mode } : { tag: 'placing', kind, mode, id: 'd1' }, { items: [], placingSize: { w: 3, h: 3 } })?.placing;
+    expect(placing('desk', 'create')).toMatchObject({ rug: true });
+    expect(placing('desk', 'move')).not.toHaveProperty('rug');
+    expect(placing('room', 'create')).not.toHaveProperty('rug');
+  });
 });
 
 describe('reduceEditorState', () => {

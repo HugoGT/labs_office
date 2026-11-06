@@ -2,15 +2,18 @@ import { describe, expect, it } from 'vitest';
 import {
   MAX_DESK_CHAIRS,
   MAX_DESK_OCCUPANCY,
+  MAX_DESK_RUGS,
   MAX_DESK_TABLES,
+  defaultDeskRug,
   deskAreaAt,
   deskBetweenTables,
   deskEntryRefused,
   deskOverChairLimit,
+  displacedDeskRugs,
   displacedDeskTables,
   isOnDesk,
 } from './deskDecorRules';
-import { decorInfoFromPieceId, type DecorItem, type DecorRotation } from './officeDecor';
+import { decorFootprint, decorInfoFromPieceId, type DecorItem, type DecorRotation } from './officeDecor';
 
 const W = 40;
 const TILE = 32;
@@ -25,6 +28,36 @@ describe('desk decor limits', () => {
     expect(MAX_DESK_TABLES).toBe(1);
     expect(MAX_DESK_CHAIRS).toBe(3);
     expect(MAX_DESK_OCCUPANCY).toBe(6);
+    expect(MAX_DESK_RUGS).toBe(1);
+  });
+});
+
+describe('defaultDeskRug', () => {
+  it('is the grass rug on the bottom two rows of a new desk, anchored at its centre', () => {
+    const rug = defaultDeskRug({ x: 10, y: 10 }, W);
+    expect(rug).toEqual({ index: at(11, 11), piece: 'rug-grass', rotation: 0 });
+    expect(decorFootprint(rug, infoOf(rug.piece), W)).toEqual({ x: 10, y: 11, w: 3, h: 2 });
+  });
+});
+
+describe('displacedDeskRugs', () => {
+  const rug = (tx: number, ty: number, piece = 'rug-grass', rotation: DecorRotation = 0): DecorItem => ({ index: at(tx, ty), piece, rotation });
+
+  it('a rug placed on a desk displaces the rug already lying on it, so a desk keeps one', () => {
+    // Desk (10,10)-(12,12): the old rug covers rows 10-11, the new one, turned, columns 11-12.
+    const items = [rug(11, 11), rug(12, 11, 'rug-hazard', 90)];
+    expect(displacedDeskRugs(items, [at(12, 11)], infoOf, [DESK], W)).toEqual([at(11, 11)]);
+  });
+
+  it('leaves the rugs of other desks and of the open floor alone', () => {
+    const other = { x: 20, y: 10, w: 3, h: 3 };
+    const items = [rug(11, 11), rug(21, 11), rug(30, 30)];
+    expect(displacedDeskRugs(items, [at(11, 11)], infoOf, [DESK, other], W)).toEqual([]);
+  });
+
+  it('where one batch lays two rugs on a desk the last one wins', () => {
+    const items = [rug(11, 11), rug(11, 12, 'rug-stone')];
+    expect(displacedDeskRugs(items, [at(11, 11), at(11, 12)], infoOf, [DESK], W)).toEqual([at(11, 11)]);
   });
 });
 

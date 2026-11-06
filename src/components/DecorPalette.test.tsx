@@ -24,7 +24,9 @@ describe('DecorPalette', () => {
   it('offers every decor piece of the catalog by its full Spanish name, grouped by kind, none pressed, and no eraser', () => {
     render(<DecorPalette value={null} catalog={catalog} onPick={() => {}} preview={noPreview()} />);
 
-    expect(screen.getAllByRole('group').map((group) => group.getAttribute('aria-label'))).toEqual(['Mi espacio', 'Escritorios', 'Sillas', 'Sala', 'Árboles', 'Paredes']);
+    expect(screen.getAllByRole('group').map((group) => group.getAttribute('aria-label'))).toEqual(['Mi espacio', 'Alfombras', 'Escritorios', 'Sillas', 'Sala', 'Árboles', 'Paredes']);
+    // The woven rug takes a color, so it leads its group.
+    expect(names('Alfombras')).toEqual(['Alfombra tejida', 'Tarima de madera', 'Alfombra de seguridad', 'Alfombra de césped', 'Alfombra de piedras', 'Alfombra de mosaico']);
     expect(names('Paredes')).toEqual(['Puerta simple', 'Puerta doble', 'Ventana']);
     // The chairs and desk tables that take a color come first, each kind otherwise in catalog order.
     expect(names('Sillas')).toEqual(['Silla gamer', 'Sillón tapizado', 'Puff', 'Silla de madera', 'Silla de metal', 'Silla de cuero', 'Silla de oficina', 'Silla giratoria', 'Silla de comedor']);
@@ -153,8 +155,9 @@ describe('DecorPalette', () => {
     const input = screen.getByLabelText(/^Color de Escritorio pintado:/);
     expect(input).toHaveAttribute('type', 'color');
     expect(input).toHaveAttribute('aria-label', 'Color de Escritorio pintado: #4f9a8a');
-    // Only the painted desk, the gamer desk (its lights), the gamer chair (its red accent), the fabric armchair, the pouf, the fabric sofas and the tree (its leaves) take a color; every other tile has none.
+    // Only the painted desk, the gamer desk (its lights), the gamer chair (its red accent), the fabric armchair, the pouf, the fabric sofas, the tree (its leaves) and the woven rug take a color; every other tile has none.
     expect(screen.getAllByLabelText(/^Color de/).map((color) => color.getAttribute('aria-label')).sort()).toEqual([
+      'Color de Alfombra tejida: #de6e3c',
       'Color de Escritorio gamer: #a066e8',
       'Color de Escritorio pintado: #4f9a8a',
       'Color de Puff: #6b8fb3',

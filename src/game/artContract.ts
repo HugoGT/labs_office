@@ -95,6 +95,7 @@ export const ART_IMAGE_KINDS = [
   'table',
   'door',
   'sofa',
+  'rug',
 ] as const;
 export type ArtImageKind = (typeof ART_IMAGE_KINDS)[number];
 
@@ -984,6 +985,47 @@ export const TABLE: TableSpec = {
 };
 
 /**
+ * The two ways a desk rug lies (a 3x2 rug, laid under a desk): its long side
+ * across the screen (`horizontal`, the footprint as stated) or along the floor
+ * depth (`vertical`, the footprint swapped). The decor layer's rotation 0 and
+ * 90; a rug is drawn per facing, never rotated, so its light keeps falling the
+ * same way.
+ */
+export const RUG_FACINGS = ['horizontal', 'vertical'] as const;
+export type RugFacing = (typeof RUG_FACINGS)[number];
+
+/** Rows of a rug frame under its footprint, for what hangs below a raised floor (legs, a contact shadow). */
+export const RUG_BELOW = 4;
+
+export interface RugSpec extends ImageSpecBase {
+  readonly kind: 'rug';
+  readonly columnOrder: readonly RugFacing[];
+  /** The horizontal footprint, in tiles. */
+  readonly footprint: Footprint;
+  /** The floor under the bottom middle of the footprint, in either frame. */
+  readonly anchor: Point;
+}
+
+/**
+ * Desk rugs, one column per `RUG_FACINGS`: a frame fits the 3x2 rug both ways
+ * (96x64 and 64x96) plus RUG_BELOW rows, the footprint's bottom middle on the
+ * anchor in both. A rug lies flat under every other decor piece and never
+ * blocks the way.
+ */
+export const RUG: RugSpec = {
+  kind: 'rug',
+  frame: { width: 96, height: 96 + RUG_BELOW },
+  columns: RUG_FACINGS.length,
+  rows: 1,
+  columnOrder: RUG_FACINGS,
+  alpha: 'partial',
+  transparentCorners: true,
+  maxColors: MAX_COLORS_PER_IMAGE,
+  footprint: { w: 3, h: 2 },
+  anchor: { x: 48, y: 96 },
+};
+
+/**
  * The door frame (S14): 8 tiles tall, because a door in a vertical run stands
  * in the walls' projection, its frame rising 77px over the span's top (to
  * where the wall's material ends) and the lower leaf of a double door
@@ -1245,6 +1287,7 @@ export const ART_IMAGE_SPECS: Readonly<{
   table: TableSpec;
   door: DoorSpec;
   sofa: SofaSpec;
+  rug: RugSpec;
 }> = {
   'character-walk': CHARACTER_WALK,
   'character-seated': CHARACTER_SEATED,
@@ -1260,6 +1303,7 @@ export const ART_IMAGE_SPECS: Readonly<{
   table: TABLE,
   door: DOOR,
   sofa: SOFA,
+  rug: RUG,
 };
 
 export function sheetSize(spec: Pick<ImageSpecBase, 'frame' | 'columns' | 'rows'>): Size {
@@ -1354,7 +1398,7 @@ export function artSheetKey(pieceId: string, role: string): string {
 /** `format` of `public/assets/pack/manifest.json`. */
 export const ART_PACK_FORMAT = 'oficina-art-pack';
 
-export const ART_PIECE_KINDS = ['character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door', 'sofa'] as const;
+export const ART_PIECE_KINDS = ['character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door', 'sofa', 'rug'] as const;
 export type ArtPieceKind = (typeof ART_PIECE_KINDS)[number];
 
 /** One PNG of a piece. Paths are relative to the manifest; `sha256` is of the file bytes. */
@@ -1542,6 +1586,21 @@ export interface ArtDoorPiece extends ArtPieceBase {
   readonly variant: DoorVariant;
 }
 
+/**
+ * A desk rug: one sheet of `RUG` frames, laid on the decor's rug layer under
+ * everything else. `footprint` is the horizontal one; a colorable rug is
+ * exported in `defaultColor` and recolored by ramp like a painted desk.
+ */
+export interface ArtRugPiece extends ArtPieceBase {
+  readonly kind: 'rug';
+  readonly material: string;
+  readonly anchor: Point;
+  readonly footprint: Footprint;
+  readonly facings: readonly RugFacing[];
+  readonly colorable: boolean;
+  readonly defaultColor: string | null;
+}
+
 export type ArtPiece =
   | ArtCharacterPiece
   | ArtChairPiece
@@ -1551,7 +1610,8 @@ export type ArtPiece =
   | ArtTilesetPiece
   | ArtPropPiece
   | ArtDoorPiece
-  | ArtSofaPiece;
+  | ArtSofaPiece
+  | ArtRugPiece;
 
 export interface ArtPackManifest {
   readonly format: typeof ART_PACK_FORMAT;

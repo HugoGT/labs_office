@@ -372,6 +372,46 @@ describe('handleCreateDesk', () => {
     expect(await desks.listDesks()).toEqual([expect.objectContaining({ label: '', x: 4, y: 4, occupantId: null })]);
   });
 
+  it('lays the default grass rug on the new desk as the admin who created it', async () => {
+    const { deps } = harness();
+    const furnished: unknown[] = [];
+
+    const furnish = async (desk: { x: number; y: number }, actorId: string, rotation: number) => void furnished.push([desk.x, desk.y, actorId, rotation]);
+
+    expect((await handleCreateDesk(BEARER_ADMIN, { x: 4, y: 4 }, { ...deps, furnish })).status).toBe(201);
+    // The turn chosen with the wheel while placing it; without one, the bottom rows.
+    expect((await handleCreateDesk(BEARER_ADMIN, { x: 10, y: 4, rugRotation: 270 }, { ...deps, furnish })).status).toBe(201);
+    expect(furnished).toEqual([[4, 4, 'id-admin', 0], [10, 4, 'id-admin', 270]]);
+  });
+
+  it('refuses a rug turn that is not a quarter turn, creating nothing', async () => {
+    const { deps, desks } = harness();
+
+    const result = await handleCreateDesk(BEARER_ADMIN, { x: 4, y: 4, rugRotation: 45 }, deps);
+
+    expect(result.status).toBe(400);
+    expect(await desks.listDesks()).toEqual([]);
+  });
+
+  it('still creates the desk when its rug does not fit', async () => {
+    const { deps, desks } = harness();
+
+    const result = await handleCreateDesk(BEARER_ADMIN, { x: 4, y: 4 }, { ...deps, furnish: async () => { throw new Error('under placement'); } });
+
+    expect(result.status).toBe(201);
+    expect(await desks.listDesks()).toHaveLength(1);
+  });
+
+  it('lays no rug when the desk is refused', async () => {
+    const { deps } = harness();
+    let furnished = 0;
+
+    const result = await handleCreateDesk(BEARER_ADMIN, { x: 'a', y: 4 }, { ...deps, furnish: async () => void (furnished += 1) });
+
+    expect(result.status).toBe(400);
+    expect(furnished).toBe(0);
+  });
+
   it('refuses a label that is not a string', async () => {
     const { deps } = harness();
 

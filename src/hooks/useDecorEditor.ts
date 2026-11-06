@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { describeAdminError } from '../dashboard/adminErrors';
 import { AdminError } from '../dashboard/adminPort';
 import { decorBrushTarget, decorColorKey, decorMoveEdits, decorPickAt, withFallenTopItems, type DecorBrush } from '../game/decorEditor';
-import { deskOverChairLimit, displacedDeskTables } from '../game/deskDecorRules';
+import { deskOverChairLimit, displacedDeskRugs, displacedDeskTables } from '../game/deskDecorRules';
 import { isEditableElementFocused } from '../game/inputFocusGuard';
 import { MAP_W } from '../game/mapData';
 import type { OfficeBridge } from '../game/officeBridge';
@@ -15,6 +15,7 @@ import {
   decorItemKey,
   decorKey,
   decorLayerOf,
+  decorRemoval,
   decorRotationFor,
   defaultDecorRotation,
   fitsInsideDesk,
@@ -303,10 +304,16 @@ export function useDecorEditor({
    * tables it displaces leave in the same click (so the preview shows the
    * table gone), and a click that would put a fourth chair on a desk is
    * refused here. The desk rules count the floor alone, and a top piece
-   * (`placed` null) takes no part in them. What the click leaves off its
-   * surface leaves with it (#121). Returns whether it queued.
+   * (`placed` null) takes no part in them; a rug displaces the rug lying on
+   * its desk, the same way. What the click leaves off its surface leaves
+   * with it (#121). Returns whether it queued.
    */
-  function queuePlacement(after: readonly DecorItem[], click: DecorEdit[], placed: number | null): boolean {
+  function queuePlacement(after: readonly DecorItem[], click: DecorEdit[], ruled: { index: number; layer: 'floor' | 'rug' } | null): boolean {
+    if (desks.length > 0 && ruled?.layer === 'rug') {
+      const rugs = withDecor(after, click).filter((item) => decorLayerOf(item.piece) === 'rug');
+      click.push(...displacedDeskRugs(rugs, [ruled.index], infoOf, desks, MAP_W).map((index): DecorEdit => ({ index, item: null, layer: 'rug' })));
+    }
+    const placed = ruled?.layer === 'floor' ? ruled.index : null;
     if (desks.length > 0 && placed !== null) {
       const floor = (layer: readonly DecorItem[]): DecorItem[] => layer.filter((item) => decorLayerOf(item.piece) === 'floor');
       const placedLayer = withDecor(after, click);
@@ -323,7 +330,10 @@ export function useDecorEditor({
   }
 
   /** The floor anchor a placement on `index` takes part in the desk rules with, or `null` for a top piece. */
-  const deskRuled = (index: number, piece: string): number | null => (decorLayerOf(piece) === 'floor' ? index : null);
+  const deskRuled = (index: number, piece: string): { index: number; layer: 'floor' | 'rug' } | null => {
+    const layer = decorLayerOf(piece);
+    return layer === 'top' ? null : { index, layer };
+  };
   /** The item of `layer` anchored on `index` in `items`. */
   const anchoredOn = (items: readonly DecorItem[], index: number, piece: string): DecorItem | undefined =>
     items.find((item) => decorItemKey(item) === decorKey(index, decorLayerOf(piece)));
@@ -436,7 +446,7 @@ export function useDecorEditor({
     const after = layerAfter();
     const item = after.find((candidate) => decorItemKey(candidate) === key);
     if (item === undefined) return;
-    const removal: DecorEdit = decorLayerOf(item.piece) === 'top' ? { index: item.index, item: null, layer: 'top' } : { index: item.index, item: null };
+    const removal = decorRemoval(item);
     queue(...withFallenTopItems(after, [removal], infoOf, MAP_W));
   }
 

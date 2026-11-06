@@ -83,6 +83,7 @@ import {
 } from './deskRules.ts';
 import type { Desk, DeskDirectory, OfficeDesk, UpdateDeskInput } from './desksPort.ts';
 import { TerrainProtectedError } from '../terrain/terrainRules.ts';
+import { isDecorRotation, type DecorRotation } from '../../../src/game/officeDecor.ts';
 import type { AreaMove } from '../terrain/terrainRuntime.ts';
 
 export interface DesksDeps extends AdminDeps {
@@ -99,6 +100,12 @@ export interface DesksDeps extends AdminDeps {
    * desk (#208): a desk is only a zone, and what stands on it stays.
    */
   walls?: DeskWallGuard;
+  /**
+   * Lays the decor a new desk starts with (its grass rug, `defaultDeskRug`,
+   * at the turn the body's `rugRotation` chose, 0 when absent) as `actorId`. Best effort: a desk where the rug does not fit is still
+   * created, empty.
+   */
+  furnish?: (desk: DeskPosition, actorId: string, rotation: DecorRotation) => Promise<void>;
 }
 
 /**
@@ -261,10 +268,19 @@ async function movingContents<T>(id: string, position: DeskPosition, actorId: st
     return { from: { x: desk.x, y: desk.y, w: DESK_SIDE, h: DESK_SIDE }, dx: position.x - desk.x, dy: position.y - desk.y };
   };
   const undo = async () => (before === null ? null : deps.desks.updateDesk(id, before));
-  return deps.walls.carry(actorId, locate, async (grid) => {
-    assertClearOfWalls(position, grid);
-    return write();
-  }, undo);
+  const walls = deps.walls;
+  try {
+    return await walls.carry(actorId, locate, async (grid) => {
+      assertClearOfWalls(position, grid);
+      return write();
+    }, undo);
+  } catch (error) {
+    // The carried contents are checked before the desk, and every desk now
+    // carries its rug: a desk landing on a wall would answer
+    // `contents-blocked`. Read after the failure, this only explains it.
+    if (error instanceof TerrainProtectedError) await walls.run(async (grid) => assertClearOfWalls(position, grid));
+    throw error;
+  }
 }
 
 /**
@@ -303,6 +319,8 @@ export async function handleCreateDesk(
   if (!authorized.ok) return authorized.result;
 
   if (!isPlainObject(body)) return INVALID_REQUEST;
+  const rugRotation = body.rugRotation ?? 0;
+  if (!isDecorRotation(rugRotation)) return INVALID_REQUEST;
 
   // Se leen solo los campos declarados. Un `id` o un `occupantId` puestos a
   // mano se caen aqui: el id lo genera la base de datos, y quien se sienta lo
@@ -319,9 +337,19 @@ export async function handleCreateDesk(
           ...(appearance === undefined ? {} : { appearance }),
         }),
       );
+      await furnishing(created, authorized.user.id, rugRotation, deps);
       return { status: 201, body: toAdminDeskBody(created) };
     }),
   );
+}
+
+/** Runs `deps.furnish` after the desk is saved: its failure leaves the desk in place, without its rug. */
+async function furnishing(desk: DeskPosition, actorId: string, rotation: DecorRotation, deps: DesksDeps): Promise<void> {
+  try {
+    await deps.furnish?.(desk, actorId, rotation);
+  } catch {
+    console.warn('[desks] the new desk could not get its default rug');
+  }
 }
 
 export async function handleUpdateDesk(

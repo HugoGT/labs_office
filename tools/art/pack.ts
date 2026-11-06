@@ -24,6 +24,8 @@ import {
   HEDGE,
   PACK_FACINGS,
   PLANT,
+  RUG,
+  RUG_FACINGS,
   SOFA,
   TABLE,
   TABLE_FACINGS,
@@ -50,6 +52,7 @@ import { DESK_DEFAULT_COLORS, ROOM_TABLE_FOOTPRINTS, type RoomTable, type TableM
 import { DEFAULT_CARPET_COLOR, DEFAULT_PLAIN_COLOR, type Terrain } from './domain/tiles.ts';
 import type { WallMaterial } from './domain/wallMap.ts';
 import { DEFAULT_PLASTER_COLOR } from './domain/wallColumns.ts';
+import { RUG_DEFAULT_COLORS, type RugKind } from './domain/rugs/catalog.ts';
 import { encodePng } from '../../server/src/assets/pngCodec.ts';
 import { renderPreviews } from './preview.ts';
 import { buildPackSheets } from './sheets.ts';
@@ -111,6 +114,14 @@ const TABLES: Readonly<Record<RoomTable, { readonly name: string; readonly mater
   round: { name: 'Mesa redonda', material: 'oak' },
 };
 /** The single and the double door are two items (#233), each with its own name and wall footprint; the window a third (tile walls). */
+const RUG_NAMES: Readonly<Record<RugKind, string>> = {
+  woven: 'Alfombra tejida',
+  wood: 'Tarima de madera',
+  hazard: 'Alfombra de seguridad',
+  grass: 'Alfombra de césped',
+  stone: 'Alfombra de piedras',
+  mosaic: 'Alfombra de mosaico',
+};
 const DOOR_NAMES: Readonly<Record<DoorVariant, string>> = { single: 'Puerta simple', double: 'Puerta doble', window: 'Ventana' };
 /** The whole 3x3 deck is walkable in both orientations; the rails are thin enough to step along. */
 const FULL_DECK = { x: 0, y: 0, w: BRIDGE.footprint.w, h: BRIDGE.footprint.h } as const;
@@ -334,6 +345,23 @@ export function renderPackFiles(): Map<string, Uint8Array> {
         anchor: DOOR.anchor,
         footprint: { w: DOOR.variants[variant].span, h: 1 },
         files: [png(`door/${material}${suffix}.png`, 'sheet', 'door', image)],
+      };
+    }),
+    // Desk rugs lie on the decor's rug layer, under every other piece; only the woven one takes a color.
+    ...sheets.rugs.map(({ kind, image }): ArtPiece => {
+      const defaultColor = RUG_DEFAULT_COLORS[kind] ?? null;
+      return {
+        id: `rug-${kind}`,
+        kind: 'rug',
+        name: RUG_NAMES[kind],
+        ...common,
+        material: kind,
+        anchor: RUG.anchor,
+        footprint: RUG.footprint,
+        facings: RUG_FACINGS,
+        colorable: defaultColor !== null,
+        defaultColor,
+        files: [png(`rug/${kind}.png`, 'sheet', 'rug', image)],
       };
     }),
   ];

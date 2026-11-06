@@ -593,6 +593,8 @@ describe('createTerrainRuntime decor', () => {
     { id: 'bridge-wood', kind: 'bridge', footprint: { w: 1, h: 1 }, retired: false },
     { id: 'sofa-leather-3', kind: 'sofa', footprint: { w: 3, h: 1 }, colorable: false, retired: false },
     { id: 'sofa-fabric-2', kind: 'sofa', footprint: { w: 2, h: 1 }, colorable: true, retired: false },
+    { id: 'rug-grass', kind: 'rug', footprint: { w: 3, h: 2 }, retired: false },
+    { id: 'rug-stone', kind: 'rug', footprint: { w: 3, h: 2 }, retired: false },
   ];
   const decorPieces = async () => CATALOG;
   const runtimeWith = (store = createMemoryTerrain(), pieces = vi.fn(decorPieces)) =>
@@ -876,6 +878,27 @@ describe('createTerrainRuntime decor', () => {
       await runtime.setDecor([{ index: at(DESK.x, DESK.y), item: { piece: 'chair-wood', rotation: 90 } }], 'user-1', DESK, desks);
       await runtime.setDecor([{ index: at(DESK.x + 2, DESK.y), item: null }, { index: at(DESK.x + 2, DESK.y + 2), item: WOOD_DOWN }], 'user-1', DESK, desks);
       expect(runtime.decor()).toHaveLength(3);
+    });
+
+    it('lets the occupant lay one rug under their desk table, a new rug replacing it', async () => {
+      const store = createMemoryTerrain([], [], [table(DESK.x + 1, DESK.y + 1)]);
+      const runtime = runtimeWith(store);
+      await runtime.load();
+      const centre = at(DESK.x + 1, DESK.y + 1);
+      const grass = { index: centre, piece: 'rug-grass', rotation: 0 as const };
+      const stone = { index: centre, piece: 'rug-stone', rotation: 180 as const };
+      const side = { index: centre, piece: 'rug-stone', rotation: 270 as const };
+
+      await runtime.setDecor([{ index: centre, item: { piece: grass.piece, rotation: 0 } }], 'user-1', DESK, desks);
+      expect(runtime.decor()).toEqual([grass, table(DESK.x + 1, DESK.y + 1)]);
+
+      // From the desk centre every turn stays on the desk: the top rows, then a side.
+      await runtime.setDecor([{ index: centre, item: { piece: stone.piece, rotation: 180 } }], 'user-1', DESK, desks);
+      expect(runtime.decor()).toEqual([stone, table(DESK.x + 1, DESK.y + 1)]);
+      await runtime.setDecor([{ index: centre, item: { piece: side.piece, rotation: 270 } }], 'user-1', DESK, desks);
+      expect(runtime.decor()).toEqual([side, table(DESK.x + 1, DESK.y + 1)]);
+      // Hung down from the desk's bottom row it would spill off the desk.
+      await expect(runtime.setDecor([{ index: at(DESK.x + 1, DESK.y + 2), item: { piece: 'rug-stone', rotation: 0 } }], 'user-1', DESK, desks)).rejects.toThrow();
     });
   });
 

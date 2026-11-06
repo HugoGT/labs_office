@@ -428,6 +428,25 @@ describe('findDecorConflict', () => {
     expect(conflict([], [])).toBeNull();
   });
 
+  describe('desk rugs', () => {
+    const rugInfo = (piece: string): DecorPieceInfo | null => (piece.startsWith('rug-') ? { kind: 'rug', footprint: { w: 3, h: 2 } } : infoOf(piece));
+    const check = (after: DecorItem[], placed: number[], snapshot = BASE_TERRAIN) => findDecorConflict(after, new Set(placed), rugInfo, snapshot, STATIC);
+    const rug = (index: number, rotation: 0 | 90 = 0): DecorItem => ({ index, piece: 'rug-grass', rotation });
+    const rugKey = (index: number) => decorKey(index, 'rug');
+
+    it('lays a rug under furniture, and furniture on a rug, on separate layers', () => {
+      const desk: DecorItem = { index: free, piece: 'desk-wood', rotation: 0 };
+      expect(check([desk, rug(free)], [rugKey(free)])).toBeNull();
+      expect(check([desk, rug(free)], [free])).toBeNull();
+    });
+
+    it('refuses a rug over another rug, and one off the walkable ground', () => {
+      expect(check([rug(free), rug(free + 1, 90)], [rugKey(free + 1)])).toBe('placement');
+      const flooded = { ...BASE_TERRAIN, walkable: BASE_TERRAIN.walkable.map((walkable, tile) => (tile === free + 1 ? false : walkable)) };
+      expect(check([rug(free)], [rugKey(free)], flooded)).toBe('placement');
+    });
+  });
+
   describe('doors and windows in tile walls (#223, #233, S6-S10)', () => {
     const door = (index: number, rotation: 0 | 90 | 180 | 270 = 0, piece = 'door-wood'): DecorItem => ({ index, piece, rotation });
     const doorInfo = (piece: string): DecorPieceInfo | null => {

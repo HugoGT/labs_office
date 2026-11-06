@@ -182,6 +182,10 @@ describe('pieceCollisions: instances', () => {
     expect(worldRectsOf(seat!, new Map([['chair-wood', [{ x: -4, y: -6, w: 8, h: 4 }]]]))).toEqual([{ x: 114, y: 172, w: 4, h: 8 }]);
   });
 
+  it('never blocks the way with a rug: it is floor', () => {
+    expect(officeDecorInstances([{ index: 2 * 10 + 3, piece: 'rug-grass', rotation: 0 }], () => ({ kind: 'rug', footprint: { w: 3, h: 2 } }), 10)).toEqual([]);
+  });
+
   it('puts each decor chair on the middle of its tile, as its own piece, turned by its rotation', () => {
     const items = [{ index: 2 * 10 + 3, piece: 'chair-gamer', rotation: 270 as const }, { index: 0, piece: 'chair-metal', rotation: 0 as const }];
     const instances = officeDecorInstances(items, infoOf, 10);

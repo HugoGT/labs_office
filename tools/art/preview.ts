@@ -13,6 +13,7 @@ import {
   CHARACTER_WALK,
   DESK,
   DOOR,
+  RUG,
   FLOOR,
   HEDGE,
   PACK_FACINGS,
@@ -523,6 +524,20 @@ function tablesPreview(sheets: PackSheets): PixelBuffer {
   return out;
 }
 
+/** Every rug sheet (both facings) over a wood floor, one row per rug. */
+function rugsPreview(sheets: PackSheets): PixelBuffer {
+  const width = RUG.columns * RUG.frame.width;
+  const height = Math.ceil(RUG.frame.height / ART_TILE) * ART_TILE;
+  const out = backdrop(GAP + width + GAP, GAP + sheets.rugs.length * (height + GAP));
+  const floor = sheets.floors.find((entry) => entry.terrain === 'wood')!.image;
+  sheets.rugs.forEach(({ image }, row) => {
+    const cell = tiledFloor(floor, width / ART_TILE, height / ART_TILE);
+    cell.blit(image, 0, 0);
+    out.blit(cell, GAP, GAP + row * (height + GAP));
+  });
+  return out;
+}
+
 /** Preview images by file name, already upscaled. */
 /** Every door sheet over a wood floor, frame grid as the sheet lays it out (#223). */
 function doorsPreview(sheets: PackSheets): PixelBuffer {
@@ -587,6 +602,7 @@ export function renderPreviews(sheets: PackSheets): Map<string, PixelBuffer> {
     ['floors.png', upscale(floorsPreview(sheets), PREVIEW_SCALE)],
     ['furniture.png', upscale(furniturePreview(sheets), PREVIEW_SCALE)],
     ['props.png', upscale(propsPreview(sheets), PREVIEW_SCALE)],
+    ['rugs.png', upscale(rugsPreview(sheets), PREVIEW_SCALE)],
     ['sofas.png', upscale(sofasPreview(sheets), PREVIEW_SCALE)],
     ['tables.png', upscale(tablesPreview(sheets), PREVIEW_SCALE)],
     ['terrain-pairs.png', upscale(terrainPairsPreview(sheets), PREVIEW_SCALE)],

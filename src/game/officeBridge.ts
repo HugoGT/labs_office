@@ -20,7 +20,7 @@ import type { AccessDeniedReason, MediaEventMessage, PresenceStatus, RecordingRe
 import type { RosterPeer } from './roster';
 import type { TerrainEditCommand } from './terrainEditor';
 import type { DecorEditCommand } from './decorEditor';
-import type { DecorItem } from './officeDecor';
+import type { DecorItem, DecorRotation } from './officeDecor';
 import type { CollisionEditCommand } from './collisionEditor';
 import type { CollisionRect, CollisionRotation } from './pieceCollisions';
 import type { ActiveRecordingSnapshot, OfficeConnectionState } from './officeRoomClient';
@@ -195,7 +195,8 @@ export interface OfficeEventMap {
    * pre-chequeo resuelta (`layoutEditor.isPlacementValid`) -- el reductor en
    * React decide que hacer con eso, incluido pedirselo al servidor.
    */
-  layoutplace: { tx: number; ty: number; valid: boolean };
+  /** `rugRotation`: the turn of a new desk's rug preview (`LayoutEditLayer`), absent for a move or a room. */
+  layoutplace: { tx: number; ty: number; valid: boolean; rugRotation?: DecorRotation };
   /**
    * The selected desk or room (`id`) got a click on its move or trash button
    * on the map, or the selection a click on the empty map, which lets it go.

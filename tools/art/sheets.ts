@@ -14,6 +14,9 @@ import {
   DOOR_STEPS,
   HEDGE,
   PACK_FACINGS,
+  RUG,
+  RUG_BELOW,
+  RUG_FACINGS,
   SOFA,
   TABLE,
   TABLE_FACINGS,
@@ -60,6 +63,7 @@ import { TERRAINS, terrainTile, type Terrain } from './domain/tiles.ts';
 import { WALL_MATERIALS, type WallMaterial } from './domain/wallMap.ts';
 import { wallFrame } from './domain/wallColumns.ts';
 import { crop, place } from './imageOps.ts';
+import { RUG_KINDS, rugSprite, type RugKind } from './domain/rugs/catalog.ts';
 
 export { characterSeatedSheet, characterWalkSheet } from '../../src/art/characterSheets.ts';
 
@@ -210,6 +214,17 @@ export function tableSheet(kind: RoomTable): PixelBuffer {
   return sheet;
 }
 
+/** One column per facing, in RUG_FACINGS order, the footprint's bottom middle on the anchor in both. */
+export function rugSheet(kind: RugKind): PixelBuffer {
+  const sheet = blankSheet(RUG);
+  RUG_FACINGS.forEach((facing, column) => {
+    const image = rugSprite(kind, facing);
+    const footprintHeight = image.height - RUG_BELOW;
+    place(sheet, image, column * RUG.frame.width + RUG.anchor.x - image.width / 2, RUG.anchor.y - footprintHeight);
+  });
+  return sheet;
+}
+
 /** One column per orientation, in BRIDGE_ORIENTATIONS order. */
 export function bridgeSheet(): PixelBuffer {
   const sheet = blankSheet(BRIDGE);
@@ -253,6 +268,7 @@ export interface PackSheets {
   readonly hedge: PixelBuffer;
   readonly tables: readonly { readonly kind: RoomTable; readonly image: PixelBuffer }[];
   readonly doors: readonly { readonly material: DoorMaterial; readonly variant: DoorVariant; readonly image: PixelBuffer }[];
+  readonly rugs: readonly { readonly kind: RugKind; readonly image: PixelBuffer }[];
 }
 
 export function buildPackSheets(): PackSheets {
@@ -273,5 +289,6 @@ export function buildPackSheets(): PackSheets {
     hedge: hedgeSheet(),
     tables: ROOM_TABLES.map((kind) => ({ kind, image: tableSheet(kind) })),
     doors: DOOR_PIECES.map(({ material, variant }) => ({ material, variant, image: doorSheet(material, variant) })),
+    rugs: RUG_KINDS.map((kind) => ({ kind, image: rugSheet(kind) })),
   };
 }

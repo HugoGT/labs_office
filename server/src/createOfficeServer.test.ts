@@ -3152,11 +3152,14 @@ describe('terrain routes (#123 phase 2)', () => {
     const overChair = await postDesk('/admin/desks', { label: 'Mesa A', x: 66, y: 21 });
     expect(overChair.status).toBe(201);
     const { id } = (await overChair.json()) as { id: string };
-    // A move carries the chair on the desk and replaces the table that stood where it lands.
+    // The new desk gets its grass rug on its bottom two rows, anchored at its centre.
+    const rug = { index: 22 * width + 67, piece: 'rug-grass', rotation: 0 };
+    expect(server.terrain.decor()).toEqual([rug, { index: chair, piece: 'chair-metal', rotation: 90 }, { index: table, piece: 'desk-wood', rotation: 0 }]);
+    // A move carries the rug and the chair on the desk and replaces the table that stood where it lands.
     expect((await postDesk(`/admin/desks/${id}`, { x: 71, y: 21 })).status).toBe(200);
-    await waitFor(() => decodeOfficeDecor(room.state.officeDecor, width * height)?.length === 1);
+    await waitFor(() => decodeOfficeDecor(room.state.officeDecor, width * height)?.length === 2);
     expect((await postDesk(`/admin/desks/${id}/delete`, {})).status).toBe(200);
-    expect(server.terrain.decor()).toEqual([{ index: chair + 5, piece: 'chair-metal', rotation: 90 }]);
+    expect(server.terrain.decor()).toEqual([{ ...rug, index: rug.index + 5 }, { index: chair + 5, piece: 'chair-metal', rotation: 90 }]);
 
     // The chair still keeps water off its block.
     const blocked = await setBlock(url, blockIndexAt(width, 72, 22), 'water');
@@ -3183,14 +3186,15 @@ describe('terrain routes (#123 phase 2)', () => {
     const created = await postDesk('/admin/desks', { x: 66, y: 17 });
     expect(created.status).toBe(201);
     const { id } = (await created.json()) as { id: string };
-    // A move replaces what stood where the desk lands: both tables go, so it holds none.
+    // A move replaces what stood where the desk lands: both tables go, so it holds only its rug.
     expect((await postDesk(`/admin/desks/${id}`, { x: 66, y: 21 })).status).toBe(200);
-    expect(server.terrain.decor()).toEqual([]);
+    const rug = { index: 22 * width + 67, piece: 'rug-grass', rotation: 0 };
+    expect(server.terrain.decor()).toEqual([rug]);
 
     // On the desk a second desk table replaces the first.
     expect((await setDecor(url, '/admin/decor', [{ index: 21 * width + 67, item: { piece: 'desk-wood', rotation: 0 } }])).status).toBe(200);
     expect((await setDecor(url, '/admin/decor', [{ index: 23 * width + 67, item: { piece: 'desk-wood', rotation: 0 } }])).status).toBe(200);
-    expect(server.terrain.decor()).toEqual([{ index: 23 * width + 67, piece: 'desk-wood', rotation: 0 }]);
+    expect(server.terrain.decor()).toEqual([rug, { index: 23 * width + 67, piece: 'desk-wood', rotation: 0 }]);
     await server.shutdown();
   });
 
