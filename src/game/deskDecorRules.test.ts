@@ -4,6 +4,7 @@ import {
   MAX_DESK_OCCUPANCY,
   MAX_DESK_RUGS,
   MAX_DESK_TABLES,
+  defaultDeskRug,
   deskAreaAt,
   deskBetweenTables,
   deskEntryRefused,
@@ -12,7 +13,7 @@ import {
   displacedDeskTables,
   isOnDesk,
 } from './deskDecorRules';
-import { decorInfoFromPieceId, type DecorItem, type DecorRotation } from './officeDecor';
+import { decorFootprint, decorInfoFromPieceId, type DecorItem, type DecorRotation } from './officeDecor';
 
 const W = 40;
 const TILE = 32;
@@ -28,6 +29,14 @@ describe('desk decor limits', () => {
     expect(MAX_DESK_CHAIRS).toBe(3);
     expect(MAX_DESK_OCCUPANCY).toBe(6);
     expect(MAX_DESK_RUGS).toBe(1);
+  });
+});
+
+describe('defaultDeskRug', () => {
+  it('is the grass rug on the bottom two rows of a new desk, anchored at its centre', () => {
+    const rug = defaultDeskRug({ x: 10, y: 10 }, W);
+    expect(rug).toEqual({ index: at(11, 11), piece: 'rug-grass', rotation: 0 });
+    expect(decorFootprint(rug, infoOf(rug.piece), W)).toEqual({ x: 10, y: 11, w: 3, h: 2 });
   });
 });
 

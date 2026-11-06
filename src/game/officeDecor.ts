@@ -196,7 +196,7 @@ export function isRotatable(kind: DecorKind): boolean {
  * a vertical (90) frame only.
  */
 export function decorRotationsOf(kind: DecorKind): readonly DecorRotation[] {
-  if (kind === 'table' || kind === 'rug') return [0, 90];
+  if (kind === 'table') return [0, 90];
   // A plant turns between its drawing (0) and its mirror (180), #121.
   if (kind === 'plant') return [0, 180];
   return isRotatable(kind) ? DECOR_ROTATIONS : [0];
@@ -213,7 +213,7 @@ export function defaultDecorRotation(kind: DecorKind): DecorRotation {
 
 /** `rotation` as `kind` can take it: a room table's symmetric turn, 0 for a plant. */
 export function decorRotationFor(kind: DecorKind, rotation: DecorRotation): DecorRotation {
-  if (kind === 'table' || kind === 'rug') return rotation === 90 || rotation === 270 ? 90 : 0;
+  if (kind === 'table') return rotation === 90 || rotation === 270 ? 90 : 0;
   if (kind === 'plant') return rotation === 180 ? 180 : 0;
   return isRotatable(kind) ? rotation : 0;
 }
@@ -300,11 +300,24 @@ export function decorFootprint(item: DecorPlacement, info: DecorPieceInfo | null
     const horizontal = item.rotation === 0 || item.rotation === 180;
     return horizontal ? { x: tx - 1, y: ty, w: 3, h: 1 } : { x: tx, y: ty - 1, w: 1, h: 3 };
   }
+  if (info.kind === 'rug') return rugFootprint(tx, ty, item.rotation);
   const vertical =
-    ((info.kind === 'table' || info.kind === 'rug') && decorRotationFor(info.kind, item.rotation) === 90) || (info.kind === 'sofa' && (item.rotation === 90 || item.rotation === 270));
+    (info.kind === 'table' && decorRotationFor(info.kind, item.rotation) === 90) || (info.kind === 'sofa' && (item.rotation === 90 || item.rotation === 270));
   const w = vertical ? info.footprint.h : info.footprint.w;
   const h = vertical ? info.footprint.w : info.footprint.h;
   return { x: tx - Math.floor(w / 2), y: ty - Math.floor(h / 2), w, h };
+}
+
+/**
+ * A rug hangs from its anchor toward its turn (0 down, 90 right, 180 up, 270
+ * left, the chair's facings) and always covers the anchor. Anchored at a desk
+ * centre, each turn lays it on two rows or columns of the desk: a new desk
+ * gets its grass rug on the bottom two rows and the wheel moves it around.
+ */
+function rugFootprint(tx: number, ty: number, rotation: DecorRotation): DecorTileRect {
+  if (rotation === 0) return { x: tx - 1, y: ty, w: 3, h: 2 };
+  if (rotation === 180) return { x: tx - 1, y: ty - 1, w: 3, h: 2 };
+  return { x: rotation === 90 ? tx : tx - 1, y: ty - 1, w: 2, h: 3 };
 }
 
 /** Every tile of a footprint rectangle, row major (`ty * width + tx`). */
@@ -380,7 +393,7 @@ export function decorItemCovering(
  * vertical either way, a plant between its drawing and its mirror (#121).
  */
 export function nextDecorRotation(rotation: DecorRotation, step: 1 | -1, kind: DecorKind = 'chair'): DecorRotation {
-  if (kind === 'table' || kind === 'rug') return decorRotationFor(kind, rotation) === 0 ? 90 : 0;
+  if (kind === 'table') return decorRotationFor(kind, rotation) === 0 ? 90 : 0;
   if (kind === 'plant') return decorRotationFor('plant', rotation) === 0 ? 180 : 0;
   if (!isRotatable(kind)) return 0;
   return ((((rotation - step * 90) % 360) + 360) % 360) as DecorRotation;

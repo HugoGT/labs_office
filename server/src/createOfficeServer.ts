@@ -72,6 +72,7 @@ import {
   type DecorDeps,
 } from './decor/decorRoutes.ts';
 import { DESK_SIDE } from './desks/deskRules.ts';
+import { defaultDeskRug } from '../../src/game/deskDecorRules.ts';
 import type { DeskDirectory } from './desks/desksPort.ts';
 import {
   handleClaimDesk,
@@ -1260,7 +1261,14 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
           })),
         carry: (actorId, locate, write, undo) => terrain.carry(locate, actorId, terrainProtections, (layer) => write({ ...layer, decorInfo }), undo),
       };
-      run(req, { directory, desks, auth, identityAdmin, decor, walls })
+      // A new desk gets its grass rug through the decor queue, after the desk
+      // is saved, with the desk rules (one rug per desk) like any decor edit.
+      const furnish = async (desk: { x: number; y: number }, actorId: string) => {
+        const rug = defaultDeskRug(desk, terrain.snapshot().width);
+        const deskAreas = async () => ((await desks?.listDesks()) ?? []).map(({ x, y }) => ({ x, y, w: DESK_SIDE, h: DESK_SIDE }));
+        await terrain.setDecor([{ index: rug.index, item: { piece: rug.piece, rotation: rug.rotation } }], actorId, undefined, deskAreas);
+      };
+      run(req, { directory, desks, auth, identityAdmin, decor, walls, furnish })
         .then((result) => {
           // Adapter promises resolve after COMMIT; failures never invalidate.
           // `notifyDesksChanged` also refreshes the collision placements.

@@ -245,7 +245,7 @@ export function DeskEditorSection({
             onRemove={(id) => void editor.remove(id)}
           />
 
-          {/* Nothing to ask: a desk is created empty, and its occupant decorates it from "Decoración". */}
+          {/* Nothing to ask: a desk is created with its grass rug only, and its occupant decorates it from "Decoración". */}
           {!embedded && (
             <>
               <button type="button" className={styles.button} disabled={busy} onClick={editor.startCreate}>

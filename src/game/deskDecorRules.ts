@@ -28,6 +28,18 @@ export const MAX_DESK_RUGS = 1;
 export const MAX_DESK_CHAIRS = 3;
 export const MAX_DESK_OCCUPANCY = 6;
 
+/** The rug a new desk is created with. */
+export const DEFAULT_DESK_RUG = 'rug-grass';
+
+/**
+ * The rug laid on a new desk: anchored at the desk centre and turned 0, so it
+ * covers the bottom two rows; the wheel hangs it from the same centre to a
+ * side or the top rows (`decorFootprint`).
+ */
+export function defaultDeskRug(desk: { readonly x: number; readonly y: number }, width: number): DecorItem {
+  return { index: (desk.y + 1) * width + desk.x + 1, piece: DEFAULT_DESK_RUG, rotation: 0 };
+}
+
 type InfoOf = (piece: string) => DecorPieceInfo | null;
 
 function sharesTile(a: DecorTileRect, b: DecorTileRect): boolean {
