@@ -58,6 +58,8 @@ export function MediaMenu({ label, sections, disabled, disabledTitle }: MediaMen
     menuRef.current?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
+      // Handled: the screen share stage minimizes on an Escape nothing else took (#304).
+      event.preventDefault();
       setOpen(false);
       caretRef.current?.focus();
     };

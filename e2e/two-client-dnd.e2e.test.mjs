@@ -20,6 +20,7 @@ import {
   waitForPeerVideoPlaying,
   waitForRoomIndicator,
   waitForScreenShareStage,
+  waitForScreenShareThumbnail,
 } from './harness.mjs';
 
 const AUDIO_E2E_ENABLED = Boolean(process.env.VITE_LIVEKIT_E2E);
@@ -106,6 +107,34 @@ test(
     await waitForPeerVideoPlaying(pageA, peerBId);
     await startScreenShare(pageA);
     await waitForScreenShareStage(pageB, peerAId);
+  },
+);
+
+// Follows the scenario above, which leaves A sharing with B in a space.
+test(
+  'Escape minimizes the view of a share without cutting it, for the sharer and for whoever watches (#304)',
+  { skip: !SPACES_ENABLED },
+  async () => {
+    const sidebarOf = (page) => page.getByRole('complementary', { name: 'Personas' });
+    assert.equal(await sidebarOf(pageA).isVisible(), false);
+
+    await pageA.keyboard.press('Escape');
+    await waitForScreenShareThumbnail(pageA);
+    assert.equal(await sidebarOf(pageA).isVisible(), true);
+    assert.equal(await pageA.getByRole('button', { name: /Dejar de compartir/ }).isVisible(), true);
+    // B still gets the share: the sharer only moved its own view.
+    await waitForScreenShareStage(pageB, peerAId);
+
+    await pageB.keyboard.press('Escape');
+    await waitForScreenShareThumbnail(pageB);
+
+    await pageA.getByRole('button', { name: 'Ampliar pantalla compartida' }).click();
+    await waitForScreenShareStage(pageA, peerAId);
+    assert.equal(await sidebarOf(pageA).isVisible(), false);
+
+    await pageA.getByRole('button', { name: /Dejar de compartir/ }).click();
+    await pageB.getByTestId('screen-share-thumbnail').waitFor({ state: 'detached' });
+    assert.equal(await sidebarOf(pageA).isVisible(), true);
   },
 );
 

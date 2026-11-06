@@ -294,7 +294,7 @@ export interface OfficeCommandMap {
   speakers: { sessionIds: string[] };
   /**
    * Whether the HUD wants the minimap out of the way (#304): the own screen
-   * share is up, so `OfficeShell` hides the sidebar and the scene follows.
+   * share holds the stage, so `OfficeShell` hides the sidebar and the scene follows.
    */
   hideminimap: { hidden: boolean };
   /**

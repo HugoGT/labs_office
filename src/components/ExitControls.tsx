@@ -68,6 +68,8 @@ function InstallButton({ offer }: { offer: InstallOffer }) {
     panelRef.current?.focus();
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
+      // Handled: the screen share stage minimizes on an Escape nothing else took (#304).
+      event.preventDefault();
       setOpen(false);
       buttonRef.current?.focus();
     };

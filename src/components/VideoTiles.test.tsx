@@ -1,4 +1,5 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { userEvent } from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import type { AttachableTrack } from '../game/attachableTrack';
@@ -31,6 +32,9 @@ function renderTiles(overrides: Partial<ComponentProps<typeof VideoTiles>> = {})
     screenShareTracks: new Map<string, AttachableTrack>(),
     localScreenShareTrack: null as AttachableTrack | null,
     activeScreenSharer: null as string | null,
+    stageMinimized: false,
+    onMinimizeStage: vi.fn(),
+    onRestoreStage: vi.fn(),
     ...overrides,
   };
   const { rerender } = render(<VideoTiles {...props} />);
@@ -537,5 +541,116 @@ describe('VideoTiles: crowded room (#280)', () => {
     } finally {
       Object.defineProperty(window, 'innerWidth', { configurable: true, value: width });
     }
+  });
+});
+
+describe('VideoTiles: the stage minimized to a thumbnail (#304)', () => {
+  const IN_SPACE = {
+    selfSessionId: 'yo',
+    selfName: 'HugoGT',
+    peers: [{ sessionId: 'ana', name: 'Ana' }],
+    spaceId: 'sala-de-juntas-stub',
+  };
+  const OWN_SHARE = { activeScreenSharer: 'yo' };
+
+  it('goes up as one more tile: no stage, the plain row, and the share still playing', () => {
+    const { bridge } = renderTiles({ ...OWN_SHARE, localScreenShareTrack: fakeVideoTrack(), stageMinimized: true });
+    act(() => bridge.emit('voice', IN_SPACE));
+
+    expect(screen.queryByTestId('screen-share-stage')).not.toBeInTheDocument();
+    const bar = screen.getByTestId('video-tile-bar');
+    expect(bar).toHaveAttribute('data-layout', 'row');
+    const thumbnail = within(bar).getByTestId('screen-share-thumbnail');
+    expect(thumbnail).toHaveTextContent('Tu pantalla');
+    expect(thumbnail.querySelector('video')).toBeInTheDocument();
+    expect(tileIds().filter(Boolean)).toEqual(['yo', 'ana']);
+  });
+
+  it('names whose screen it is for someone watching a peer', () => {
+    const { bridge } = renderTiles({
+      activeScreenSharer: 'ana',
+      screenShareTracks: new Map([['ana', fakeVideoTrack()]]),
+      stageMinimized: true,
+    });
+    act(() => bridge.emit('voice', IN_SPACE));
+
+    expect(screen.getByTestId('screen-share-thumbnail')).toHaveTextContent('Pantalla de Ana');
+  });
+
+  it('shows up for a sharer alone with no camera, who has no other tile', () => {
+    const { bridge } = renderTiles({ ...OWN_SHARE, localScreenShareTrack: fakeVideoTrack(), stageMinimized: true });
+    act(() => bridge.emit('voice', { ...IN_SPACE, peers: [] }));
+
+    expect(within(screen.getByTestId('video-tile-bar')).getByTestId('screen-share-thumbnail')).toBeInTheDocument();
+  });
+
+  it('moving between stage and thumbnail keeps one video of the share and never remounts a camera', () => {
+    const { bridge, rerender } = renderTiles({ ...OWN_SHARE, localScreenShareTrack: fakeVideoTrack(), localVideoTrack: fakeVideoTrack() });
+    act(() => bridge.emit('voice', IN_SPACE));
+    const camera = screen.getByTestId('video-tile-bar').querySelector('[data-session-id="yo"] video');
+
+    rerender({ stageMinimized: true });
+    expect(screen.queryByTestId('screen-share-stage')).not.toBeInTheDocument();
+    expect(screen.getByTestId('screen-share-thumbnail').querySelectorAll('video')).toHaveLength(1);
+    expect(screen.getByTestId('video-tile-bar').querySelector('[data-session-id="yo"] video')).toBe(camera);
+
+    rerender({ stageMinimized: false });
+    expect(screen.queryByTestId('screen-share-thumbnail')).not.toBeInTheDocument();
+    expect(screen.getByTestId('screen-share-stage').querySelectorAll('video')).toHaveLength(1);
+    expect(screen.getByTestId('video-tile-bar').querySelector('[data-session-id="yo"] video')).toBe(camera);
+  });
+
+  it('counts as a slot, so the bar never grows past what fits', () => {
+    const peers = Array.from({ length: 10 }, (_, index) => ({ sessionId: `p${index}`, name: `P${index}` }));
+    const { bridge } = renderTiles({ ...OWN_SHARE, localScreenShareTrack: fakeVideoTrack(), stageMinimized: true });
+    act(() => bridge.emit('voice', { ...IN_SPACE, peers }));
+
+    // jsdom's 1024px fit 6 slots in the row: the thumbnail, the counter and 4 tiles.
+    expect(screen.getByTestId('video-tile-bar').children).toHaveLength(6);
+    expect(screen.getByTestId('video-tile-overflow')).toHaveTextContent('+7 personas');
+  });
+
+  it('clicking the thumbnail asks for the stage back', async () => {
+    const onRestoreStage = vi.fn();
+    const { bridge } = renderTiles({ ...OWN_SHARE, localScreenShareTrack: fakeVideoTrack(), stageMinimized: true, onRestoreStage });
+    act(() => bridge.emit('voice', IN_SPACE));
+
+    await userEvent.click(screen.getByRole('button', { name: 'Ampliar pantalla compartida' }));
+
+    expect(onRestoreStage).toHaveBeenCalledTimes(1);
+  });
+
+  it('Escape asks to minimize an open stage, and handles the press', () => {
+    const onMinimizeStage = vi.fn();
+    const { bridge } = renderTiles({ ...OWN_SHARE, localScreenShareTrack: fakeVideoTrack(), onMinimizeStage });
+    act(() => bridge.emit('voice', IN_SPACE));
+
+    // `fireEvent` answers false for a default-prevented event.
+    expect(fireEvent.keyDown(window, { key: 'Escape' })).toBe(false);
+    expect(onMinimizeStage).toHaveBeenCalledTimes(1);
+  });
+
+  it('Escape leaves everything alone with no stage open or once minimized', () => {
+    const onMinimizeStage = vi.fn();
+    const { bridge, rerender } = renderTiles({ onMinimizeStage });
+    act(() => bridge.emit('voice', IN_SPACE));
+    expect(fireEvent.keyDown(window, { key: 'Escape' })).toBe(true);
+
+    rerender({ ...OWN_SHARE, localScreenShareTrack: fakeVideoTrack(), stageMinimized: true });
+    expect(fireEvent.keyDown(window, { key: 'Escape' })).toBe(true);
+    expect(onMinimizeStage).not.toHaveBeenCalled();
+  });
+
+  it('an Escape something else already handled does not minimize too', () => {
+    const onMinimizeStage = vi.fn();
+    const { bridge } = renderTiles({ ...OWN_SHARE, localScreenShareTrack: fakeVideoTrack(), onMinimizeStage });
+    act(() => bridge.emit('voice', IN_SPACE));
+    const claim = (event: KeyboardEvent) => event.preventDefault();
+    window.addEventListener('keydown', claim, true);
+
+    fireEvent.keyDown(window, { key: 'Escape' });
+
+    window.removeEventListener('keydown', claim, true);
+    expect(onMinimizeStage).not.toHaveBeenCalled();
   });
 });

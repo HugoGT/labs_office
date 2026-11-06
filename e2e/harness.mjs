@@ -800,6 +800,19 @@ export async function startScreenShare(page) {
   await page.getByRole('button', { name: /Dejar de compartir/ }).waitFor({ timeout: READINESS_DEADLINE_MS });
 }
 
+/** The share moved from the stage to its thumbnail on this page, with a live `<video>` (#304). */
+export async function waitForScreenShareThumbnail(page) {
+  await page.waitForFunction(
+    () => {
+      const element = document.querySelector('[data-testid="screen-share-thumbnail"] video');
+      const stage = document.querySelector('[data-testid="screen-share-stage"]');
+      return Boolean(element && !stage && !element.paused && element.readyState >= 2);
+    },
+    undefined,
+    { timeout: READINESS_DEADLINE_MS },
+  );
+}
+
 /** The peer's screen share reached this page's stage with a live `<video>`. */
 export async function waitForScreenShareStage(page, sessionId) {
   await page.waitForFunction(
