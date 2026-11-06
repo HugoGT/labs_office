@@ -137,6 +137,7 @@ function proximityAudio(
     audioBlocked: false,
     audioReconnecting: false,
     connectionQuality: 'unknown',
+    audioLost: false,
     dnd: false,
     toggleMic: vi.fn(),
     toggleCam: vi.fn(),

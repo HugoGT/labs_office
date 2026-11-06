@@ -2,7 +2,7 @@ import { render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { DEFAULT_NAME } from '../game/officeProtocol';
+import { DEFAULT_NAME, DO_NOT_DISTURB } from '../game/officeProtocol';
 import { STATUS_COLOR, statusCssColor } from '../game/presence';
 import type { OfficeEventMap } from '../game/officeBridge';
 import { BottomBar } from './BottomBar';
@@ -397,33 +397,97 @@ describe('BottomBar: audio reconnecting (#283)', () => {
   });
 });
 
-describe('BottomBar: connection quality (#275)', () => {
+describe('BottomBar: connection quality (#275, #307)', () => {
+  function statusLine(): HTMLElement {
+    return document.querySelector<HTMLElement>(`.${styles.status}`)!;
+  }
+
   it.each([
     ['excellent', 'Conexión excelente'],
     ['good', 'Conexión buena'],
-    ['poor', 'Conexión débil'],
-    ['lost', 'Conexión perdida'],
-  ] as const)('shows %s as "%s" in the Estado group', (quality, label) => {
+  ] as const)('keeps %s off the bar and offers it when hovering the status text', (quality, label) => {
     renderBar({ connectionQuality: quality });
 
-    const indicator = within(screen.getByRole('group', { name: 'Estado' })).getByText(new RegExp(label));
-    expect(indicator.getAttribute('title')).toMatch(/calidad/i);
+    expect(screen.queryByText(new RegExp(label))).not.toBeInTheDocument();
+    expect(statusLine()).toHaveTextContent('Audio por proximidad');
+    expect(statusLine().getAttribute('title')).toContain(label);
   });
 
-  it('says nothing while the quality is not measured yet', () => {
+  it('offers a good connection over the room name too', () => {
+    renderBar({ connectionQuality: 'good', room: 'Sala Norte' });
+
+    expect(statusLine()).toHaveTextContent('Sala Norte');
+    expect(statusLine().getAttribute('title')).toContain('Conexión buena');
+  });
+
+  it.each([
+    ['poor', 'Conexión débil'],
+    ['lost', 'Conexión perdida'],
+  ] as const)('replaces the audio status with %s, visible without hovering', (quality, label) => {
+    renderBar({ connectionQuality: quality });
+
+    expect(statusLine()).toHaveTextContent(label);
+    expect(statusLine()).not.toHaveTextContent('proximidad');
+    expect(statusLine().getAttribute('title')).toMatch(/calidad/i);
+  });
+
+  it('moves the room name to the hover while a bad connection takes its place, and REC stays', () => {
+    renderBar({ connectionQuality: 'poor', room: 'Sala Norte', recording: true });
+
+    expect(statusLine()).toHaveTextContent('Conexión débil');
+    expect(statusLine()).not.toHaveTextContent('Sala Norte');
+    expect(statusLine().getAttribute('title')).toContain('Sala Norte');
+    expect(screen.getByText('REC')).toBeInTheDocument();
+  });
+
+  it('replaces the audio status while the audio reconnects, whatever the last quality said', () => {
+    renderBar({ audioReconnecting: true, connectionQuality: 'lost' });
+
+    expect(statusLine()).toHaveTextContent('Reconectando audio…');
+    expect(statusLine()).not.toHaveTextContent('proximidad');
+    expect(screen.queryByText(/Conexión perdida/)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/Reconectando audio/)).toHaveLength(1);
+  });
+
+  it('replaces the audio status once an audio connection was lost for good', () => {
+    renderBar({ audioAvailable: false, audioLost: true });
+
+    expect(statusLine()).toHaveTextContent('Conexión perdida');
+    expect(statusLine()).not.toHaveTextContent('proximidad');
+    expect(statusLine().getAttribute('title')).toBeTruthy();
+  });
+
+  it('stays as today without LiveKit: no warning and nothing to hover', () => {
+    renderBar({ audioAvailable: false, connectionQuality: 'unknown' });
+
+    expect(statusLine()).toHaveTextContent('Audio por proximidad');
+    expect(statusLine()).not.toHaveAttribute('title');
+  });
+
+  it('says nothing about a quality measured for no live room', () => {
+    renderBar({ audioAvailable: false, connectionQuality: 'poor' });
+
+    expect(statusLine()).toHaveTextContent('Audio por proximidad');
+    expect(statusLine()).not.toHaveAttribute('title');
+  });
+
+  it('has nothing to hover while the quality is not measured yet', () => {
     renderBar({ connectionQuality: 'unknown' });
 
     expect(screen.queryByText(/Conexión/)).not.toBeInTheDocument();
+    expect(statusLine()).not.toHaveAttribute('title');
   });
 
-  it('says nothing without a live audio connection, nor while it is coming back', () => {
-    renderBar({ audioAvailable: false, connectionQuality: 'good' });
-    expect(screen.queryByText(/Conexión buena/)).not.toBeInTheDocument();
-  });
+  it.each([
+    [{ connectionQuality: 'poor' }],
+    [{ audioReconnecting: true }],
+    [{ audioAvailable: false, audioLost: true }],
+    [{ connectionQuality: 'excellent' }],
+  ] as const)('"No molestar" always wins the status line: %j', (overrides) => {
+    renderBar({ ...overrides, status: DO_NOT_DISTURB });
 
-  it('leaves the word to the reconnecting indicator during an outage', () => {
-    renderBar({ audioReconnecting: true, connectionQuality: 'lost' });
-    expect(screen.queryByText(/Conexión perdida/)).not.toBeInTheDocument();
+    expect(statusLine()).toHaveTextContent('No molestar');
+    expect(statusLine()).not.toHaveAttribute('title');
   });
 });
 

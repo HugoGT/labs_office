@@ -1701,6 +1701,84 @@ describe('useProximityAudio: a room lost for good is rebuilt (#84)', () => {
     expect(removed.disconnect).toHaveBeenCalled();
     expect(result.current.audioAvailable).toBe(false);
     expect(result.current.audioReconnecting).toBe(false);
+    expect(result.current.audioLost).toBe(true);
+  });
+
+  it('a new place that connects again clears a room lost for good (#307)', async () => {
+    const bridge = createOfficeBridge();
+    const { connect, options } = connectSeries(fakeConnection(), fakeConnection());
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+    const { result } = renderHook(() =>
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
+    );
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), spaceId: 's1' });
+    });
+    await act(async () => options[0].onDisconnected?.('stop'));
+    expect(result.current.audioLost).toBe(true);
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), spaceId: 's2' });
+    });
+
+    expect(connect).toHaveBeenCalledTimes(2);
+    expect(result.current.audioAvailable).toBe(true);
+    expect(result.current.audioLost).toBe(false);
+  });
+
+  it('a first connection that fails was never lost: without LiveKit the bar stays quiet (#307)', async () => {
+    const bridge = createOfficeBridge();
+    const connect = vi.fn(async () => {
+      throw new Error('livekit down');
+    });
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+    const { result } = renderHook(() =>
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
+    );
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), spaceId: 's1' });
+    });
+
+    expect(result.current.audioAvailable).toBe(false);
+    expect(result.current.audioLost).toBe(false);
+  });
+
+  it('a room being rebuilt is not lost: it says reconnecting (#307)', async () => {
+    vi.useFakeTimers();
+    const bridge = createOfficeBridge();
+    const { connect, options } = connectSeries(fakeConnection(), fakeConnection());
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+    const { result } = renderHook(() =>
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
+    );
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), spaceId: 's1' });
+    });
+
+    await act(async () => options[0].onDisconnected?.('rebuild'));
+
+    expect(result.current.audioReconnecting).toBe(true);
+    expect(result.current.audioLost).toBe(false);
+  });
+
+  it('leaving the office clears a room lost for good (#307)', async () => {
+    const bridge = createOfficeBridge();
+    const { connect, options } = connectSeries(fakeConnection());
+    const fetchToken = vi.fn(async () => fakeTokenResponse());
+    const { result } = renderHook(() =>
+      useProximityAudio(bridge, { config: CONFIG, status: 'g', connect, fetchToken }),
+    );
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: peersOf(['ana']), spaceId: 's1' });
+    });
+    await act(async () => options[0].onDisconnected?.('stop'));
+
+    await act(async () => {
+      bridge.emit('voice', { selfSessionId: null, selfName: 'Yo', peers: [], spaceId: null });
+    });
+
+    expect(result.current.audioLost).toBe(false);
   });
 
   it('the mic left on before the outage is on again in the rebuilt room (#283, #277)', async () => {

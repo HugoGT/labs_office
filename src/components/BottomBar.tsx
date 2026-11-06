@@ -31,6 +31,8 @@ export interface BottomBarProps {
    * `audioReconnecting`: `'unknown'` or absent says nothing.
    */
   connectionQuality?: ConnectionQualityLevel;
+  /** A connection that existed is gone and nothing brings it back by itself (#307). */
+  audioLost?: boolean;
   recording: boolean;
   room: string | null;
   /**
@@ -138,6 +140,27 @@ const CONNECTION_QUALITY_LABEL: Record<Exclude<ConnectionQualityLevel, 'unknown'
 
 const CONNECTION_QUALITY_TITLE = 'Calidad de tu conexión de audio y vídeo, según LiveKit';
 
+const AUDIO_LOST_TITLE = 'Se perdió la conexión de audio: volverá al cambiar de lugar';
+
+/**
+ * What the status line says instead of the audio state: the bar stays quiet
+ * while all is well and only speaks up about a problem (#307). Reconnecting
+ * goes first because the last measured quality is stale during an outage.
+ */
+function audioProblem(
+  audioAvailable: boolean,
+  audioReconnecting: boolean,
+  audioLost: boolean,
+  quality: ConnectionQualityLevel,
+): { label: string; title: string } | null {
+  if (audioReconnecting) return { label: `🟡 ${AUDIO_RECONNECTING_LABEL}`, title: AUDIO_RECONNECTING_TITLE };
+  if (audioLost) return { label: CONNECTION_QUALITY_LABEL.lost, title: AUDIO_LOST_TITLE };
+  if (audioAvailable && (quality === 'poor' || quality === 'lost')) {
+    return { label: CONNECTION_QUALITY_LABEL[quality], title: CONNECTION_QUALITY_TITLE };
+  }
+  return null;
+}
+
 /** El otro motivo de `disabled`, y el unico que el usuario puede deshacer solo. */
 const DND_TITLE = 'No molestar: no publicas micrófono ni cámara';
 
@@ -205,6 +228,7 @@ export function BottomBar({
   audioAvailable,
   audioReconnecting = false,
   connectionQuality = 'unknown',
+  audioLost = false,
   recording,
   room,
   presence,
@@ -258,6 +282,16 @@ export function BottomBar({
     deviceSection('audioinput', devices, selectedDevices, onSelectDevice),
     ...(audioOutputSelectable ? [deviceSection('audiooutput', devices, selectedDevices, onSelectDevice)] : []),
   ];
+  const problem = dnd ? null : audioProblem(audioAvailable, audioReconnecting, audioLost, connectionQuality);
+  // A problem takes the room name's place, so the hover keeps the name. A good
+  // connection asks for nothing: hovering is the only place that mentions it.
+  const statusTitle = dnd
+    ? undefined
+    : problem
+      ? [room, problem.title].filter(Boolean).join(' · ')
+      : audioAvailable && connectionQuality !== 'unknown'
+        ? CONNECTION_QUALITY_LABEL[connectionQuality]
+        : undefined;
   const recordTitle =
     room === null ? ONLY_IN_SPACE_TITLE : recording || recordableMedia ? undefined : NOTHING_TO_RECORD_TITLE;
 
@@ -377,11 +411,13 @@ export function BottomBar({
             {locked ? '🔓' : '🔒'}
           </button>
         </span>
-        <div className={styles.status}>
+        <div className={styles.status} title={statusTitle}>
           {dnd ? (
             // Anunciar "Audio por proximidad" mientras nada es audible seria
             // mentir sobre lo unico que esta linea existe para contar.
             <>🔴 No molestar: aislado del audio de la oficina</>
+          ) : problem ? (
+            <>{problem.label}</>
           ) : room ? (
             <b>{room}</b>
           ) : (
@@ -421,17 +457,6 @@ export function BottomBar({
             ) : (
               <>⚪ Sin servidor</>
             )}
-          </div>
-        )}
-        {audioReconnecting && (
-          <div className={styles.presence} title={AUDIO_RECONNECTING_TITLE}>
-            🟡 {AUDIO_RECONNECTING_LABEL}
-          </div>
-        )}
-        {/* Only for a live room: during an outage the line above says it. */}
-        {audioAvailable && !audioReconnecting && connectionQuality !== 'unknown' && (
-          <div className={styles.presence} title={CONNECTION_QUALITY_TITLE}>
-            {CONNECTION_QUALITY_LABEL[connectionQuality]}
           </div>
         )}
         {/* Solo cuando la sesion se perdio Y hay servidor configurado al que

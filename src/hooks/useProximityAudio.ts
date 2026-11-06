@@ -123,6 +123,12 @@ export interface UseProximityAudioResult {
   audioReconnecting: boolean;
   /** Quality LiveKit measures for the own connection (#275); `'unknown'` without a room. */
   connectionQuality: ConnectionQualityLevel;
+  /**
+   * The server took this connection away and coming back would undo it (#283),
+   * so nothing retries until a new place asks for a room. Distinct from having
+   * no LiveKit at all, where `audioAvailable` is just as `false` (#307).
+   */
+  audioLost: boolean;
   /** `true` en "No molestar": ni se publica ni se escucha audio de la oficina. */
   dnd: boolean;
   toggleMic: () => void;
@@ -237,6 +243,7 @@ export function useProximityAudio(
   const [audioBlocked, setAudioBlocked] = useState(false);
   const [audioReconnecting, setAudioReconnecting] = useState(false);
   const [connectionQuality, setConnectionQuality] = useState<ConnectionQualityLevel>('unknown');
+  const [audioLost, setAudioLost] = useState(false);
   /** By ref: a new function each render must not rebuild the room. */
   const randomRef = useRef(random);
   useEffect(() => {
@@ -443,6 +450,7 @@ export function useProximityAudio(
       setAudioAvailable(false);
       setAudioBlocked(false);
       setAudioReconnecting(false);
+      setAudioLost(false);
       setConnectionQuality('unknown');
       // Ninguna pista, hablante o camara sobrevive a la sala que las reporto:
       // sin esto, salir de una sala dejaria el ultimo estado colgado en React.
@@ -564,7 +572,10 @@ export function useProximityAudio(
           // Removed by the server or replaced by the same identity (#283):
           // coming back would undo it. The target stays, so only a new place
           // asks for a room again.
-          if (reaction === 'stop') return;
+          if (reaction === 'stop') {
+            setAudioLost(true);
+            return;
+          }
           // Never at once (#283): the whole office loses LiveKit together.
           setAudioReconnecting(true);
           scheduleRebuild(target, generationRef.current, 0);
@@ -673,6 +684,7 @@ export function useProximityAudio(
             const oldConnection = connectionRef.current;
             connectionRef.current = connection;
             setAudioAvailable(true);
+            setAudioLost(false);
             setInSpaceRoom(true);
             applyRoomKind(response, false);
             reapplyPublishIntent(connection);
@@ -747,6 +759,7 @@ export function useProximityAudio(
           if (stale) void stale.disconnect();
           setAudioAvailable(true);
           setAudioReconnecting(false);
+          setAudioLost(false);
           // Fallen back to the corridor (D5) is not a space: no sharing there.
           setInSpaceRoom(target.spaceId !== null && !acquired.corridor);
           applyRoomKind(acquired.response, acquired.corridor);
@@ -984,6 +997,7 @@ export function useProximityAudio(
     audioBlocked,
     audioReconnecting,
     connectionQuality,
+    audioLost,
     dnd,
     toggleMic,
     toggleCam,
