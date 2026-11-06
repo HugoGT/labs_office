@@ -7,6 +7,8 @@
  *     removes the other desk tables on it in the same save
  *     (`displacedDeskTables`), and a desk cannot be created or moved between
  *     two of them (`deskBetweenTables`, 409 `desk-between-tables`).
+ *   - At most `MAX_DESK_RUGS` rug per desk: placing one on a desk removes
+ *     the other rugs on it in the same save (`displacedDeskRugs`).
  *   - At most `MAX_DESK_CHAIRS` chairs per desk (`deskOverChairLimit`, 409
  *     `desk-chair-limit`).
  *   - At most `MAX_DESK_OCCUPANCY` people inside a desk area: the next one
@@ -22,6 +24,7 @@
 import { decorFootprint, type DecorItem, type DecorPieceInfo, type DecorTileRect } from './officeDecor.ts';
 
 export const MAX_DESK_TABLES = 1;
+export const MAX_DESK_RUGS = 1;
 export const MAX_DESK_CHAIRS = 3;
 export const MAX_DESK_OCCUPANCY = 6;
 
@@ -66,15 +69,41 @@ export function displacedDeskTables(
   desks: readonly DecorTileRect[],
   width: number,
 ): number[] {
+  return displacedOnDesk('desk', items, placed, infoOf, desks, width);
+}
+
+/**
+ * The anchors of the rugs a batch displaces, like `displacedDeskTables`: a
+ * rug placed on a desk removes every other rug on it, the last one placed
+ * winning. `items` is the rug layer alone, after the batch's own edits.
+ */
+export function displacedDeskRugs(
+  items: readonly DecorItem[],
+  placed: readonly number[],
+  infoOf: InfoOf,
+  desks: readonly DecorTileRect[],
+  width: number,
+): number[] {
+  return displacedOnDesk('rug', items, placed, infoOf, desks, width);
+}
+
+function displacedOnDesk(
+  kind: 'desk' | 'rug',
+  items: readonly DecorItem[],
+  placed: readonly number[],
+  infoOf: InfoOf,
+  desks: readonly DecorTileRect[],
+  width: number,
+): number[] {
   const layer = new Map(items.map((item) => [item.index, item]));
   const removed: number[] = [];
   for (const anchor of [...placed].reverse()) {
     const item = layer.get(anchor);
     const info = item === undefined ? null : infoOf(item.piece);
-    if (item === undefined || info === null || info.kind !== 'desk') continue;
+    if (item === undefined || info === null || info.kind !== kind) continue;
     for (const desk of desks) {
       if (!isOnDesk(item, info, desk, width)) continue;
-      for (const other of onDeskOfKind('desk', desk, [...layer.values()], infoOf, width)) {
+      for (const other of onDeskOfKind(kind, desk, [...layer.values()], infoOf, width)) {
         if (other.index === anchor) continue;
         layer.delete(other.index);
         removed.push(other.index);

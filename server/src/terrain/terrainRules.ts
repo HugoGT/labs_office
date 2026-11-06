@@ -297,7 +297,7 @@ export function parseDecorBatch(body: unknown, tileCount: number): DecorEdit[] {
     if (item === null) {
       if (seen.has(decorKey(index, layer ?? 'floor'))) throw new InvalidTerrainEditError('duplicate tile');
       seen.add(decorKey(index, layer ?? 'floor'));
-      return layer === 'top' ? { index, item: null, layer } : { index, item: null };
+      return layer === undefined || layer === 'floor' ? { index, item: null } : { index, item: null, layer };
     }
     if (typeof item !== 'object' || item === undefined || Array.isArray(item)) throw new InvalidTerrainEditError('invalid decor item');
     const { piece, rotation, color } = item as Record<string, unknown>;
@@ -349,8 +349,10 @@ export function findDecorConflict(
   const wallTiles = wallTilesAfter(snapshot, after);
   const taken = new Set<number>();
   const takenOnTop = new Set<number>();
+  const takenByRugs = new Set<number>();
   for (const item of after) {
-    const tiles = decorLayerOf(item.piece) === 'top' ? takenOnTop : taken;
+    const layer = decorLayerOf(item.piece);
+    const tiles = layer === 'top' ? takenOnTop : layer === 'rug' ? takenByRugs : taken;
     if (!placed.has(decorItemKey(item))) for (const tile of decorTiles(item, infoOf(item.piece), snapshot.width)) tiles.add(tile);
   }
   for (const item of after) {
@@ -362,6 +364,16 @@ export function findDecorConflict(
       for (const tile of rectTiles(rect, snapshot.width)) {
         if (takenOnTop.has(tile)) return 'placement';
         takenOnTop.add(tile);
+      }
+      continue;
+    }
+    if (decorLayerOf(item.piece) === 'rug') {
+      // A rug lies on walkable floor, never on a wall, nor on another rug; furniture and static props stand on it.
+      const rect = decorFootprint(item, info, snapshot.width);
+      if (!insideMap(rect, snapshot.width, snapshot.height)) return 'placement';
+      for (const tile of rectTiles(rect, snapshot.width)) {
+        if (!snapshot.walkable[tile] || wallTiles[tile] === true || takenByRugs.has(tile)) return 'placement';
+        takenByRugs.add(tile);
       }
       continue;
     }

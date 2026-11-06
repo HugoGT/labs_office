@@ -442,6 +442,41 @@ describe('officeDecor: sofas', () => {
   });
 });
 
+describe('officeDecor: the rug layer', () => {
+  const rugInfo = decorInfoFromPieceId;
+
+  it('puts rugs on a layer of their own, keyed apart from the floor and the top', () => {
+    expect(decorLayerOf('rug-grass')).toBe('rug');
+    const key = decorItemKey({ index: 41, piece: 'rug-woven' });
+    expect(key).toBe(decorKey(41, 'rug'));
+    expect([decorKey(41, 'floor'), decorKey(41, 'top')]).not.toContain(key);
+    expect(decorKeyLayer(key)).toBe('rug');
+    expect(decorKeyIndex(key)).toBe(41);
+  });
+
+  it('is 3x2 centered on its anchor, turned 2x3 at 90, and takes only 0 and 90', () => {
+    expect(rugInfo('rug-stone')).toEqual({ kind: 'rug', footprint: { w: 3, h: 2 } });
+    expect(decorFootprint({ index: at(5, 5), rotation: 0 }, rugInfo('rug-stone'), WIDTH)).toEqual({ x: 4, y: 4, w: 3, h: 2 });
+    expect(decorFootprint({ index: at(5, 5), rotation: 90 }, rugInfo('rug-stone'), WIDTH)).toEqual({ x: 4, y: 4, w: 2, h: 3 });
+    expect(decorRotationFor('rug', 270)).toBe(90);
+    expect(decorRotationFor('rug', 180)).toBe(0);
+  });
+
+  it('lets a desk table and a rug share an anchor, the rug first, and a click picks the furniture over the rug', () => {
+    const rug: DecorItem = { index: at(5, 5), piece: 'rug-grass', rotation: 0 };
+    const desk: DecorItem = { index: at(5, 5), piece: 'desk-wood', rotation: 0 };
+    expect(decodeOfficeDecor(encodeOfficeDecor([desk, rug]), WIDTH * WIDTH)).toEqual([rug, desk]);
+    const info = (piece: string) => (piece === 'desk-wood' ? { kind: 'desk' as const, footprint: { w: 3, h: 1 } } : rugInfo(piece));
+    expect(decorItemCovering([rug, desk], info, WIDTH, at(5, 5))).toBe(desk);
+    expect(decorItemCovering([rug, desk], info, WIDTH, at(5, 4))).toBe(rug);
+  });
+
+  it('removes a rug by naming its layer', () => {
+    const rug: DecorItem = { index: at(5, 5), piece: 'rug-grass', rotation: 0 };
+    expect(diffDecor([rug], [])).toEqual([{ index: at(5, 5), item: null, layer: 'rug' }]);
+  });
+});
+
 describe('officeDecor: the top layer (#121)', () => {
   const DESK_AT = at(5, 5);
   // A desk table turned 0 covers (4..6, 5); the room table 7x5 centered on (14, 10) covers (11..17, 8..12).

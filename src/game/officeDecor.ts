@@ -24,8 +24,8 @@ export const DECOR_ROTATIONS: readonly DecorRotation[] = [0, 90, 180, 270];
  * The art piece kinds the decor layer places; a door (#223) stands on a wall's
  * grid line (`officeDoors.ts`), and a sofa seats one person per tile.
  */
-export type DecorKind = 'chair' | 'desk' | 'plant' | 'table' | 'door' | 'sofa' | 'tree';
-export const DECOR_KINDS: readonly DecorKind[] = ['chair', 'desk', 'plant', 'table', 'door', 'sofa', 'tree'];
+export type DecorKind = 'chair' | 'desk' | 'plant' | 'table' | 'door' | 'sofa' | 'tree' | 'rug';
+export const DECOR_KINDS: readonly DecorKind[] = ['chair', 'desk', 'plant', 'table', 'door', 'sofa', 'tree', 'rug'];
 
 /**
  * The two layers of the decor (#121): the floor, where furniture stands and
@@ -33,8 +33,10 @@ export const DECOR_KINDS: readonly DecorKind[] = ['chair', 'desk', 'plant', 'tab
  * room tables, where a "Mi espacio" piece stands. A tile may hold one item of
  * each. An item's layer is its kind's (`decorLayerOf`), so the wire entries
  * and every stored row written before the layers existed read the same.
+ * Under both lies the rug layer: a desk rug is part of the floor's surface,
+ * so any floor item stands on it and it never blocks the way.
  */
-export type DecorLayer = 'floor' | 'top';
+export type DecorLayer = 'floor' | 'top' | 'rug';
 
 /** The kinds that stand on top of a desk table or room table, never on the floor. */
 export const ON_TOP_KINDS: ReadonlySet<DecorKind> = new Set<DecorKind>(['plant']);
@@ -47,13 +49,25 @@ export function isOnTopKind(kind: string): boolean {
 }
 
 export function isDecorLayer(value: unknown): value is DecorLayer {
-  return value === 'floor' || value === 'top';
+  return value === 'floor' || value === 'top' || value === 'rug';
+}
+
+/** The layer a kind lies on. */
+export function decorLayerOfKind(kind: string): DecorLayer {
+  if (kind === 'rug') return 'rug';
+  return isOnTopKind(kind) ? 'top' : 'floor';
 }
 
 /** The layer of a piece, by the kind its id starts with (piece ids are prefixed by kind, `decorInfoFromPieceId`). */
 export function decorLayerOf(piece: string): DecorLayer {
-  return isOnTopKind(piece.slice(0, piece.indexOf('-'))) ? 'top' : 'floor';
+  return decorLayerOfKind(piece.slice(0, piece.indexOf('-')));
 }
+
+/**
+ * Where the rug layer's keys start: past any tile index of any map, so a rug
+ * key is never a floor one, and positive, so never a top one.
+ */
+const RUG_KEY_BASE = 2 ** 26;
 
 /**
  * One number per (anchor, layer): a floor item's key is its anchor, so every
@@ -62,14 +76,17 @@ export function decorLayerOf(piece: string): DecorLayer {
  * passes it through the bridge where it used to pass the anchor.
  */
 export function decorKey(index: number, layer: DecorLayer): number {
+  if (layer === 'rug') return RUG_KEY_BASE + index;
   return layer === 'top' ? -1 - index : index;
 }
 
 export function decorKeyIndex(key: number): number {
+  if (key >= RUG_KEY_BASE) return key - RUG_KEY_BASE;
   return key < 0 ? -1 - key : key;
 }
 
 export function decorKeyLayer(key: number): DecorLayer {
+  if (key >= RUG_KEY_BASE) return 'rug';
   return key < 0 ? 'top' : 'floor';
 }
 
@@ -80,6 +97,12 @@ export function decorItemKey(item: Pick<DecorItem, 'index' | 'piece'>): number {
 /** The layer an edit touches: a placement its piece's, a removal the one it names, the floor when it names none. */
 export function decorEditLayer(edit: DecorEdit): DecorLayer {
   return edit.item === null ? (edit.layer ?? 'floor') : decorLayerOf(edit.item.piece);
+}
+
+/** The edit that removes `item` from its own layer; a floor removal names none, as every edit did before the layers. */
+export function decorRemoval(item: Pick<DecorItem, 'index' | 'piece'>): DecorEdit {
+  const layer = decorLayerOf(item.piece);
+  return layer === 'floor' ? { index: item.index, item: null } : { index: item.index, item: null, layer };
 }
 
 export function decorEditKey(edit: DecorEdit): number {
@@ -162,7 +185,7 @@ export function isDecorColor(value: unknown): value is string {
   return typeof value === 'string' && DECOR_COLOR.test(value);
 }
 
-/** Chairs, desk tables, room tables and doors turn, and a plant mirrors (#121); a tree is drawn in one frame. */
+/** Chairs, desk tables, room tables, rugs and doors turn, and a plant mirrors (#121); a tree is drawn in one frame. */
 export function isRotatable(kind: DecorKind): boolean {
   return kind !== 'tree';
 }
@@ -173,7 +196,7 @@ export function isRotatable(kind: DecorKind): boolean {
  * a vertical (90) frame only.
  */
 export function decorRotationsOf(kind: DecorKind): readonly DecorRotation[] {
-  if (kind === 'table') return [0, 90];
+  if (kind === 'table' || kind === 'rug') return [0, 90];
   // A plant turns between its drawing (0) and its mirror (180), #121.
   if (kind === 'plant') return [0, 180];
   return isRotatable(kind) ? DECOR_ROTATIONS : [0];
@@ -190,7 +213,7 @@ export function defaultDecorRotation(kind: DecorKind): DecorRotation {
 
 /** `rotation` as `kind` can take it: a room table's symmetric turn, 0 for a plant. */
 export function decorRotationFor(kind: DecorKind, rotation: DecorRotation): DecorRotation {
-  if (kind === 'table') return rotation === 90 || rotation === 270 ? 90 : 0;
+  if (kind === 'table' || kind === 'rug') return rotation === 90 || rotation === 270 ? 90 : 0;
   if (kind === 'plant') return rotation === 180 ? 180 : 0;
   return isRotatable(kind) ? rotation : 0;
 }
@@ -204,6 +227,8 @@ export function decorRotationFor(kind: DecorKind, rotation: DecorRotation): Deco
 const FIXED_FOOTPRINTS: Partial<Record<DecorKind, { w: number; h: number }>> = {
   chair: { w: 1, h: 1 },
   desk: { w: 3, h: 1 },
+  // A desk rug is 3x2, laid centered on its anchor, the long side across at rotation 0.
+  rug: { w: 3, h: 2 },
 };
 
 /**
@@ -217,8 +242,9 @@ export function decorPieceInfo(piece: {
   readonly colorable?: boolean;
 }): DecorPieceInfo | null {
   if (!isDecorKind(piece.kind)) return null;
-  // Only desk tables, chairs, sofas and trees take a color in the art contract (`colorable` of `ArtDeskPiece`, `ArtChairPiece`, `ArtSofaPiece` and `ArtTreePiece`).
-  const colorable = (piece.kind === 'desk' || piece.kind === 'chair' || piece.kind === 'sofa' || piece.kind === 'tree') && piece.colorable === true ? { colorable: true as const } : {};
+  // Only desk tables, chairs, sofas, trees and rugs take a color in the art contract (`colorable` of `ArtDeskPiece`, `ArtChairPiece`, `ArtSofaPiece`, `ArtTreePiece` and `ArtRugPiece`).
+  const tintable = piece.kind === 'desk' || piece.kind === 'chair' || piece.kind === 'sofa' || piece.kind === 'tree' || piece.kind === 'rug';
+  const colorable = tintable && piece.colorable === true ? { colorable: true as const } : {};
   const fixed = FIXED_FOOTPRINTS[piece.kind];
   if (fixed !== undefined) return { kind: piece.kind, footprint: fixed, ...colorable };
   const footprint = piece.footprint;
@@ -236,7 +262,7 @@ export function decorPieceInfo(piece: {
  */
 export function decorInfoFromPieceId(piece: string): DecorPieceInfo | null {
   const kind = piece.slice(0, piece.indexOf('-'));
-  if (kind === 'chair' || kind === 'desk') return decorPieceInfo({ kind });
+  if (kind === 'chair' || kind === 'desk' || kind === 'rug') return decorPieceInfo({ kind });
   if (kind === 'door') return decorPieceInfo({ kind, footprint: { w: doorSpanOf(piece), h: 1 } });
   if (kind === 'sofa') {
     const seats = sofaSeatsOf(piece);
@@ -275,7 +301,7 @@ export function decorFootprint(item: DecorPlacement, info: DecorPieceInfo | null
     return horizontal ? { x: tx - 1, y: ty, w: 3, h: 1 } : { x: tx, y: ty - 1, w: 1, h: 3 };
   }
   const vertical =
-    (info.kind === 'table' && decorRotationFor('table', item.rotation) === 90) || (info.kind === 'sofa' && (item.rotation === 90 || item.rotation === 270));
+    ((info.kind === 'table' || info.kind === 'rug') && decorRotationFor(info.kind, item.rotation) === 90) || (info.kind === 'sofa' && (item.rotation === 90 || item.rotation === 270));
   const w = vertical ? info.footprint.h : info.footprint.w;
   const h = vertical ? info.footprint.w : info.footprint.h;
   return { x: tx - Math.floor(w / 2), y: ty - Math.floor(h / 2), w, h };
@@ -324,7 +350,8 @@ export function findDecorOverlap(items: readonly DecorItem[], infoOf: (piece: st
  * about, or `null`. Where footprints stack (a chair at a room table) the
  * smallest wins, like the collision editor's pick: it is drawn over the
  * other and could not be reached any other way. A top item (#121) wins over
- * any floor item for the same reason, whatever their sizes.
+ * any floor item for the same reason, whatever their sizes, and a rug, under
+ * everything, only wins where nothing else stands.
  */
 export function decorItemCovering(
   items: readonly DecorItem[],
@@ -336,8 +363,9 @@ export function decorItemCovering(
   let bestRank = Number.POSITIVE_INFINITY;
   for (const item of items) {
     const rect = decorFootprint(item, infoOf(item.piece), width);
-    // Every top item ranks under every floor one: no footprint covers the whole map.
-    const rank = rect.w * rect.h - (decorLayerOf(item.piece) === 'top' ? width * width * width : 0);
+    // Every top item ranks under every floor one, and every floor one under every rug: no footprint covers the whole map.
+    const layer = decorLayerOf(item.piece);
+    const rank = rect.w * rect.h + (layer === 'top' ? -1 : layer === 'rug' ? 1 : 0) * width * width * width;
     if (!rectTiles(rect, width).includes(tile) || rank >= bestRank) continue;
     best = item;
     bestRank = rank;
@@ -352,7 +380,7 @@ export function decorItemCovering(
  * vertical either way, a plant between its drawing and its mirror (#121).
  */
 export function nextDecorRotation(rotation: DecorRotation, step: 1 | -1, kind: DecorKind = 'chair'): DecorRotation {
-  if (kind === 'table') return decorRotationFor('table', rotation) === 0 ? 90 : 0;
+  if (kind === 'table' || kind === 'rug') return decorRotationFor(kind, rotation) === 0 ? 90 : 0;
   if (kind === 'plant') return decorRotationFor('plant', rotation) === 0 ? 180 : 0;
   if (!isRotatable(kind)) return 0;
   return ((((rotation - step * 90) % 360) + 360) % 360) as DecorRotation;
@@ -408,9 +436,11 @@ export function decorChairs(items: readonly DecorItem[]): { index: number; piece
   );
 }
 
-/** Anchor order, and on one anchor the floor item before the top one: the order of the layer everywhere. */
-function byAnchor(a: DecorItem, b: DecorItem): number {
-  return a.index - b.index || Number(decorLayerOf(a.piece) === 'top') - Number(decorLayerOf(b.piece) === 'top');
+const LAYER_ORDER: Readonly<Record<DecorLayer, number>> = { rug: -1, floor: 0, top: 1 };
+
+/** Anchor order, and on one anchor the rug, then the floor item, then the top one: the order of the layer everywhere. */
+export function byAnchor(a: DecorItem, b: DecorItem): number {
+  return a.index - b.index || LAYER_ORDER[decorLayerOf(a.piece)] - LAYER_ORDER[decorLayerOf(b.piece)];
 }
 
 /** A copy of `items` with every edit applied in order, each on its own layer (`decorEditKey`), sorted by anchor. */
@@ -424,7 +454,7 @@ export function withDecor(items: readonly DecorItem[], edits: readonly DecorEdit
   return [...byKey.values()].sort(byAnchor);
 }
 
-/** The edits that turn `before` into `after`, one per (anchor, layer) that differs, a top removal naming its layer. */
+/** The edits that turn `before` into `after`, one per (anchor, layer) that differs, a top or rug removal naming its layer. */
 export function diffDecor(before: readonly DecorItem[], after: readonly DecorItem[]): DecorEdit[] {
   const old = new Map(before.map((item) => [decorItemKey(item), item]));
   const changes: DecorEdit[] = [];
@@ -435,7 +465,7 @@ export function diffDecor(before: readonly DecorItem[], after: readonly DecorIte
     if (current !== undefined && current.piece === item.piece && current.rotation === item.rotation && current.color === item.color) continue;
     changes.push({ index: item.index, item: { piece: item.piece, rotation: item.rotation, ...(item.color === undefined ? {} : { color: item.color }) } });
   }
-  for (const item of old.values()) changes.push(decorLayerOf(item.piece) === 'top' ? { index: item.index, item: null, layer: 'top' } : { index: item.index, item: null });
+  for (const item of old.values()) changes.push(decorRemoval(item));
   return changes;
 }
 

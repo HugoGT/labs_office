@@ -78,7 +78,10 @@ import {
   decorRotationsOf,
   diffDecor,
   fallenTopItems,
-  isOnTopKind,
+  decorKeyIndex,
+  decorKeyLayer,
+  decorLayerOfKind,
+  decorRemoval,
   fitsInsideDesk,
   withDecor,
   type DecorEdit,
@@ -86,7 +89,7 @@ import {
   type DecorPieceInfo,
   type DecorTileRect,
 } from '../../../src/game/officeDecor.ts';
-import { deskOverChairLimit, displacedDeskTables } from '../../../src/game/deskDecorRules.ts';
+import { deskOverChairLimit, displacedDeskRugs, displacedDeskTables } from '../../../src/game/deskDecorRules.ts';
 import { doorOpenings, doorPostSet, doorsLeftOffWall, doorsReplacedBy, isDoorPiece } from '../../../src/game/officeDoors.ts';
 import { carriedDecor, onAreaOutline, replacedDecor } from '../../../src/game/areaCarry.ts';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY } from '../../../src/game/mapData.ts';
@@ -253,13 +256,16 @@ export interface DecorCatalogPiece {
 const decorChanges = diffDecor;
 
 /** The removal of an item, on its own layer. */
-function removalOf(item: DecorItem): DecorEdit {
-  return decorLayerOf(item.piece) === 'top' ? { index: item.index, item: null, layer: 'top' } : { index: item.index, item: null };
-}
+const removalOf = decorRemoval;
 
 /** The floor items alone: the desk rules (`deskDecorRules.ts`) know one item per anchor, and only the floor counts for them. */
 function floorOf(items: readonly DecorItem[]): DecorItem[] {
   return items.filter((item) => decorLayerOf(item.piece) === 'floor');
+}
+
+/** The rugs alone, for the one-rug-per-desk rule. */
+function rugsOf(items: readonly DecorItem[]): DecorItem[] {
+  return items.filter((item) => decorLayerOf(item.piece) === 'rug');
 }
 
 export function createTerrainRuntime({
@@ -464,7 +470,7 @@ export function createTerrainRuntime({
       const info = decorPieces ? (known === undefined || known.retired ? null : decorPieceInfo(known)) : decorInfoFromPieceId(item.piece);
       if (info === null) throw new InvalidTerrainEditError('unknown decor piece');
       // The layer is the id's (`decorLayerOf`): a catalog kind that stands on top under a floor id would land on the floor.
-      if (isOnTopKind(info.kind) !== (decorLayerOf(item.piece) === 'top')) throw new InvalidTerrainEditError('this piece stands on another layer');
+      if (decorLayerOfKind(info.kind) !== decorLayerOf(item.piece)) throw new InvalidTerrainEditError('this piece stands on another layer');
       // A room table is symmetric: only its horizontal (0) and vertical (90) frames exist.
       if (!decorRotationsOf(info.kind).includes(item.rotation)) throw new InvalidTerrainEditError('this piece does not turn that way');
       // A colorable piece without a color draws in its manifest default; any other piece takes none.
@@ -493,9 +499,13 @@ export function createTerrainRuntime({
     const deskAreas = desks === undefined ? [] : await desks();
     if (deskAreas.length > 0) {
       // One desk table per desk: the ones a placement displaces leave in the same save. A floor key is its anchor.
-      const floorPlaced = placedInOrder.filter((key) => key >= 0);
+      const floorPlaced = placedInOrder.filter((key) => decorKeyLayer(key) === 'floor');
       const displaced = displacedDeskTables(floorOf(next), floorPlaced, decorInfo, deskAreas, layout.width);
       next = withDecor(next, displaced.map((index) => ({ index, item: null })));
+      // One rug per desk, the same way: a new rug replaces the one lying there.
+      const rugsPlaced = placedInOrder.filter((key) => decorKeyLayer(key) === 'rug').map(decorKeyIndex);
+      const rugsDisplaced = displacedDeskRugs(rugsOf(next), rugsPlaced, decorInfo, deskAreas, layout.width);
+      next = withDecor(next, rugsDisplaced.map((index): DecorEdit => ({ index, item: null, layer: 'rug' })));
       if (deskOverChairLimit(floorOf(decor), floorOf(next), floorPlaced, decorInfo, deskAreas, layout.width) !== null) throw new DeskChairLimitError();
     }
     const nextKeys = new Set(next.map(decorItemKey));

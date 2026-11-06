@@ -7,7 +7,7 @@
 
 import { isLayoutMaterial, isTerrainColor, isWallPieceId, type LayoutMaterial, type WallPieceId } from '../../../src/game/officeLayout.ts';
 import { isTerrainFloorPieceId } from '../../../src/game/terrainFloors.ts';
-import { decorEditLayer, decorLayerOf, isDecorColor, isDecorPieceId, isDecorRotation, type DecorEdit, type DecorItem } from '../../../src/game/officeDecor.ts';
+import { byAnchor, decorEditLayer, decorLayerOf, isDecorColor, isDecorPieceId, isDecorRotation, type DecorEdit, type DecorItem } from '../../../src/game/officeDecor.ts';
 import type { DirectoryPool } from '../directory/pgDirectory.ts';
 import type { TerrainStore } from './terrainPort.ts';
 
@@ -135,7 +135,7 @@ export function createPgTerrain(pool: DirectoryPool): TerrainStore {
         if (row.layer !== decorLayerOf(row.piece_id)) continue;
         items.push({ index: row.tile_index as number, piece: row.piece_id, rotation: row.rotation, ...(color === null ? {} : { color }) });
       }
-      return items.sort((a, b) => a.index - b.index || Number(decorLayerOf(a.piece) === 'top') - Number(decorLayerOf(b.piece) === 'top'));
+      return items.sort(byAnchor);
     },
     async saveDecor(edits, actorId) {
       // One statement, like the walls: removals and placements commit

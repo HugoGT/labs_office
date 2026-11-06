@@ -29,6 +29,7 @@ import {
 import { mergeColliderRects } from './colliderMerge';
 import {
   DESK_ZONE_DEPTH,
+  RUG_DEPTH,
   MINIMAP_MARKER_DEPTH,
   SPACE_SHADE_DEPTH,
   onTopDepth,
@@ -170,6 +171,7 @@ const FOLLOW_LERP = 0.12;
  * piece (#121) shares its anchor with the desk table under it.
  */
 export function decorObjectName(index: number, layer: DecorLayer = 'floor'): string {
+  if (layer === 'rug') return `decor:rug:${index}`;
   return layer === 'top' ? `decor:top:${index}` : `decor:${index}`;
 }
 const ART_FALLBACK_COLOR = 0x6b7280;
@@ -1809,6 +1811,7 @@ export class OfficeScene extends Phaser.Scene {
       return [putArtSprite(this, sheet.key, placement, worldAssetDepth(placement.depthY)).setName(decorObjectName(item.index))];
     }
     if (kind === 'door') return this.drawDoor(item);
+    if (kind === 'rug') return this.drawRug(item, rect, name);
     const propKind = kind === 'table' ? 'table' : kind === 'tree' ? 'tree' : 'plant';
     // A tree in its own leaf color; without one, its manifest default (the exported sheet).
     const sheet = this.artSheet({ materialId: item.piece, color: kind === 'tree' ? (item.color ?? null) : null }, propKind, this.redrawDecor);
@@ -1827,6 +1830,25 @@ export class OfficeScene extends Phaser.Scene {
     // A plant turned 180 is its mirror (#121): one frame, flipped about its anchor's column, the middle of its frame.
     if (sheet.piece.kind === 'plant' && decorRotationFor('plant', item.rotation) === 180) sprite.setFlipX(true);
     return [sprite];
+  }
+
+  /**
+   * A desk rug, flat under every other piece (`RUG_DEPTH`): its sheet's
+   * horizontal or vertical frame on its footprint, in its own color when it
+   * takes one, or a placeholder over the footprint until the sheet loads.
+   */
+  private drawRug(item: DecorItem, rect: DecorTileRect, name: string): Phaser.GameObjects.GameObject[] {
+    const sheet = this.artSheet({ materialId: item.piece, color: item.color ?? null }, 'rug', this.redrawDecor);
+    if (sheet === null || sheet.piece.kind !== 'rug') {
+      return [
+        this.add
+          .rectangle((rect.x + rect.w / 2) * TILE, (rect.y + rect.h / 2) * TILE, rect.w * TILE, rect.h * TILE, ART_FALLBACK_COLOR, ART_FALLBACK_ALPHA)
+          .setDepth(RUG_DEPTH)
+          .setName(name),
+      ];
+    }
+    const placement = propPlacement({ anchor: sheet.piece.anchor, footprint: { w: rect.w, h: rect.h } }, rect.x, rect.y);
+    return [putArtSprite(this, sheet.key, { ...placement, frame: tableFrameIndex(item.rotation) }, RUG_DEPTH).setName(name)];
   }
 
   /**

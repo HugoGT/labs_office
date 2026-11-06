@@ -179,7 +179,7 @@ export function normalizeArtPack(raw: unknown): ArtPackManifest {
         throw new InvalidArtPackError(`art piece ${id} has a file without role, path or sha256`);
       }
     }
-    if (kind === 'desk' || kind === 'floor') {
+    if (kind === 'desk' || kind === 'floor' || kind === 'rug') {
       if (!nonEmptyString(piece.material)) throw new InvalidArtPackError(`art piece ${id} has no material`);
       const valid = piece.colorable === true
         ? typeof piece.defaultColor === 'string' && COLOR.test(piece.defaultColor)
@@ -222,7 +222,10 @@ export interface ArtPieceFields {
 }
 
 export function artPieceFields(piece: ArtPiece): ArtPieceFields {
-  const tinted = piece.kind === 'desk' || piece.kind === 'floor' || piece.kind === 'chair' || piece.kind === 'sofa' || piece.kind === 'tree' || piece.kind === 'wall' ? piece : null;
+  const tinted =
+    piece.kind === 'desk' || piece.kind === 'floor' || piece.kind === 'chair' || piece.kind === 'sofa' || piece.kind === 'tree' || piece.kind === 'wall' || piece.kind === 'rug'
+      ? piece
+      : null;
   return {
     id: piece.id,
     kind: piece.kind,

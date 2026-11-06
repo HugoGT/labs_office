@@ -208,11 +208,11 @@ describe('load requests', () => {
     const requests = bootLoadRequests(pack(), ART_PACK_MANIFEST_URL);
     const kinds = new Set(requests.map((request) => request.key.split(':')[1]?.split('-')[0]));
 
-    expect(kinds).toEqual(new Set(['floor', 'desk', 'chair', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door', 'sofa', 'character']));
+    expect(kinds).toEqual(new Set(['floor', 'desk', 'chair', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door', 'sofa', 'rug', 'character']));
     // Nine floors, six desks, nine chairs and three walls, the terrain tileset,
     // three trees, two plants, a bridge, a hedge, four tables (art step 8, the oval one since #208, the round one), two doors (#223, #233),
-    // a window (tile walls) and four sofas.
-    expect(requests).toHaveLength(47);
+    // a window (tile walls), four sofas and six desk rugs.
+    expect(requests).toHaveLength(53);
     expect(requests.filter((request) => request.key.startsWith('art:character-')).map((request) => request.key))
       .toEqual([artSheetKey(pack().defaults.character, 'walk'), artSheetKey(pack().defaults.character, 'seated')]);
     expect(requests).toContainEqual({

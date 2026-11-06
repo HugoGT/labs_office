@@ -320,8 +320,8 @@ export function officeDecorInstances(
   const instances: CollisionInstance[] = [];
   for (const item of items) {
     const info = infoOf(item.piece);
-    // A door (#223) never blocks: it opens the wall it stands on (`terrainSnapshot`).
-    if (info === null || info.kind === 'door') continue;
+    // A door (#223) never blocks: it opens the wall it stands on (`terrainSnapshot`). A rug is floor: it never blocks either.
+    if (info === null || info.kind === 'door' || info.kind === 'rug') continue;
     const rect = decorFootprint(item, info, width);
     const pickBox = { x: rect.x * COLLISION_TILE, y: rect.y * COLLISION_TILE, w: rect.w * COLLISION_TILE, h: rect.h * COLLISION_TILE };
     const tx = item.index % width;

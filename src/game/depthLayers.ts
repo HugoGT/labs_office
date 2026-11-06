@@ -81,6 +81,13 @@ export function seatedAvatarDepth(groundY: number): number {
 export const DESK_ZONE_DEPTH = 1.75;
 
 /**
+ * Desk rugs: flat on the floor, over the terrain, its decals, the wall shadow
+ * and the ground props (0.5, mapBuilder.ts), under the desk zone tint and
+ * every piece that stands, so any decor stands on a rug.
+ */
+export const RUG_DEPTH = 1.5;
+
+/**
  * A top piece (#121) sorts with the surface it stands on (`surfaceDepthY`,
  * the y that desk table or room table sorts by): over that surface and a
  * chair's front layer on the same row, under someone walking on that row,

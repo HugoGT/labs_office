@@ -328,7 +328,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS users_display_name_unique ON users (
 -- backfill writes ids that only exist here once the pack is registered.
 CREATE TABLE IF NOT EXISTS art_pieces (
   id text PRIMARY KEY,
-  kind text NOT NULL CHECK (kind IN ('character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door', 'sofa')),
+  kind text NOT NULL CHECK (kind IN ('character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door', 'sofa', 'rug')),
   name text NOT NULL,
   -- NULL for characters and the terrain tileset; every other kind has one.
   material text,
@@ -347,7 +347,7 @@ CREATE TABLE IF NOT EXISTS art_pieces (
 -- NOT EXISTS keeps the CHECK of a table created before, so it is replaced;
 -- the door (#223) and the sofa came later the same way.
 ALTER TABLE art_pieces DROP CONSTRAINT IF EXISTS art_pieces_kind_check;
-ALTER TABLE art_pieces ADD CONSTRAINT art_pieces_kind_check CHECK (kind IN ('character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door', 'sofa'));
+ALTER TABLE art_pieces ADD CONSTRAINT art_pieces_kind_check CHECK (kind IN ('character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door', 'sofa', 'rug'));
 
 -- Admin uploads (#121) live in the same catalog, so every choice resolves
 -- them the same way. `source` is what keeps a pack registration from
@@ -630,6 +630,10 @@ END $$;
 ALTER TABLE office_decor ADD COLUMN IF NOT EXISTS layer text NOT NULL DEFAULT 'floor' CHECK (layer IN ('floor', 'top'));
 ALTER TABLE office_decor DROP CONSTRAINT IF EXISTS office_decor_pkey;
 ALTER TABLE office_decor ADD CONSTRAINT office_decor_pkey PRIMARY KEY (tile_index, layer);
+-- The desk rugs lie on a third layer, under the floor items (`decorLayerOf`). The inline CHECK above only
+-- names 'floor' and 'top' on a table created before the rugs, so it is replaced on every start.
+ALTER TABLE office_decor DROP CONSTRAINT IF EXISTS office_decor_layer_check;
+ALTER TABLE office_decor ADD CONSTRAINT office_decor_layer_check CHECK (layer IN ('floor', 'top', 'rug'));
 -- A plant stored before the layers sits on the floor, where no edit reaches it (`decorLayerOf` puts
 -- every plant on top): it moves up, unless a top item already holds its tile. Idempotent.
 UPDATE office_decor SET layer = 'top'

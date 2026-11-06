@@ -20,12 +20,14 @@ import { ColorableTile } from './ColorableTile';
  * the colors and what a click on the map does.
  */
 
-type DecorCatalogKind = 'chair' | 'sofa' | 'desk' | 'table' | 'plant' | 'tree' | 'door';
+type DecorCatalogKind = 'chair' | 'sofa' | 'desk' | 'table' | 'plant' | 'tree' | 'door' | 'rug';
 
 /** The groups in palette order, named for the person picking, each with the catalog kinds it lists in order. */
 const GROUPS: readonly { kinds: readonly DecorCatalogKind[]; label: string }[] = [
   // #121: the small pieces that dress one's own desk come first, named for the space they dress.
   { kinds: ['plant'], label: 'Mi espacio' },
+  // Desk rugs: everyone may lay one under their own desk (one per desk, `displacedDeskRugs`).
+  { kinds: ['rug'], label: 'Alfombras' },
   { kinds: ['desk'], label: 'Escritorios' },
   { kinds: ['chair'], label: 'Sillas' },
   // A room's furniture together. Only the office scope offers it (`fitsDeskArea` leaves both out).
@@ -38,7 +40,7 @@ const GROUPS: readonly { kinds: readonly DecorCatalogKind[]; label: string }[] =
 ];
 
 /** The kinds whose pieces that take a color come first, so the ones people paint are at hand. */
-const COLORABLE_FIRST: ReadonlySet<DecorCatalogKind> = new Set(['chair', 'desk']);
+const COLORABLE_FIRST: ReadonlySet<DecorCatalogKind> = new Set(['chair', 'desk', 'rug']);
 
 /** `options` with the colorable ones first for a kind that asks for it, each part in catalog order. */
 function inPaletteOrder(kind: DecorCatalogKind, options: readonly MaterialOption[]): readonly MaterialOption[] {
@@ -58,7 +60,7 @@ const THUMBNAIL_PX = 48;
  * reads as big as it can.
  */
 function shrinkFor(kind: DecorCatalogKind, frame: { readonly width: number; readonly height: number }): number {
-  if (kind === 'desk' || kind === 'sofa') return 2;
+  if (kind === 'desk' || kind === 'sofa' || kind === 'rug') return 2;
   if (kind === 'table' || kind === 'tree') return Math.max(1, Math.ceil(Math.max(frame.width, frame.height) / THUMBNAIL_PX));
   return 1;
 }

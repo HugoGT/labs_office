@@ -561,7 +561,7 @@ describe('schema.sql: art pack catalog and appearance (art migration, step 3)', 
 
   it('creates the catalog keyed by the stable manifest id, with a retirement mark and no delete path', () => {
     expect(squashed).toContain('create table if not exists art_pieces ( id text primary key');
-    const kinds = "'character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door', 'sofa'";
+    const kinds = "'character', 'chair', 'desk', 'floor', 'wall', 'tileset', 'tree', 'plant', 'bridge', 'hedge', 'table', 'door', 'sofa', 'rug'";
     expect(squashed).toContain(`kind text not null check (kind in (${kinds}))`);
     // A live table keeps its old CHECK, so today's kinds (the door since #223, the sofa since) replace it.
     expect(squashed).toContain('alter table art_pieces drop constraint if exists art_pieces_kind_check');
@@ -897,6 +897,16 @@ describe('schema.sql: the office decor layer (#208)', () => {
       expect(squashed.indexOf(prerequisite), prerequisite).toBeGreaterThanOrEqual(0);
       expect(squashed.indexOf(prerequisite), prerequisite).toBeLessThan(start);
     }
+  });
+});
+
+describe('schema.sql: the rug layer of the decor', () => {
+  it('lets office_decor hold rugs on a layer of their own, replacing the two-layer check of a live table', () => {
+    const squashed = squash(schema);
+    const drop = squashed.indexOf('alter table office_decor drop constraint if exists office_decor_layer_check;');
+    const add = squashed.indexOf("alter table office_decor add constraint office_decor_layer_check check (layer in ('floor', 'top', 'rug'));");
+    expect(drop).toBeGreaterThan(squashed.indexOf('alter table office_decor add column if not exists layer'));
+    expect(add).toBeGreaterThan(drop);
   });
 });
 

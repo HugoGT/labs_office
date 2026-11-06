@@ -28,6 +28,7 @@ import {
   type ArtChairPiece,
   type ArtDeskPiece,
   type ArtDoorPiece,
+  type ArtRugPiece,
   type ArtFloorPiece,
   type ArtPlantPiece,
   type ArtSofaPiece,
@@ -42,7 +43,7 @@ const SHEET_ROLE = 'sheet';
 
 export interface MaterialOption {
   readonly id: string;
-  readonly kind: 'desk' | 'floor' | 'wall' | 'chair' | 'sofa' | 'plant' | 'tree' | 'table' | 'door';
+  readonly kind: 'desk' | 'floor' | 'wall' | 'chair' | 'sofa' | 'plant' | 'tree' | 'table' | 'door' | 'rug';
   /** Spanish name from the manifest. */
   readonly name: string;
   readonly colorable: boolean;
@@ -55,7 +56,7 @@ export interface MaterialOption {
   readonly retired: boolean;
 }
 
-type CatalogPiece = ArtDeskPiece | ArtFloorPiece | ArtWallPiece | ArtChairPiece | ArtSofaPiece | ArtPlantPiece | ArtTreePiece | ArtTablePiece | ArtDoorPiece;
+type CatalogPiece = ArtDeskPiece | ArtFloorPiece | ArtWallPiece | ArtChairPiece | ArtSofaPiece | ArtPlantPiece | ArtTreePiece | ArtTablePiece | ArtDoorPiece | ArtRugPiece;
 
 export interface MaterialCatalog {
   readonly desk: readonly MaterialOption[];
@@ -74,6 +75,8 @@ export interface MaterialCatalog {
   readonly table: readonly MaterialOption[];
   /** The doors (#223), for the admin's decor palette (never colorable). */
   readonly door: readonly MaterialOption[];
+  /** The desk rugs, for the decor palette (colorable only for the woven one). */
+  readonly rug: readonly MaterialOption[];
   /** Pack defaults, or the first offered option when the default is not offered. */
   readonly defaults: { readonly desk: string; readonly floor: string };
 }
@@ -83,8 +86,8 @@ function manifestFolder(manifestUrl: string): string {
 }
 
 /** The kinds that may take a color of their own (`recolorFor`). */
-function tinted(piece: CatalogPiece): piece is ArtDeskPiece | ArtFloorPiece | ArtChairPiece | ArtSofaPiece | ArtTreePiece | ArtWallPiece {
-  return piece.kind === 'desk' || piece.kind === 'floor' || piece.kind === 'chair' || piece.kind === 'sofa' || piece.kind === 'tree' || piece.kind === 'wall';
+function tinted(piece: CatalogPiece): piece is ArtDeskPiece | ArtFloorPiece | ArtChairPiece | ArtSofaPiece | ArtTreePiece | ArtWallPiece | ArtRugPiece {
+  return piece.kind === 'desk' || piece.kind === 'floor' || piece.kind === 'chair' || piece.kind === 'sofa' || piece.kind === 'tree' || piece.kind === 'wall' || piece.kind === 'rug';
 }
 
 function optionOf(piece: CatalogPiece, folder: string): MaterialOption | null {
@@ -125,17 +128,17 @@ export function materialCatalogFrom(raw: unknown, manifestUrl: string, uploads?:
     { manifest: uploads === undefined ? null : parseArtPackManifest(uploads.raw), url: uploads?.url ?? manifestUrl },
   ]);
   if (joined === null) return null;
-  const options: Record<MaterialOption['kind'], MaterialOption[]> = { desk: [], floor: [], wall: [], chair: [], sofa: [], plant: [], tree: [], table: [], door: [] };
+  const options: Record<MaterialOption['kind'], MaterialOption[]> = { desk: [], floor: [], wall: [], chair: [], sofa: [], plant: [], tree: [], table: [], door: [], rug: [] };
   for (const piece of joined.manifest.pieces) {
     if (!(piece.kind in options)) continue;
     const option = optionOf(piece as CatalogPiece, manifestFolder(joined.sourceOf(piece.id) ?? manifestUrl));
     if (option !== null) options[option.kind].push(option);
   }
-  const { desk, floor, wall, chair, sofa, plant, tree, table, door } = options;
+  const { desk, floor, wall, chair, sofa, plant, tree, table, door, rug } = options;
   const deskDefault = defaultOf(desk, manifest.defaults.desk);
   const floorDefault = defaultOf(floor, manifest.defaults.floor);
   if (deskDefault === null || floorDefault === null) return null;
-  return { desk, floor, wall, chair, sofa, plant, tree, table, door, defaults: { desk: deskDefault, floor: floorDefault } };
+  return { desk, floor, wall, chair, sofa, plant, tree, table, door, rug, defaults: { desk: deskDefault, floor: floorDefault } };
 }
 
 /** What a form holds right after picking `option`: a colorable material starts in its default color. */
@@ -190,6 +193,13 @@ export function previewFrame(option: MaterialOption): PreviewFrame {
     const right = Math.min(frame.width, anchor.x + halfWidth);
     const bottom = Math.min(frame.height, anchor.y + TABLE_PREVIEW_MARGIN * 2);
     return { x, y, width: right - x, height: bottom - y };
+  }
+  // A rug shows its horizontal frame's footprint, without the rows under it.
+  if (option.kind === 'rug') {
+    const { anchor, footprint } = ART_IMAGE_SPECS.rug;
+    const width = footprint.w * ART_TILE;
+    const height = footprint.h * ART_TILE;
+    return { x: anchor.x - width / 2, y: anchor.y - height, width, height };
   }
   if (option.kind === 'plant' || option.kind === 'tree' || option.kind === 'table') {
     const { frame } = ART_IMAGE_SPECS[option.kind];

@@ -9,13 +9,14 @@
  * refused and the editor says why.
  */
 
-import { deskOverChairLimit } from './deskDecorRules';
+import { deskOverChairLimit, displacedDeskRugs } from './deskDecorRules';
 import {
   decorFootprint,
   decorItemCovering,
   decorItemKey,
   decorKey,
   decorLayerOf,
+  decorRemoval,
   decorTiles,
   diffDecor,
   fallenTopItems,
@@ -191,6 +192,9 @@ export function decorBrushTarget(index: number, brush: DecorBrush, width: number
  * A top piece (#121) is the room's top rule (`findDecorConflict`): its whole
  * footprint on the desk tables and room tables the click leaves, off every
  * other top piece. The floor rules never see the top layer.
+ *
+ * A rug lies on the rug layer, under everything: walkable ground off the
+ * walls and off every other rug, the one it replaces on its desk aside.
  */
 export function decorPlacementAllowed(
   items: readonly DecorItem[],
@@ -211,15 +215,20 @@ export function decorPlacementAllowed(
   const ignored = brush.from ?? index;
   // The doors and windows a door brush replaces leave with the click (S6): their tiles are free for it.
   const replaced = new Set(door ? doorsReplacedBy(onLayer, [{ index, rotation: brush.rotation, piece: brush.piece }], ground.width) : []);
+  // A rug replaces the rug lying on its desk (`displacedDeskRugs`): that one's tiles are free for it.
+  if (layer === 'rug' && desks.length > 0) {
+    const laid = withDecor(onLayer, [{ index, item: { piece: brush.piece, rotation: brush.rotation } }]);
+    for (const anchor of displacedDeskRugs(laid, [index], infoOf, desks, ground.width)) replaced.add(anchor);
+  }
   const taken = new Set(
     onLayer.filter((item) => item.index !== ignored && !replaced.has(item.index)).flatMap((item) => decorTiles(item, infoOf(item.piece), ground.width)),
   );
   if (brush.from !== undefined && index !== brush.from && onLayer.some((item) => item.index === index)) return false;
   const placed: DecorEdit = { index, item: { piece: brush.piece, rotation: brush.rotation } };
-  const leaving: DecorEdit = layer === 'top' ? { index: brush.from ?? index, item: null, layer } : { index: brush.from ?? index, item: null };
+  const leaving: DecorEdit = decorRemoval({ index: brush.from ?? index, piece: brush.piece });
   const after = withDecor(items, [
     ...(brush.from === undefined || brush.from === index ? [placed] : [leaving, placed]),
-    ...[...replaced].map((anchor): DecorEdit => ({ index: anchor, item: null })),
+    ...[...replaced].map((anchor): DecorEdit => decorRemoval({ index: anchor, piece: brush.piece })),
   ]);
   if (layer === 'top') return topItemSupported({ index, rotation: brush.rotation, piece: brush.piece }, after, infoOf, ground.width) && rectTiles(target, ground.width).every((tile) => !taken.has(tile));
   const floorOf = (layerItems: readonly DecorItem[]): DecorItem[] => layerItems.filter((item) => decorLayerOf(item.piece) === 'floor');
@@ -244,7 +253,7 @@ export function withFallenTopItems(
   const after = withDecor(items, click);
   const placed = new Set(click.flatMap((edit) => (edit.item === null ? [] : [decorKey(edit.index, decorLayerOf(edit.item.piece))])));
   const fallen = fallenTopItems(items, after, infoOf, width, placed);
-  return [...click, ...fallen.map((item): DecorEdit => ({ index: item.index, item: null, layer: 'top' }))];
+  return [...click, ...fallen.map(decorRemoval)];
 }
 
 /**
@@ -266,7 +275,7 @@ export function decorMoveEdits(
   const layer = decorLayerOf(placement.piece);
   const moved = items.find((item) => decorItemKey(item) === decorKey(from, layer));
   if (moved === undefined) return [];
-  const leaving = (item: DecorItem): DecorEdit => (decorLayerOf(item.piece) === 'top' ? { index: item.index, item: null, layer: 'top' } : { index: item.index, item: null });
+  const leaving = (item: DecorItem): DecorEdit => decorRemoval(item);
   let after = withDecor(items, [leaving(moved), { index, item: placement }]);
   if (layer === 'floor' && moved.rotation === placement.rotation) {
     const surface = decorFootprint(moved, infoOf(moved.piece), width);

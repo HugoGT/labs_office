@@ -2522,6 +2522,198 @@
           "sha256": "b0d8dbe4f85e44f41dbb72644553564feb9054d6d633dcb2aa1a83b9c952fc56"
         }
       ]
+    },
+    {
+      "id": "rug-woven",
+      "kind": "rug",
+      "name": "Alfombra tejida",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "woven",
+      "anchor": {
+        "x": 48,
+        "y": 96
+      },
+      "footprint": {
+        "w": 3,
+        "h": 2
+      },
+      "facings": [
+        "horizontal",
+        "vertical"
+      ],
+      "colorable": true,
+      "defaultColor": "#de6e3c",
+      "files": [
+        {
+          "role": "sheet",
+          "path": "rug/woven.png",
+          "imageKind": "rug",
+          "width": 192,
+          "height": 100,
+          "sha256": "bf7797ecc48f44b43d2371f64c7e38a8fae1f9510adbcdeac2a37b9f9a130efa"
+        }
+      ]
+    },
+    {
+      "id": "rug-wood",
+      "kind": "rug",
+      "name": "Tarima de madera",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "wood",
+      "anchor": {
+        "x": 48,
+        "y": 96
+      },
+      "footprint": {
+        "w": 3,
+        "h": 2
+      },
+      "facings": [
+        "horizontal",
+        "vertical"
+      ],
+      "colorable": false,
+      "defaultColor": null,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "rug/wood.png",
+          "imageKind": "rug",
+          "width": 192,
+          "height": 100,
+          "sha256": "4749349a1cbbf6bd74633ab9133e8bb5f25d4c602d8c3bce6813cd3d6446d9a1"
+        }
+      ]
+    },
+    {
+      "id": "rug-hazard",
+      "kind": "rug",
+      "name": "Alfombra de seguridad",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "hazard",
+      "anchor": {
+        "x": 48,
+        "y": 96
+      },
+      "footprint": {
+        "w": 3,
+        "h": 2
+      },
+      "facings": [
+        "horizontal",
+        "vertical"
+      ],
+      "colorable": false,
+      "defaultColor": null,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "rug/hazard.png",
+          "imageKind": "rug",
+          "width": 192,
+          "height": 100,
+          "sha256": "efe21f80c72bb6fc639455c1297171ac3aa836aca54e16aaef3d354c8c6945fd"
+        }
+      ]
+    },
+    {
+      "id": "rug-grass",
+      "kind": "rug",
+      "name": "Alfombra de césped",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "grass",
+      "anchor": {
+        "x": 48,
+        "y": 96
+      },
+      "footprint": {
+        "w": 3,
+        "h": 2
+      },
+      "facings": [
+        "horizontal",
+        "vertical"
+      ],
+      "colorable": false,
+      "defaultColor": null,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "rug/grass.png",
+          "imageKind": "rug",
+          "width": 192,
+          "height": 100,
+          "sha256": "23e385e06dd16e88890067b7181a5d902647729ab7eced0e28dad24a24088d71"
+        }
+      ]
+    },
+    {
+      "id": "rug-stone",
+      "kind": "rug",
+      "name": "Alfombra de piedras",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "stone",
+      "anchor": {
+        "x": 48,
+        "y": 96
+      },
+      "footprint": {
+        "w": 3,
+        "h": 2
+      },
+      "facings": [
+        "horizontal",
+        "vertical"
+      ],
+      "colorable": false,
+      "defaultColor": null,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "rug/stone.png",
+          "imageKind": "rug",
+          "width": 192,
+          "height": 100,
+          "sha256": "a659857f04045b781ccf8cc93f0d3b2b92c77cf36458a28bc5d21294b3b03394"
+        }
+      ]
+    },
+    {
+      "id": "rug-mosaic",
+      "kind": "rug",
+      "name": "Alfombra de mosaico",
+      "author": "HugoGT",
+      "license": "proprietary-internal",
+      "material": "mosaic",
+      "anchor": {
+        "x": 48,
+        "y": 96
+      },
+      "footprint": {
+        "w": 3,
+        "h": 2
+      },
+      "facings": [
+        "horizontal",
+        "vertical"
+      ],
+      "colorable": false,
+      "defaultColor": null,
+      "files": [
+        {
+          "role": "sheet",
+          "path": "rug/mosaic.png",
+          "imageKind": "rug",
+          "width": 192,
+          "height": 100,
+          "sha256": "7f2daca647667516d1d1e41c052942f8731f1afabdb4dc512e9cbbbbce9a85f4"
+        }
+      ]
     }
   ]
 }
