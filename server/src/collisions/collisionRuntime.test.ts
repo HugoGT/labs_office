@@ -100,12 +100,13 @@ describe('createCollisionRuntime', () => {
   });
 
   it('blocks a decor desk table along its row out of the box, and frees the floor around it', async () => {
-    // A table anchored on tile (21, 52): its middle tile center is (688, 1680).
+    // A table anchored on tile (21, 52): it stands half a tile below its middle tile center (688, 1680).
     const items: DecorItem[] = [{ index: 52 * W + 21, piece: 'desk-wood', rotation: 0 }];
     const collisions = createCollisionRuntime({ layout: BASE_LAYOUT, seats: BASE_MAP_SEATS, store: createMemoryCollisions([]), decor: () => items, decorInfo });
     await collisions.load();
 
-    expect(isPositionBlocked(collisions.rects(), 688, 1680 - 11)).toBe(true);
+    expect(isPositionBlocked(collisions.rects(), 688, 1696 - 11)).toBe(true);
+    expect(isPositionBlocked(collisions.rects(), 688, 1680 - 11)).toBe(false);
     expect(isPositionBlocked(collisions.rects(), 688, 1616 - 11)).toBe(false);
   });
 

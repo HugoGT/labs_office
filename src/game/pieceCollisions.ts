@@ -22,7 +22,7 @@
  */
 
 import { AVATAR_BODY_CENTER_OFFSET, physicalBodyRect } from './avatarGeometry.ts';
-import { tableFacing, tableFloorRect } from './deskTable.ts';
+import { tableAnchor, tableDrop, tableFacing, tableFloorRect } from './deskTable.ts';
 import { decorChairFacing, decorFootprint, decorRotationFor, isOnTopKind, type DecorItem, type DecorPieceInfo } from './officeDecor.ts';
 
 /** Same as `TILE` in mapData.ts (pinned by a test). */
@@ -346,12 +346,12 @@ export function officeDecorInstances(
     if (info.kind === 'desk') {
       instances.push({
         piece: item.piece,
-        pivot: { x: (tx + 0.5) * COLLISION_TILE, y: (ty + 0.5) * COLLISION_TILE },
+        pivot: tableAnchor(tx, ty, COLLISION_TILE, item.rotation),
         rotation: rotationForFacing(tableFacing(item.rotation)),
         scale: UNIT,
         offset: ORIGIN,
         defaults: [tableFloorRect(item.rotation)],
-        pickBox,
+        pickBox: { ...pickBox, y: pickBox.y + tableDrop(item.rotation) },
       });
       continue;
     }

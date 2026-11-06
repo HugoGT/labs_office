@@ -42,8 +42,24 @@ export function tableFacing(rotation: number): TableFacing {
 }
 
 /**
- * The floor area of a table's top around its anchor (the middle of its
- * middle tile), in world orientation: the default collision of a table
+ * How far below the middle of its anchor tile a table stands. Centered on the
+ * tile, its top reached into the desk of the row above. Half a tile facing
+ * down; a tenth of a tile higher in every other facing, on whole pixels so the
+ * pixel art stays sharp. Only where it stands moves: its tile footprint
+ * (`decorFootprint`), the rules read from it and the stored rows stay.
+ */
+export function tableDrop(rotation: number): number {
+  return tableFacing(rotation) === 'down' ? 16 : 13;
+}
+
+/** Where a table anchored on tile (`tx`, `ty`) stands in the world, in pixels: its art, its collision and what stands on it hang from this point. */
+export function tableAnchor(tx: number, ty: number, tile: number, rotation: number): { x: number; y: number } {
+  return { x: (tx + 0.5) * tile, y: (ty + 0.5) * tile + tableDrop(rotation) };
+}
+
+/**
+ * The floor area of a table's top around its anchor (`tableAnchor`), in
+ * world orientation: the default collision of a table
  * nobody edited, so it blocks its row or column but leaves the floor around
  * it walkable.
  */

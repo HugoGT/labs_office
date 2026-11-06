@@ -255,25 +255,33 @@ describe('pieceCollisions: instances', () => {
 
     expect(table).toMatchObject({
       piece: 'desk-wood',
-      pivot: { x: middle.x + 16, y: middle.y + 16 },
+      pivot: { x: middle.x + 16, y: middle.y + 29 },
       rotation: rotationForFacing('up'),
       scale: { x: 1, y: 1 },
       offset: { x: 0, y: 0 },
-      pickBox: { x: 320, y: 160, w: 96, h: 32 },
+      pickBox: { x: 320, y: 173, w: 96, h: 32 },
     });
     // Unedited: the floor under its 84px top, along the row.
-    expect(worldRectsOf(table!, NO_EDITS)).toEqual([{ x: middle.x + 16 - 42, y: middle.y + 16 - 8, w: 84, h: 16 }]);
+    expect(worldRectsOf(table!, NO_EDITS)).toEqual([{ x: middle.x + 16 - 42, y: middle.y + 29 - 8, w: 84, h: 16 }]);
     // Edited: the piece's rectangles, turned by its facing.
-    expect(worldRectsOf(table!, new Map([['desk-wood', [{ x: -30, y: -4, w: 60, h: 8 }]]]))).toEqual([{ x: middle.x + 16 - 30, y: middle.y + 12, w: 60, h: 8 }]);
+    expect(worldRectsOf(table!, new Map([['desk-wood', [{ x: -30, y: -4, w: 60, h: 8 }]]]))).toEqual([{ x: middle.x + 16 - 30, y: middle.y + 25, w: 60, h: 8 }]);
   });
 
   it('turns a desk table along a column a quarter, like its vertical drawing', () => {
     const [table] = officeDecorInstances([{ index: 6 * 20 + 12, piece: 'desk-glass', rotation: 90 }], infoOf, 20);
     const middle = { x: 12 * 32, y: 6 * 32 };
 
-    expect(table).toMatchObject({ rotation: 90, pivot: { x: middle.x + 16, y: middle.y + 16 }, pickBox: { x: 384, y: 160, w: 32, h: 96 } });
-    expect(worldRectsOf(table!, NO_EDITS)).toEqual([{ x: middle.x + 16 - 13, y: middle.y + 16 - 42, w: 26, h: 84 }]);
-    expect(worldRectsOf(table!, new Map([['desk-glass', [{ x: -30, y: -4, w: 60, h: 8 }]]]))).toEqual([{ x: middle.x + 12, y: middle.y + 16 - 30, w: 8, h: 60 }]);
+    expect(table).toMatchObject({ rotation: 90, pivot: { x: middle.x + 16, y: middle.y + 29 }, pickBox: { x: 384, y: 173, w: 32, h: 96 } });
+    expect(worldRectsOf(table!, NO_EDITS)).toEqual([{ x: middle.x + 16 - 13, y: middle.y + 29 - 42, w: 26, h: 84 }]);
+    expect(worldRectsOf(table!, new Map([['desk-glass', [{ x: -30, y: -4, w: 60, h: 8 }]]]))).toEqual([{ x: middle.x + 12, y: middle.y + 29 - 30, w: 8, h: 60 }]);
+  });
+
+  it('keeps a desk table facing down half a tile below its middle tile, drawing and collision alike', () => {
+    const [table] = officeDecorInstances([{ index: 5 * 20 + 11, piece: 'desk-wood', rotation: 0 }], infoOf, 20);
+    const middle = { x: 11 * 32, y: 5 * 32 };
+
+    expect(table).toMatchObject({ pivot: { x: middle.x + 16, y: middle.y + 32 }, pickBox: { x: 320, y: 176, w: 96, h: 32 } });
+    expect(worldRectsOf(table!, NO_EDITS)).toEqual([{ x: middle.x + 16 - 42, y: middle.y + 32 - 8, w: 84, h: 16 }]);
   });
 
   it('stands a plant 1:1 on the bottom middle of its footprint, walk-through until an admin edits it', () => {
