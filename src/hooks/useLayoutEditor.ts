@@ -152,7 +152,7 @@ export function useLayoutEditor({
 
   useEffect(
     () =>
-      bridge.on('layoutplace', ({ tx, ty, valid }) => {
+      bridge.on('layoutplace', ({ tx, ty, valid, rugRotation }) => {
         // Invalido: el ghost se queda donde esta, para que se pueda
         // reintentar sin perder la seleccion.
         if (!valid) return;
@@ -171,7 +171,7 @@ export function useLayoutEditor({
             if (moveId !== null) {
               await desks.updateDesk(moveId, { x: tx, y: ty });
             } else {
-              await desks.createDesk({ x: tx, y: ty });
+              await desks.createDesk({ x: tx, y: ty, ...(rugRotation === undefined ? {} : { rugRotation }) });
             }
             dispatch({ type: 'saveSucceeded' });
             refreshDesks();

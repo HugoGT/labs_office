@@ -34,9 +34,19 @@ import {
 import { carriedDecor, replacedDecor } from './areaCarry';
 import { DECOR_DELETE_COLOR } from './DecorEditLayer';
 import { LAYOUT_GHOST_DEPTH } from './depthLayers';
+import { isEditableElementFocused } from './inputFocusGuard';
 import { MAP_H, TILE } from './mapData';
+import { INITIAL_WHEEL_STATE, ROTATE_WHEEL_RULES, accumulateWheel, type WheelState } from './mapZoom';
 import type { OfficeBridge } from './officeBridge';
-import { decorFootprint, type DecorItem, type DecorPieceInfo } from './officeDecor';
+import {
+  decorFootprint,
+  nextDecorRotation,
+  rugFootprint,
+  type DecorItem,
+  type DecorPieceInfo,
+  type DecorRotation,
+  type DecorTileRect,
+} from './officeDecor';
 import { PressHold } from './pressHold';
 import { SelectionButtons, type SelectionAction } from './selectionButtons';
 import { LAYOUT_OUTLINE_NAME, drawContextOutlines, drawOutline } from './spaceOutline';
@@ -67,6 +77,14 @@ export interface LayoutEditLayerOptions {
     items: () => readonly DecorItem[];
     infoOf: (piece: string) => DecorPieceInfo | null;
     width: number;
+  };
+  /**
+   * Draws the grass rug a new desk is created with on its preview, at `rect`
+   * and `rotation`; the layer destroys what it returns on the next draw.
+   * Absent previews no rug, but the wheel still turns it.
+   */
+  rug?: {
+    draw: (rect: DecorTileRect, rotation: DecorRotation) => Phaser.GameObjects.GameObject[];
   };
 }
 
@@ -114,8 +132,37 @@ export class LayoutEditLayer {
   /** Where the drag was released, kept until the move reaches the map. */
   private drop: { worldX: number; worldY: number } | null = null;
   private readonly now: () => number;
+  private readonly rug: LayoutEditLayerOptions['rug'];
+  /** The turn of a new desk's rug preview, chosen with the wheel or R, sent with its placement. */
+  private rugRotation: DecorRotation = 0;
+  /** Where the new desk's preview stands, once the pointer moved: the rug is drawn on it. */
+  private rugAt: { tx: number; ty: number } | null = null;
+  private rugObjects: Phaser.GameObjects.GameObject[] = [];
+  private rugDrawn = '';
+  private wheelState: WheelState = INITIAL_WHEEL_STATE;
 
   private readonly unsubscribeCommand: () => void;
+  private readonly onWheel = (pointer: Phaser.Input.Pointer, _over: unknown, _dx: number, deltaY: number): void => {
+    if (!this.holdsWheel()) {
+      this.wheelState = INITIAL_WHEEL_STATE;
+      return;
+    }
+    const native = pointer.event as WheelEvent | undefined;
+    const { state, step } = accumulateWheel(
+      this.wheelState,
+      { deltaY, deltaMode: native?.deltaMode ?? 0, ctrlKey: native?.ctrlKey ?? false, now: this.now() },
+      ROTATE_WHEEL_RULES,
+    );
+    this.wheelState = state;
+    // Signed like the zoom (up is 1): turning down goes forward, as in the decor editor.
+    if (step !== 0) this.turnRug(step === -1 ? 1 : -1);
+  };
+  private readonly onKeyDown = (event: KeyboardEvent): void => {
+    if (!this.holdsWheel()) return;
+    if (event.key.toLowerCase() !== 'r' || event.repeat || event.ctrlKey || event.metaKey || event.altKey) return;
+    if (isEditableElementFocused()) return;
+    this.turnRug(event.shiftKey ? -1 : 1);
+  };
   private readonly onPointerMove = (pointer: Phaser.Input.Pointer): void => {
     // A drag grabs at once.
     if ((pointer.getDistance?.() ?? 0) > PAN_THRESHOLD_PX) this.grab(this.hold.take());
@@ -158,13 +205,21 @@ export class LayoutEditLayer {
     this.bridge = bridge;
     this.now = options.now ?? (() => performance.now());
     this.decor = options.decor;
+    this.rug = options.rug;
     this.buttons = new SelectionButtons(scene, { move: LAYOUT_MOVE_BUTTON_NAME, delete: LAYOUT_DELETE_BUTTON_NAME });
 
     this.unsubscribeCommand = bridge.onCommand('layoutedit', (command) => this.applyCommand(command));
     scene.input.on('pointermove', this.onPointerMove);
     scene.input.on('pointerdown', this.onPointerDown);
     scene.input.on('pointerup', this.onPointerUp);
+    scene.input.on('wheel', this.onWheel);
     scene.events.on(Phaser.Scenes.Events.POST_UPDATE, this.onPostUpdate);
+    window.addEventListener('keydown', this.onKeyDown);
+  }
+
+  /** Whether the wheel turns a new desk's rug instead of zooming: a desk is being created. */
+  holdsWheel(): boolean {
+    return this.command?.placing?.rug === true;
   }
 
   /** Simetrico con el `SHUTDOWN` de `OfficeScene`: se llama en el mismo momento que el resto de desuscripciones. */
@@ -173,7 +228,10 @@ export class LayoutEditLayer {
     this.scene.input.off('pointermove', this.onPointerMove);
     this.scene.input.off('pointerdown', this.onPointerDown);
     this.scene.input.off('pointerup', this.onPointerUp);
+    this.scene.input.off('wheel', this.onWheel);
     this.scene.events.off(Phaser.Scenes.Events.POST_UPDATE, this.onPostUpdate);
+    window.removeEventListener('keydown', this.onKeyDown);
+    this.clearRug();
     this.clearPickable();
     this.ghost?.destroy();
     this.ghost = null;
@@ -184,7 +242,13 @@ export class LayoutEditLayer {
   }
 
   private applyCommand(command: LayoutEditCommand | null): void {
+    // A new placement starts with the rug on the bottom rows; the same one re-sent keeps its turn.
+    if (command?.placing?.rug !== true || this.command?.placing?.rug !== true) {
+      this.rugRotation = 0;
+      this.rugAt = null;
+    }
     this.command = command;
+    this.clearRug();
     this.clearPickable();
     this.ghost?.destroy();
     this.ghost = null;
@@ -301,6 +365,32 @@ export class LayoutEditLayer {
       .setFillStyle(valid ? GHOST_VALID_COLOR : GHOST_INVALID_COLOR, GHOST_ALPHA)
       .setVisible(true);
     this.drawReplaced(valid ? this.replacedAt(tx, ty) : []);
+    if (this.command.placing.rug === true) {
+      this.rugAt = { tx, ty };
+      this.drawRug();
+    }
+  }
+
+  /** Turns the new desk's rug one step, the order a chair turns: down, left, up, right. */
+  private turnRug(step: 1 | -1): void {
+    this.rugRotation = nextDecorRotation(this.rugRotation, step, 'rug');
+    this.drawRug();
+  }
+
+  /** The new desk's rug on its preview, hung from the desk centre toward its turn. */
+  private drawRug(): void {
+    const at = this.rugAt;
+    if (this.rug === undefined || at === null || this.command?.placing?.rug !== true) return;
+    const key = `${at.tx},${at.ty},${this.rugRotation}`;
+    if (key === this.rugDrawn) return;
+    this.clearRug();
+    this.rugDrawn = key;
+    this.rugObjects = this.rug.draw(rugFootprint(at.tx + 1, at.ty + 1, this.rugRotation), this.rugRotation);
+  }
+
+  private clearRug(): void {
+    for (const object of this.rugObjects.splice(0)) object.destroy();
+    this.rugDrawn = '';
   }
 
   /**
@@ -335,6 +425,7 @@ export class LayoutEditLayer {
   private confirmPlacement(pointer: Phaser.Input.Pointer): void {
     if (!this.command?.placing) return;
 
-    this.bridge.emit('layoutplace', this.placementAt(pointer.worldX, pointer.worldY));
+    const placement = this.placementAt(pointer.worldX, pointer.worldY);
+    this.bridge.emit('layoutplace', this.command.placing.rug === true ? { ...placement, rugRotation: this.rugRotation } : placement);
   }
 }

@@ -376,10 +376,21 @@ describe('handleCreateDesk', () => {
     const { deps } = harness();
     const furnished: unknown[] = [];
 
-    const result = await handleCreateDesk(BEARER_ADMIN, { x: 4, y: 4 }, { ...deps, furnish: async (desk, actorId) => void furnished.push([desk.x, desk.y, actorId]) });
+    const furnish = async (desk: { x: number; y: number }, actorId: string, rotation: number) => void furnished.push([desk.x, desk.y, actorId, rotation]);
 
-    expect(result.status).toBe(201);
-    expect(furnished).toEqual([[4, 4, 'id-admin']]);
+    expect((await handleCreateDesk(BEARER_ADMIN, { x: 4, y: 4 }, { ...deps, furnish })).status).toBe(201);
+    // The turn chosen with the wheel while placing it; without one, the bottom rows.
+    expect((await handleCreateDesk(BEARER_ADMIN, { x: 10, y: 4, rugRotation: 270 }, { ...deps, furnish })).status).toBe(201);
+    expect(furnished).toEqual([[4, 4, 'id-admin', 0], [10, 4, 'id-admin', 270]]);
+  });
+
+  it('refuses a rug turn that is not a quarter turn, creating nothing', async () => {
+    const { deps, desks } = harness();
+
+    const result = await handleCreateDesk(BEARER_ADMIN, { x: 4, y: 4, rugRotation: 45 }, deps);
+
+    expect(result.status).toBe(400);
+    expect(await desks.listDesks()).toEqual([]);
   });
 
   it('still creates the desk when its rug does not fit', async () => {

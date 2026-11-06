@@ -142,7 +142,8 @@ export function createDeskAdminClient(
       // Se manda solo lo que el servidor lee. Ni `id` ni `occupantId`: el id lo
       // genera la base de datos y quien se sienta lo decide esa persona. Nor a
       // label or a material: a desk is created empty (Editar espacios).
-      return parseAdminDesk(await request('/admin/desks', jsonBody({ x: input.x, y: input.y })));
+      const rug = input.rugRotation === undefined ? {} : { rugRotation: input.rugRotation };
+      return parseAdminDesk(await request('/admin/desks', jsonBody({ x: input.x, y: input.y, ...rug })));
     },
 
     async updateDesk(id: string, input: UpdateDeskInput): Promise<AdminDesk> {

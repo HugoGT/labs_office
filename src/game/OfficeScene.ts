@@ -29,6 +29,7 @@ import {
 import { mergeColliderRects } from './colliderMerge';
 import {
   DESK_ZONE_DEPTH,
+  LAYOUT_GHOST_DEPTH,
   RUG_DEPTH,
   MINIMAP_MARKER_DEPTH,
   SPACE_SHADE_DEPTH,
@@ -41,7 +42,7 @@ import { tableFacing, tableFloorRect } from './deskTable';
 import { decorChairFacing, decorChairs, decorFootprint, decorLayerOf, decorRotationFor, decorSeats, encodeOfficeDecor, isDecorChairPiece, isDecorSofaPiece, withDecor, type DecorEdit, type DecorItem, type DecorLayer, type DecorTileRect } from './officeDecor';
 import { deskSurface, onTopGround, tableSurface, type DecorSurface } from './decorTop';
 import { doorHingeStops, doorLeaves, doorOpenings, doorSpan, doorStepOf, doorSwingRotation, isWindowPiece, keptSwings, moveDoors, openDoorLeaves, type DoorLeaf, type DoorMotion } from './officeDoors';
-import { deskEntryRefused, isOnDesk } from './deskDecorRules';
+import { DEFAULT_DESK_RUG, deskEntryRefused, isOnDesk } from './deskDecorRules';
 import { lockedBehindDoor, lockedDoorAhead, lockedSpaceEntered } from './spaceLocks';
 import type { OfficeDesk } from './desksPort';
 import { MINIMAP_HEIGHT, MINIMAP_MARGIN, MINIMAP_WIDTH, RAIL_RIGHT } from './hudLayout';
@@ -157,6 +158,9 @@ import { AVATAR_KEYS, PLAYER_TEXTURE, avatarTextureKey, createOfficeTextures } f
 export const OFFICE_SCENE_KEY = 'office';
 
 const PLAYER_SPEED = 230;
+/** The new desk's rug on its placement preview: see-through enough to tell it from a placed one. */
+const LAYOUT_RUG_PREVIEW_NAME = 'layout-edit:rug';
+const LAYOUT_RUG_PREVIEW_ALPHA = 0.8;
 /** `Pointer.button` of the secondary (right) mouse button. */
 const RIGHT_BUTTON = 2;
 // Below both the 14px body height and Arcade's 4px overlap bias, even at the top speed.
@@ -758,8 +762,9 @@ export class OfficeScene extends Phaser.Scene {
       minimap: this.minimapCamera,
       bridge: this.bridge,
       store: this.options.zoomStore,
-      // #207: a picked chair, desk table or room table turns with the wheel instead (`DecorEditLayer`).
-      wheelSuppressed: () => this.decorEditLayer?.holdsWheel() ?? false,
+      // #207: a picked chair, desk table or room table turns with the wheel instead (`DecorEditLayer`),
+      // and so does the rug of a desk being created (`LayoutEditLayer`).
+      wheelSuppressed: () => (this.decorEditLayer?.holdsWheel() ?? false) || (this.layoutEditLayer?.holdsWheel() ?? false),
     });
     // #53: despues de `setupInput` (comparte `this.input`, mismo momento en
     // que `layoutEditLayer` se crea mas abajo).
@@ -824,6 +829,12 @@ export class OfficeScene extends Phaser.Scene {
         items: () => this.officeDecor,
         infoOf: (piece) => decorInfoFromManifest(this.art.manifest)(piece),
         width: this.layout.width,
+      },
+      // A desk being created shows the grass rug it gets, over the ghost's tint.
+      rug: {
+        draw: (rect, rotation) =>
+          this.drawRug({ index: 0, piece: DEFAULT_DESK_RUG, rotation }, rect, LAYOUT_RUG_PREVIEW_NAME).map((object) =>
+            (object as Phaser.GameObjects.Sprite).setDepth(LAYOUT_GHOST_DEPTH + 0.5).setAlpha(LAYOUT_RUG_PREVIEW_ALPHA)),
       },
     });
     this.unsubscribeLayoutEdit = this.bridge.onCommand('layoutedit', (command) => {

@@ -21,7 +21,7 @@
  * client (the decor editor, the scene), so both judge the same way.
  */
 
-import { decorFootprint, type DecorItem, type DecorPieceInfo, type DecorTileRect } from './officeDecor.ts';
+import { decorFootprint, type DecorItem, type DecorPieceInfo, type DecorRotation, type DecorTileRect } from './officeDecor.ts';
 
 export const MAX_DESK_TABLES = 1;
 export const MAX_DESK_RUGS = 1;
@@ -32,12 +32,12 @@ export const MAX_DESK_OCCUPANCY = 6;
 export const DEFAULT_DESK_RUG = 'rug-grass';
 
 /**
- * The rug laid on a new desk: anchored at the desk centre and turned 0, so it
- * covers the bottom two rows; the wheel hangs it from the same centre to a
- * side or the top rows (`decorFootprint`).
+ * The rug laid on a new desk: anchored at the desk centre, so turn 0 covers
+ * the bottom two rows and the other turns a side or the top rows
+ * (`decorFootprint`); the turn is the one the wheel gave its preview.
  */
-export function defaultDeskRug(desk: { readonly x: number; readonly y: number }, width: number): DecorItem {
-  return { index: (desk.y + 1) * width + desk.x + 1, piece: DEFAULT_DESK_RUG, rotation: 0 };
+export function defaultDeskRug(desk: { readonly x: number; readonly y: number }, width: number, rotation: DecorRotation = 0): DecorItem {
+  return { index: (desk.y + 1) * width + desk.x + 1, piece: DEFAULT_DESK_RUG, rotation };
 }
 
 type InfoOf = (piece: string) => DecorPieceInfo | null;

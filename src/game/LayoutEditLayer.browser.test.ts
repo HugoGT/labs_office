@@ -66,6 +66,12 @@ function fakePointer(worldX = 0, worldY = 0): Phaser.Input.Pointer {
   return { worldX, worldY, event: { stopPropagation: vi.fn() } } as unknown as Phaser.Input.Pointer;
 }
 
+/** A wheel event the way Phaser's input plugin reports it, `deltaY` positive when turned down. */
+function wheel(scene: Phaser.Scene, deltaY: number): void {
+  const pointer = { worldX: 0, worldY: 0, event: { deltaMode: 0, ctrlKey: false } } as unknown as Phaser.Input.Pointer;
+  scene.input.emit('wheel', pointer, [], 0, deltaY, 0);
+}
+
 function findPickable(scene: Phaser.Scene, id: string): Phaser.GameObjects.Rectangle | null {
   return scene.children.getByName(layoutPickName(id)) as Phaser.GameObjects.Rectangle | null;
 }
@@ -584,5 +590,59 @@ describe('LayoutEditLayer: the selected desk or room carries its move and trash 
 
       expect(seen).toEqual([['pick', { id: 'desk-1' }], ['action', { action: 'delete', id: 'desk-1' }]]);
     });
+  });
+});
+
+describe('LayoutEditLayer: the rug of a new desk', () => {
+  function rugLayer(scene: Phaser.Scene) {
+    const bridge = createOfficeBridge();
+    const clock = { now: 1000 };
+    const drawn: { rect: unknown; rotation: number }[] = [];
+    const layer = new LayoutEditLayer(scene, bridge, {
+      now: () => clock.now,
+      rug: { draw: (rect, rotation) => { drawn.push({ rect, rotation }); return []; } },
+    });
+    const notch = (deltaY: number): void => {
+      clock.now += 400;
+      wheel(scene, deltaY);
+    };
+    return { bridge, layer, drawn, notch };
+  }
+
+  it('previews the grass rug on the bottom rows, turns it with the wheel and creates the desk with that turn', async () => {
+    const scene = await bootHostScene();
+    const { bridge, layer, drawn, notch } = rugLayer(scene);
+    const placements: unknown[] = [];
+    bridge.on('layoutplace', (payload) => placements.push(payload));
+
+    bridge.emitCommand('layoutedit', { pickable: [], selectedId: null, placing: { w: 3, h: 3, obstacles: [], rug: true } });
+    expect(layer.holdsWheel()).toBe(true);
+    scene.input.emit('pointermove', fakePointer(10 * TILE, 10 * TILE));
+    expect(drawn.at(-1)).toEqual({ rect: { x: 9, y: 10, w: 3, h: 2 }, rotation: 0 });
+
+    // Down turns it like a chair: left, then up.
+    notch(100);
+    expect(drawn.at(-1)).toEqual({ rect: { x: 9, y: 9, w: 2, h: 3 }, rotation: 270 });
+    notch(100);
+    expect(drawn.at(-1)).toEqual({ rect: { x: 9, y: 9, w: 3, h: 2 }, rotation: 180 });
+    scene.input.emit('pointerdown', fakePointer(10 * TILE, 10 * TILE));
+
+    expect(placements).toEqual([{ tx: 9, ty: 9, valid: true, rugRotation: 180 }]);
+  });
+
+  it('leaves the wheel to the zoom while moving a desk or placing a room, and sends no rug turn', async () => {
+    const scene = await bootHostScene();
+    const { bridge, layer, drawn, notch } = rugLayer(scene);
+    const placements: unknown[] = [];
+    bridge.on('layoutplace', (payload) => placements.push(payload));
+
+    bridge.emitCommand('layoutedit', { pickable: [], selectedId: null, placing: { w: 3, h: 3, obstacles: [], id: 'desk-1' } });
+    expect(layer.holdsWheel()).toBe(false);
+    scene.input.emit('pointermove', fakePointer(10 * TILE, 10 * TILE));
+    notch(100);
+    scene.input.emit('pointerdown', fakePointer(10 * TILE, 10 * TILE));
+
+    expect(drawn).toEqual([]);
+    expect(placements).toEqual([{ tx: 9, ty: 9, valid: true }]);
   });
 });

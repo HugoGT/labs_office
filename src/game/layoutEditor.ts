@@ -207,8 +207,11 @@ function toObstacleTileRect(bounds: SpaceBounds): TileRect {
 export interface LayoutEditCommand {
   pickable: readonly PickableRect[];
   selectedId: string | null;
-  /** `id`: the item being moved, absent while creating one. */
-  placing: { w: number; h: number; obstacles: readonly TileRect[]; snap?: 'block'; id?: string } | null;
+  /**
+   * `id`: the item being moved, absent while creating one. `rug`: a new desk,
+   * previewed with the grass rug it is created with, which the wheel turns.
+   */
+  placing: { w: number; h: number; obstacles: readonly TileRect[]; snap?: 'block'; id?: string; rug?: true } | null;
   /**
    * What stands on the map but is not pickable in this mode (the desks while
    * editing rooms, the rooms while editing desks), outlined so it shows: a
@@ -259,5 +262,6 @@ export function toLayoutEditCommand(
   const obstacles = computeObstacles(obstacleSource, options.moving ?? null).map(toObstacleTileRect);
 
   const moving = state.mode === 'move' ? { id: state.id } : {};
-  return { pickable, selectedId: null, placing: { w, h, obstacles, ...moving, ...(state.kind === 'room' && w === BLOCK_TILES && h === BLOCK_TILES ? { snap: 'block' as const } : {}) }, outlines };
+  const rug = state.kind === 'desk' && state.mode === 'create' ? { rug: true as const } : {};
+  return { pickable, selectedId: null, placing: { w, h, obstacles, ...moving, ...rug, ...(state.kind === 'room' && w === BLOCK_TILES && h === BLOCK_TILES ? { snap: 'block' as const } : {}) }, outlines };
 }

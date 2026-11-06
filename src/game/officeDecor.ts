@@ -314,7 +314,7 @@ export function decorFootprint(item: DecorPlacement, info: DecorPieceInfo | null
  * centre, each turn lays it on two rows or columns of the desk: a new desk
  * gets its grass rug on the bottom two rows and the wheel moves it around.
  */
-function rugFootprint(tx: number, ty: number, rotation: DecorRotation): DecorTileRect {
+export function rugFootprint(tx: number, ty: number, rotation: DecorRotation): DecorTileRect {
   if (rotation === 0) return { x: tx - 1, y: ty, w: 3, h: 2 };
   if (rotation === 180) return { x: tx - 1, y: ty - 1, w: 3, h: 2 };
   return { x: rotation === 90 ? tx : tx - 1, y: ty - 1, w: 2, h: 3 };

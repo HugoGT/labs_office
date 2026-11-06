@@ -20,7 +20,7 @@ import type { AddressInfo } from 'node:net';
 import { BASE_LAYOUT, type OfficeLayout } from '../../src/game/officeLayout.ts';
 import { BASE_CHAIR_PIECE } from '../../src/game/pieceCollisions.ts';
 import { BASE_MAP_SEATS, type MapSeat } from '../../src/game/seating.ts';
-import type { DecorTileRect } from '../../src/game/officeDecor.ts';
+import type { DecorRotation, DecorTileRect } from '../../src/game/officeDecor.ts';
 import { TILE, type SpaceArea } from '../../src/game/mapData.ts';
 import { livekitRoomFor, type MediaEventMessage } from '../../src/game/officeProtocol.ts';
 import { createOfficeMetrics, playersByRoom } from './observability/officeMetrics.ts';
@@ -1263,8 +1263,8 @@ export function createOfficeServer(overrides?: OfficeServerOverrides): OfficeSer
       };
       // A new desk gets its grass rug through the decor queue, after the desk
       // is saved, with the desk rules (one rug per desk) like any decor edit.
-      const furnish = async (desk: { x: number; y: number }, actorId: string) => {
-        const rug = defaultDeskRug(desk, terrain.snapshot().width);
+      const furnish = async (desk: { x: number; y: number }, actorId: string, rotation: DecorRotation) => {
+        const rug = defaultDeskRug(desk, terrain.snapshot().width, rotation);
         const deskAreas = async () => ((await desks?.listDesks()) ?? []).map(({ x, y }) => ({ x, y, w: DESK_SIDE, h: DESK_SIDE }));
         await terrain.setDecor([{ index: rug.index, item: { piece: rug.piece, rotation: rug.rotation } }], actorId, undefined, deskAreas);
       };

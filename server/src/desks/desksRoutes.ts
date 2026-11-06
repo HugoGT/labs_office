@@ -83,6 +83,7 @@ import {
 } from './deskRules.ts';
 import type { Desk, DeskDirectory, OfficeDesk, UpdateDeskInput } from './desksPort.ts';
 import { TerrainProtectedError } from '../terrain/terrainRules.ts';
+import { isDecorRotation, type DecorRotation } from '../../../src/game/officeDecor.ts';
 import type { AreaMove } from '../terrain/terrainRuntime.ts';
 
 export interface DesksDeps extends AdminDeps {
@@ -100,11 +101,11 @@ export interface DesksDeps extends AdminDeps {
    */
   walls?: DeskWallGuard;
   /**
-   * Lays the decor a new desk starts with (its grass rug, `defaultDeskRug`)
-   * as `actorId`. Best effort: a desk where the rug does not fit is still
+   * Lays the decor a new desk starts with (its grass rug, `defaultDeskRug`,
+   * at the turn the body's `rugRotation` chose, 0 when absent) as `actorId`. Best effort: a desk where the rug does not fit is still
    * created, empty.
    */
-  furnish?: (desk: DeskPosition, actorId: string) => Promise<void>;
+  furnish?: (desk: DeskPosition, actorId: string, rotation: DecorRotation) => Promise<void>;
 }
 
 /**
@@ -318,6 +319,8 @@ export async function handleCreateDesk(
   if (!authorized.ok) return authorized.result;
 
   if (!isPlainObject(body)) return INVALID_REQUEST;
+  const rugRotation = body.rugRotation ?? 0;
+  if (!isDecorRotation(rugRotation)) return INVALID_REQUEST;
 
   // Se leen solo los campos declarados. Un `id` o un `occupantId` puestos a
   // mano se caen aqui: el id lo genera la base de datos, y quien se sienta lo
@@ -334,16 +337,16 @@ export async function handleCreateDesk(
           ...(appearance === undefined ? {} : { appearance }),
         }),
       );
-      await furnishing(created, authorized.user.id, deps);
+      await furnishing(created, authorized.user.id, rugRotation, deps);
       return { status: 201, body: toAdminDeskBody(created) };
     }),
   );
 }
 
 /** Runs `deps.furnish` after the desk is saved: its failure leaves the desk in place, without its rug. */
-async function furnishing(desk: DeskPosition, actorId: string, deps: DesksDeps): Promise<void> {
+async function furnishing(desk: DeskPosition, actorId: string, rotation: DecorRotation, deps: DesksDeps): Promise<void> {
   try {
-    await deps.furnish?.(desk, actorId);
+    await deps.furnish?.(desk, actorId, rotation);
   } catch {
     console.warn('[desks] the new desk could not get its default rug');
   }

@@ -112,6 +112,14 @@ describe('createDeskAdminClient: contrato del servidor', () => {
     expect(created.label).toBe('');
   });
 
+  it('sends the turn of the new desk rug when one was chosen', async () => {
+    const fetchImpl = fetchWith(201, { ...SERVED_DESK, label: '' });
+
+    await clientWith(fetchImpl).createDesk({ x: 6, y: 9, rugRotation: 90 });
+
+    expect(sentBody(fetchImpl)).toEqual({ x: 6, y: 9, rugRotation: 90 });
+  });
+
   it('mover y renombrar son dos peticiones distintas, no una con huecos', async () => {
     // El servidor copia solo las claves PRESENTES. Mandar `label: undefined`
     // al renombrar desaparece al serializar, pero mandar `x`/`y` con lo ultimo

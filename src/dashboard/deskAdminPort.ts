@@ -19,6 +19,8 @@
  * anadiria dos sitios donde perder un redondeo.
  */
 
+import type { DecorRotation } from '../game/officeDecor';
+
 /**
  * Quien ocupa un escritorio, con lo justo para decirlo en una tabla.
  *
@@ -53,6 +55,8 @@ export interface AdminDesk {
 export interface CreateDeskInput {
   x: number;
   y: number;
+  /** The turn of the grass rug the desk is created with; absent lays it on the bottom rows. */
+  rugRotation?: DecorRotation;
 }
 
 export interface UpdateDeskInput {
