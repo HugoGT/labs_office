@@ -334,6 +334,22 @@ describe('HUD layout: focus ring of the call buttons (#305)', () => {
     },
   );
 
+  it('the game still gets the whole key press: Phaser listens on window, past the released button', async () => {
+    await page.viewport(WIDE, 800);
+    renderBar();
+    const seen: string[] = [];
+    const record = (event: KeyboardEvent) => seen.push(`${event.type}:${event.key}`);
+    window.addEventListener('keydown', record);
+    window.addEventListener('keyup', record);
+
+    await realInput.click(screen.getByRole('button', { name: /Mic/ }));
+    await realInput.keyboard('w');
+
+    window.removeEventListener('keydown', record);
+    window.removeEventListener('keyup', record);
+    expect(seen).toEqual(['keydown:w', 'keyup:w']);
+  });
+
   it('Tab still carries the ring to the next control, so keyboard navigation keeps its indicator', async () => {
     await page.viewport(WIDE, 800);
     renderBar();
