@@ -410,6 +410,7 @@ export class OfficeScene extends Phaser.Scene {
   private spacesVersion: string = BUILT_IN_SPACES_VERSION;
   private unsubscribeSetStatus?: () => void;
   private unsubscribeSpeakers?: () => void;
+  private unsubscribeHideMinimap?: () => void;
   /** Solo se asigna bajo `__OFFICE_E2E__` (D4): produccion nunca la toca. */
   private unsubscribeTeleportToTile?: () => void;
   private unsubscribeCallPeer?: () => void;
@@ -482,6 +483,8 @@ export class OfficeScene extends Phaser.Scene {
   private decorHolds = false;
   /** A decor piece picked: the minimap steps aside like the rail; a mere selection keeps both. */
   private decorHidesRail = false;
+  /** The HUD asked for it, while the own screen is shared: the minimap steps aside like the sidebar (#304). */
+  private hudHidesMinimap = false;
   /**
    * Todo lo dibujado del ultimo comando `desks` (#7, slice 5): zonas y
    * etiquetas. Se guarda entero porque cada lista nueva sustituye
@@ -561,9 +564,13 @@ export class OfficeScene extends Phaser.Scene {
     const wasHeld = this.mapHeld;
     this.layoutEditing = this.layoutCommandActive || this.terrainEditing || this.collisionEditing || this.decorEditing;
     this.mapHeld = this.layoutHolds || this.terrainHolds || this.collisionHolds || this.decorHolds;
-    // A hidden camera takes no pointer, so the map under the minimap can be edited too.
-    this.minimapCamera?.setVisible(!this.terrainHidesRail && !this.decorHidesRail);
+    this.syncMinimapVisibility();
     if (this.mapHeld && !wasHeld) this.resetWalking();
+  }
+
+  private syncMinimapVisibility(): void {
+    // A hidden camera takes no pointer, so the map under the minimap can be edited too.
+    this.minimapCamera?.setVisible(!this.terrainHidesRail && !this.decorHidesRail && !this.hudHidesMinimap);
   }
 
   /**
@@ -787,6 +794,10 @@ export class OfficeScene extends Phaser.Scene {
     this.unsubscribeSpeakers = this.bridge.onCommand('speakers', ({ sessionIds }) => {
       this.applySpeakers(sessionIds);
     });
+    this.unsubscribeHideMinimap = this.bridge.onCommand('hideminimap', ({ hidden }) => {
+      this.hudHidesMinimap = hidden;
+      this.syncMinimapVisibility();
+    });
     // Issue #2, D3: los 3 comandos de llamada, cada uno suscrito por su
     // cuenta como los de arriba -- `walkToPeer` es ademas un seam probable
     // por si solo, sin tener que pasar por el apreton de manos completo de
@@ -967,6 +978,7 @@ export class OfficeScene extends Phaser.Scene {
       this.alive = false;
       this.unsubscribeSetStatus?.();
       this.unsubscribeSpeakers?.();
+      this.unsubscribeHideMinimap?.();
       this.unsubscribeTeleportToTile?.();
       this.unsubscribeCallPeer?.();
       this.unsubscribeRespondCall?.();

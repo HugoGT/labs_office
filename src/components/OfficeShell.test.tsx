@@ -1,4 +1,4 @@
-import { act, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDeskAdminClient } from '../dashboard/deskAdminClient';
@@ -1895,6 +1895,252 @@ describe('OfficeShell: right rail while painting terrain', () => {
     expect(sidebar()).not.toBeVisible();
     act(() => bridge.emitCommand('terrainedit', null));
     expect(sidebar()).toBeVisible();
+  });
+});
+
+describe('OfficeShell: while sharing the screen (#304)', () => {
+  const sidebar = () => screen.getByRole('complementary', { name: 'Personas', hidden: true });
+  const sharing = (on: boolean) =>
+    useProximityAudioMock.mockReturnValue(proximityAudio({ audioAvailable: true, screenShareAvailable: true, screenShareOn: on }));
+
+  it('hides the sidebar while the own screen is published and brings it back afterwards', () => {
+    sharing(false);
+    const { rerender } = render(<OfficeShell onLeaveOffice={vi.fn()} />);
+    expect(sidebar()).toBeVisible();
+
+    sharing(true);
+    rerender(<OfficeShell onLeaveOffice={vi.fn()} />);
+    expect(sidebar()).not.toBeVisible();
+
+    // Also how a capture cut by the browser arrives: `screenShareOn` goes false.
+    sharing(false);
+    rerender(<OfficeShell onLeaveOffice={vi.fn()} />);
+    expect(sidebar()).toBeVisible();
+  });
+
+  it('keeps the bottom bar, with its stop button, and the zoom and exit controls', async () => {
+    const onToggleScreenShare = vi.fn();
+    useProximityAudioMock.mockReturnValue(
+      proximityAudio({ audioAvailable: true, screenShareAvailable: true, screenShareOn: true, toggleScreenShare: onToggleScreenShare }),
+    );
+    render(<OfficeShell onLeaveOffice={vi.fn()} />);
+
+    const stop = screen.getByRole('button', { name: '🖥️ Dejar de compartir' });
+    expect(stop).toBeVisible();
+    expect(stop).toBeEnabled();
+    await userEvent.click(stop);
+    expect(onToggleScreenShare).toHaveBeenCalledTimes(1);
+
+    expect(screen.getByRole('group', { name: 'Zoom del mapa' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Salir' })).toBeVisible();
+  });
+
+  it('leaves the sidebar hidden for an editor that still holds the map when the share ends', () => {
+    sharing(true);
+    const { rerender } = render(<OfficeShell onLeaveOffice={vi.fn()} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    act(() => bridge.emitCommand('terrainedit', { brush: { kind: 'floor', material: 'grass' } }));
+
+    sharing(false);
+    rerender(<OfficeShell onLeaveOffice={vi.fn()} />);
+    expect(sidebar()).not.toBeVisible();
+
+    act(() => bridge.emitCommand('terrainedit', null));
+    expect(sidebar()).toBeVisible();
+  });
+
+  it('tells the scene, which draws the minimap', () => {
+    sharing(false);
+    const { rerender } = render(<OfficeShell onLeaveOffice={vi.fn()} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    const commands: { hidden: boolean }[] = [];
+    bridge.onCommand('hideminimap', (command) => commands.push(command));
+
+    sharing(true);
+    rerender(<OfficeShell onLeaveOffice={vi.fn()} />);
+    sharing(false);
+    rerender(<OfficeShell onLeaveOffice={vi.fn()} />);
+
+    expect(commands).toEqual([{ hidden: true }, { hidden: false }]);
+  });
+
+  it('the own desk banner stops offering what opens the hidden sidebar, and offers it again afterwards', async () => {
+    vi.mocked(fetchOfficeDesks).mockResolvedValue([
+      { id: 'id-mesa', label: 'Mesa 4', x: 320, y: 384, w: 96, h: 96, occupant: { id: 'id-ana', displayName: 'Ana Torres' }, mine: true },
+    ]);
+    const session = { displayName: 'Ana Torres', getIdToken: async () => 'id-token' };
+    sharing(true);
+    const { rerender } = render(<OfficeShell session={session} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalled());
+    await act(async () => {});
+    act(() => bridge.emit('deskhover', { deskId: 'id-mesa', x: 200, y: 150 }));
+
+    expect(screen.getByRole('button', { name: 'Dejar escritorio' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Decorar' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Mi personaje' })).not.toBeInTheDocument();
+
+    sharing(false);
+    rerender(<OfficeShell session={session} />);
+    expect(screen.getByRole('button', { name: 'Decorar' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Mi personaje' })).toBeInTheDocument();
+  });
+});
+
+describe('OfficeShell: Escape minimizes the shared screen (#304)', () => {
+  const SELF = 'ses-me';
+  const sidebar = () => screen.getByRole('complementary', { name: 'Personas', hidden: true });
+  const fakeTrack = () => ({ kind: 'video', attach: () => document.createElement('video'), detach: () => [] });
+  const stage = () => screen.queryByTestId('screen-share-stage');
+  const thumbnail = () => screen.queryByTestId('screen-share-thumbnail');
+  const escape = () => fireEvent.keyDown(window, { key: 'Escape' });
+
+  function ownShare(toggleScreenShare = vi.fn()) {
+    useProximityAudioMock.mockReturnValue(
+      proximityAudio({
+        audioAvailable: true,
+        screenShareAvailable: true,
+        screenShareOn: true,
+        toggleScreenShare,
+        localScreenShareTrack: fakeTrack(),
+        activeScreenSharer: { sessionId: SELF, name: 'Yo' },
+      }),
+    );
+  }
+
+  function peerShare(sessionId: string, name: string) {
+    useProximityAudioMock.mockReturnValue(
+      proximityAudio({ screenShareTracks: new Map([[sessionId, fakeTrack()]]), activeScreenSharer: { sessionId, name } }),
+    );
+  }
+
+  function noShare() {
+    useProximityAudioMock.mockReturnValue(proximityAudio({ activeScreenSharer: null }));
+  }
+
+  function renderInSpace(session?: { displayName: string; getIdToken: () => Promise<string> }) {
+    const rendered = render(<OfficeShell session={session} />);
+    const bridge = createGameMock.mock.calls[0][1];
+    const peers = [
+      { sessionId: 'ses-ana', name: 'Ana' },
+      { sessionId: 'ses-luis', name: 'Luis' },
+    ];
+    act(() => bridge.emit('voice', { selfSessionId: SELF, selfName: 'Yo', peers, spaceId: 'space-stub' }));
+    return { bridge, rerender: () => rendered.rerender(<OfficeShell session={session} />) };
+  }
+
+  it('puts the own share up as a thumbnail with the sidebar and minimap back, and a click restores it', async () => {
+    const toggleScreenShare = vi.fn();
+    ownShare(toggleScreenShare);
+    const { bridge } = renderInSpace();
+    const commands: { hidden: boolean }[] = [];
+    bridge.onCommand('hideminimap', (command) => commands.push(command));
+    expect(stage()).toBeInTheDocument();
+    expect(sidebar()).not.toBeVisible();
+
+    act(() => void escape());
+
+    expect(stage()).not.toBeInTheDocument();
+    expect(thumbnail()).toBeInTheDocument();
+    expect(sidebar()).toBeVisible();
+    expect(commands.at(-1)).toEqual({ hidden: false });
+    // It only moved: the share keeps going and the bar can still stop it.
+    expect(toggleScreenShare).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: '🖥️ Dejar de compartir' })).toBeEnabled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Ampliar pantalla compartida' }));
+
+    expect(stage()).toBeInTheDocument();
+    expect(thumbnail()).not.toBeInTheDocument();
+    expect(sidebar()).not.toBeVisible();
+    expect(commands.at(-1)).toEqual({ hidden: true });
+  });
+
+  it('keeps a sidebar panel open behind the stage just as it was', async () => {
+    useProximityAudioMock.mockReturnValue(proximityAudio({}));
+    const { rerender } = renderInSpace();
+    await userEvent.click(screen.getByRole('button', { name: /Personas conectadas/ }));
+    const people = () => screen.getByRole('button', { name: /Personas conectadas/, hidden: true });
+    expect(people()).toHaveAttribute('aria-expanded', 'true');
+
+    ownShare();
+    rerender();
+    act(() => void escape());
+
+    expect(thumbnail()).toBeInTheDocument();
+    expect(people()).toHaveAttribute('aria-expanded', 'true');
+  });
+
+  it('the stage opens again for a new share of the same person', () => {
+    ownShare();
+    const { rerender } = renderInSpace();
+    act(() => void escape());
+    expect(thumbnail()).toBeInTheDocument();
+
+    noShare();
+    rerender();
+    ownShare();
+    rerender();
+
+    expect(stage()).toBeInTheDocument();
+    expect(thumbnail()).not.toBeInTheDocument();
+  });
+
+  it('someone watching can minimize too, and a takeover opens the stage again', () => {
+    peerShare('ses-ana', 'Ana');
+    const { rerender } = renderInSpace();
+    act(() => void escape());
+    expect(stage()).not.toBeInTheDocument();
+    expect(thumbnail()).toHaveTextContent('Pantalla de Ana');
+
+    peerShare('ses-luis', 'Luis');
+    rerender();
+
+    expect(stage()).toBeInTheDocument();
+    expect(thumbnail()).not.toBeInTheDocument();
+  });
+
+  it('with a sidebar panel open while watching, Escape closes the panel first and the stage after', async () => {
+    useProximityAudioMock.mockReturnValue(proximityAudio({}));
+    const { rerender } = renderInSpace();
+    await userEvent.click(screen.getByRole('button', { name: /Personas conectadas/ }));
+    peerShare('ses-ana', 'Ana');
+    rerender();
+
+    act(() => void escape());
+    expect(screen.getByRole('button', { name: /Personas conectadas/ })).toHaveAttribute('aria-expanded', 'false');
+    expect(stage()).toBeInTheDocument();
+
+    act(() => void escape());
+    expect(stage()).not.toBeInTheDocument();
+  });
+
+  it('with a bottom bar menu open, Escape closes the menu and leaves the stage', async () => {
+    ownShare();
+    renderInSpace();
+    await userEvent.click(screen.getByRole('button', { name: 'Opciones de micrófono' }));
+    expect(screen.getByRole('menu')).toBeInTheDocument();
+
+    act(() => void fireEvent.keyDown(document, { key: 'Escape' }));
+
+    expect(screen.queryByRole('menu')).not.toBeInTheDocument();
+    expect(stage()).toBeInTheDocument();
+  });
+
+  it('the own desk banner offers what opens the sidebar again once it is back', async () => {
+    vi.mocked(fetchOfficeDesks).mockResolvedValue([
+      { id: 'id-mesa', label: 'Mesa 4', x: 320, y: 384, w: 96, h: 96, occupant: { id: 'id-ana', displayName: 'Ana Torres' }, mine: true },
+    ]);
+    ownShare();
+    const { bridge } = renderInSpace({ displayName: 'Ana Torres', getIdToken: async () => 'id-token' });
+    await vi.waitFor(() => expect(fetchOfficeDesks).toHaveBeenCalled());
+    await act(async () => {});
+    act(() => bridge.emit('deskhover', { deskId: 'id-mesa', x: 200, y: 150 }));
+    expect(screen.queryByRole('button', { name: 'Decorar' })).not.toBeInTheDocument();
+
+    act(() => void escape());
+
+    expect(screen.getByRole('button', { name: 'Decorar' })).toBeInTheDocument();
   });
 });
 

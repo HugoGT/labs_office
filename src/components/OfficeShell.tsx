@@ -549,6 +549,24 @@ export function OfficeShell({
   }, [sharerSessionId, sharerName, selfSessionId]);
 
   /**
+   * Escape moves the shared screen from the stage up to a thumbnail, and a
+   * click on it brings it back (#304). Only this client's view: the share goes
+   * on. Held by sharer so a takeover opens the stage again, and forgotten when
+   * the share ends so a new one by the same person does too.
+   */
+  const [minimizedSharer, setMinimizedSharer] = useState<string | null>(null);
+  useEffect(() => {
+    if (sharerSessionId === null) setMinimizedSharer(null);
+  }, [sharerSessionId]);
+  const stageMinimized = sharerSessionId !== null && minimizedSharer === sharerSessionId;
+  /** The own screen fills the view: the sidebar and the minimap step aside until it is minimized or ends. */
+  const ownShareOnStage = screenShareOn && !stageMinimized;
+  // The minimap is a Phaser camera, so it follows by command.
+  useEffect(() => {
+    bridge.emitCommand('hideminimap', { hidden: ownShareOnStage });
+  }, [bridge, ownShareOnStage]);
+
+  /**
    * Recording is server-owned (#5): whether this room is being recorded is
    * read from the synced state every occupant receives, never from a local
    * flag. The button only asks; the badge follows the state.
@@ -874,8 +892,9 @@ export function OfficeShell({
         deskHover.dismiss();
         callPeer(sessionId, name);
       }}
-      onCharacter={characterPort === null ? undefined : () => openSidebarSection('character')}
-      onDecorate={() => openSidebarSection('decor')}
+      // Both open a section of the sidebar, which the own share on the stage hides (#304).
+      onCharacter={characterPort === null || ownShareOnStage ? undefined : () => openSidebarSection('character')}
+      onDecorate={ownShareOnStage ? undefined : () => openSidebarSection('decor')}
       onLeave={() => {
         deskHover.dismiss();
         void leaveDesk(hoveredDesk.label);
@@ -887,6 +906,9 @@ export function OfficeShell({
 
   // `contents` keeps the fixed children placed and stacked as if unwrapped.
   const rightRailStyle = { display: hudHidden ? 'none' : 'contents' } as const;
+  // Sharing hides only the sidebar and the minimap (#304): not `hudHidden`, which also takes
+  // the zoom and exit controls and the desk banner, and means an editor holds the map.
+  const sidebarStyle = { display: hudHidden || ownShareOnStage ? 'none' : 'contents' } as const;
 
   return (
     <div id="office-shell">
@@ -899,10 +921,13 @@ export function OfficeShell({
         screenShareTracks={screenShareTracks}
         localScreenShareTrack={localScreenShareTrack}
         activeScreenSharer={activeScreenSharer?.sessionId ?? null}
+        stageMinimized={stageMinimized}
+        onMinimizeStage={() => setMinimizedSharer(sharerSessionId)}
+        onRestoreStage={() => setMinimizedSharer(null)}
       />
       <ContextMenu menu={menu} onAction={handleMenuAction} onClose={closeMenu} />
       {deskBanner}
-      <div style={rightRailStyle}>
+      <div style={sidebarStyle}>
         <OfficeSidebar
           self={rosterSelf}
           peers={rosterPeers}
@@ -929,6 +954,7 @@ export function OfficeShell({
           onCallPeer={callPeer}
           moderation={moderation}
           openRequest={sidebarRequest}
+          escapeSuspended={ownShareOnStage}
         />
       </div>
       <BottomBar

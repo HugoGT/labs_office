@@ -163,6 +163,8 @@ export interface OfficeSidebarProps {
   moderation?: SidebarModeration | null;
   /** Opens a section of "Personalizar" on each new request. */
   openRequest?: SidebarOpenRequest | null;
+  /** Hidden behind a screen share (#304): an unseen panel must not close on Escape, it comes back as it was. */
+  escapeSuspended?: boolean;
 }
 
 export interface SidebarModeration {
@@ -205,6 +207,7 @@ export function OfficeSidebar({
   onCallPeer,
   moderation = null,
   openRequest = null,
+  escapeSuspended = false,
 }: OfficeSidebarProps) {
   const [openPanel, setOpenPanel] = useState<'personalize' | 'people' | null>(null);
   const [query, setQuery] = useState('');
@@ -283,10 +286,12 @@ export function OfficeSidebar({
 
   useEffect(() => {
     // A map editor owns Escape while it holds the map (a picked brush, a draft).
-    if (openPanel === null || layoutSection !== null || deskDecor) return undefined;
+    if (openPanel === null || layoutSection !== null || deskDecor || escapeSuspended) return undefined;
     const toggle = openPanel === 'people' ? peopleToggleRef : personalizeToggleRef;
     const onKeyDown = (event: KeyboardEvent): void => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
+      // Handled: the screen share stage minimizes on an Escape nothing else took (#304).
+      event.preventDefault();
       // Focus inside the closing panel would be lost with it; elsewhere (the map) it stays put.
       const hadFocus = rootRef.current?.contains(document.activeElement) ?? false;
       setOpenPanel(null);
@@ -295,7 +300,7 @@ export function OfficeSidebar({
     };
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, [openPanel, layoutSection, deskDecor]);
+  }, [openPanel, layoutSection, deskDecor, escapeSuspended]);
 
   return (
     <div

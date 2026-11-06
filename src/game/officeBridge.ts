@@ -294,6 +294,11 @@ export interface OfficeCommandMap {
    */
   speakers: { sessionIds: string[] };
   /**
+   * Whether the HUD wants the minimap out of the way (#304): the own screen
+   * share holds the stage, so `OfficeShell` hides the sidebar and the scene follows.
+   */
+  hideminimap: { hidden: boolean };
+  /**
    * Sit on the free seat in reach, or stand up when seated (art migration,
    * step 6). Same as pressing E in the canvas; the room has the last word.
    */
@@ -432,6 +437,7 @@ const STATE_COMMANDS: ReadonlySet<keyof OfficeCommandMap> = new Set<keyof Office
   'desks',
   'setStatus',
   'speakers',
+  'hideminimap',
 ]);
 
 export function createOfficeBridge(): OfficeBridge {

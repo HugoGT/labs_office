@@ -44,6 +44,9 @@ function renderCrowd(sharing: boolean) {
       screenShareTracks={new Map(sharing ? [['p00', fakeVideoTrack()]] : [])}
       localScreenShareTrack={null}
       activeScreenSharer={sharing ? 'p00' : null}
+      stageMinimized={false}
+      onMinimizeStage={() => undefined}
+      onRestoreStage={() => undefined}
     />,
   );
   act(() => bridge.emit('voice', { selfSessionId: 'yo', selfName: 'HugoGT', peers: PEERS, spaceId: 'sala' }));

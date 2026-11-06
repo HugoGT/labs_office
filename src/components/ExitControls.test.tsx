@@ -103,6 +103,16 @@ describe('ExitControls (#66)', () => {
       expect(button).toHaveAttribute('aria-controls', panel.id);
     });
 
+    it('an Escape that closes the steps counts as handled, so nothing else acts on it (#304)', async () => {
+      const user = userEvent.setup();
+      render(<ExitControls onSignOut={vi.fn()} onLeaveOffice={vi.fn()} install={{ kind: 'ios' }} />);
+      await user.click(screen.getByRole('button', { name: 'Instalar app' }));
+
+      // `fireEvent` answers false for a default-prevented event.
+      expect(fireEvent.keyDown(document, { key: 'Escape' })).toBe(false);
+      expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    });
+
     it('the steps close on Escape and give focus back to the button', async () => {
       const user = userEvent.setup();
       render(<ExitControls onSignOut={vi.fn()} onLeaveOffice={vi.fn()} install={{ kind: 'ios' }} />);

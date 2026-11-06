@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { AttachableTrack } from '../game/attachableTrack';
+import { useEscapeStep } from '../hooks/useEscapeStep';
 import type { OfficeBridge, OfficeEventMap } from '../game/officeBridge';
 import { selectScreenShareStage } from '../game/screenShare';
 import { selectVideoTiles, videoTileCapacity } from '../game/videoTileSelection';
@@ -20,6 +21,12 @@ export interface VideoTilesProps {
   localScreenShareTrack: AttachableTrack | null;
   /** SessionId holding the single share slot of the space, or `null` (#20). */
   activeScreenSharer: string | null;
+  /** The share moved from the stage up to a thumbnail in the bar (#304). */
+  stageMinimized: boolean;
+  /** Escape on an open stage. It only moves the view: the share goes on. */
+  onMinimizeStage: () => void;
+  /** A click on the thumbnail. */
+  onRestoreStage: () => void;
 }
 
 const INITIAL_VOICE: OfficeEventMap['voice'] = {
@@ -71,6 +78,9 @@ export function VideoTiles({
   screenShareTracks,
   localScreenShareTrack,
   activeScreenSharer,
+  stageMinimized,
+  onMinimizeStage,
+  onRestoreStage,
 }: VideoTilesProps) {
   const [voice, setVoice] = useState<OfficeEventMap['voice']>(INITIAL_VOICE);
   const [portraits, setPortraits] = useState<Record<string, string> | null>(null);
@@ -125,7 +135,14 @@ export function VideoTiles({
     // Screen share stays space-only: the open floor never shares (#20).
     remoteTracks: voice.spaceId !== null ? screenShareTracks : new Map(),
   });
-  const layout = stage ? 'column' : 'row';
+  const thumbnail = stage && stageMinimized ? stage : null;
+  const openStage = stage && !stageMinimized ? stage : null;
+  useEscapeStep(openStage !== null, () => {
+    onMinimizeStage();
+    return true;
+  });
+  const layout = openStage ? 'column' : 'row';
+  const capacity = videoTileCapacity({ layout, viewportWidth: viewport.width, viewportHeight: viewport.height });
   // Cameras and speakers first, within what fits the layout (#280).
   const selection = selectVideoTiles(
     entries.map((entry) => ({
@@ -134,7 +151,8 @@ export function VideoTiles({
       speaking: speakers.has(entry.sessionId),
       pinned: entry.sessionId === voice.selfSessionId,
     })),
-    videoTileCapacity({ layout, viewportWidth: viewport.width, viewportHeight: viewport.height }),
+    // The thumbnail takes one of the slots.
+    thumbnail ? Math.max(1, capacity - 1) : capacity,
     visibleRef.current,
   );
   useEffect(() => {
@@ -159,26 +177,51 @@ export function VideoTiles({
   // by (participant, source): a new sharer gets a fresh element.
   return (
     <>
-      {stage && (
+      {openStage && (
         <div
-          key={`${stage.sessionId}:screen_share`}
+          key={`${openStage.sessionId}:screen_share`}
           className={styles.stage}
           data-testid="screen-share-stage"
-          data-session-id={stage.sessionId}
+          data-session-id={openStage.sessionId}
         >
           <VideoTile
-            sessionId={stage.sessionId}
+            sessionId={openStage.sessionId}
             name={stageLabel}
             portraits={portraits}
             characterPortraits={characterPortraits}
-            track={stage.track}
+            track={openStage.track}
             speaking={false}
             fit="contain"
           />
         </div>
       )}
-      {entries.length > 0 && (
+      {(entries.length > 0 || thumbnail) && (
         <div className={styles.bar} data-layout={layout} data-testid="video-tile-bar">
+          {/* No `data-session-id`: that marks the people's tiles, and this is a screen. */}
+          {thumbnail && (
+            <div
+              key={`${thumbnail.sessionId}:screen_share`}
+              className={`${styles.tile} ${styles.stageThumbnail}`}
+              data-testid="screen-share-thumbnail"
+            >
+              <VideoTile
+                sessionId={thumbnail.sessionId}
+                name={stageLabel}
+                portraits={portraits}
+                characterPortraits={characterPortraits}
+                track={thumbnail.track}
+                speaking={false}
+                fit="contain"
+              />
+              <button
+                type="button"
+                className={styles.stageRestore}
+                aria-label="Ampliar pantalla compartida"
+                title="Ampliar pantalla compartida"
+                onClick={onRestoreStage}
+              />
+            </div>
+          )}
           {visibleEntries.map((entry) => (
             <div key={entry.sessionId} className={styles.tile} data-session-id={entry.sessionId}>
               <VideoTile

@@ -143,6 +143,29 @@
 }
 
 /*
+ * The stage minimized (#304). Unlike the rest of the bar it takes the pointer,
+ * only over its own box, because it is the way back to the stage.
+ */
+.stageThumbnail {
+  position: relative;
+  pointer-events: auto;
+}
+
+.stageRestore {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  cursor: pointer;
+}
+
+.stageRestore:hover {
+  background: #ffffff14;
+}
+
+/*
  * "+N personas" (#280): the people left without a tile. It takes one tile
  * slot, so the capacity rule counts it and the bar never grows past it.
  */
