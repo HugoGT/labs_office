@@ -123,7 +123,7 @@ describe('createGame: map zoom persistence (map-zoom)', () => {
     games.push(game);
     await waitForSceneRunning(game, 'office');
 
-    bridge.emitCommand('zoom', { action: 'out' });
+    game.scene.getScene('office')!.input.keyboard!.emit('keydown', { key: '-', code: '' });
 
     expect(window.localStorage.getItem(MAP_ZOOM_KEY)).toBe('1');
   });

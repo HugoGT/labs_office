@@ -20,9 +20,7 @@ import {
   restoreZoom,
   snapScrollToScreenPixels,
   zoomKeyAction,
-  zoomLabel,
   zoomStep,
-  zoomView,
   type WheelState,
   type ZoomStore,
 } from './mapZoom';
@@ -396,26 +394,6 @@ describe('zoomKeyAction', () => {
     expect(press('-', { metaKey: true })).toBeNull();
     expect(press('0', { altKey: true })).toBeNull();
     expect(press('+', { repeat: true })).toBeNull();
-  });
-});
-
-describe('zoomLabel and zoomView', () => {
-  it('labels every stop with the camera zoom itself: 0.5x, 1x, 2x, 3x, 4x', () => {
-    expect(ZOOM_STOPS.map(zoomLabel)).toEqual(['0.5x', '1x', '2x', '3x', '4x']);
-    expect(zoomLabel(ZOOM_DEFAULT)).toBe('2x');
-  });
-
-  it('a value between stops gets at most two decimals', () => {
-    expect(zoomLabel(1.5)).toBe('1.5x');
-    expect(zoomLabel(4 / 3)).toBe('1.33x');
-  });
-
-  it('flags the limits: nothing further out at 0.5x, nothing further in at 4x', () => {
-    expect(zoomView(0.5)).toEqual({ zoom: 0.5, canZoomIn: true, canZoomOut: false });
-    expect(zoomView(1)).toEqual({ zoom: 1, canZoomIn: true, canZoomOut: true });
-    expect(zoomView(2)).toEqual({ zoom: 2, canZoomIn: true, canZoomOut: true });
-    expect(zoomView(3)).toEqual({ zoom: 3, canZoomIn: true, canZoomOut: true });
-    expect(zoomView(4)).toEqual({ zoom: 4, canZoomIn: false, canZoomOut: true });
   });
 });
 
