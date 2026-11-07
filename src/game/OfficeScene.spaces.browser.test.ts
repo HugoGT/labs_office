@@ -1,5 +1,10 @@
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import Phaser from 'phaser';
+import { createElement } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import * as vitestBrowser from 'vitest/browser';
+import { VideoTiles } from '../components/VideoTiles';
+import type { AttachableTrack } from './attachableTrack';
 import type { CharacterContainer } from './characters';
 import { PLAYER_SPAWN_TX, PLAYER_SPAWN_TY, TILE } from './mapData';
 import {
@@ -41,6 +46,10 @@ import {
   findRemoteAvatars,
   BUILT_IN_SPACES_VERSION,
 } from '../test/officeScene';
+
+const { userEvent } = vitestBrowser as unknown as {
+  userEvent: { hover(element: Element, options: { position: { x: number; y: number }; force?: boolean }): Promise<void> };
+};
 
 afterEach(destroyOfficeGames);
 
@@ -489,6 +498,57 @@ describe('OfficeScene: escritorios asignables (#7, slice 5)', () => {
     const canvas = scene.game.canvas.getBoundingClientRect();
     expect(hover!.x).toBe(Math.round(canvas.left + (desk.x + desk.w / 2 - camera.worldView.x) * camera.zoom));
     expect(hover!.y).toBe(Math.round(canvas.top + (desk.y - camera.worldView.y) * camera.zoom));
+  });
+
+  it('offers no desk under the stage of a share: real mouse, real stage (#304)', async () => {
+    const bridge = createOfficeBridge();
+    const { scene } = await bootOfficeScene(bridge);
+    const hovers: OfficeEventMap['deskhover'][] = [];
+    bridge.on('deskhover', (payload) => hovers.push(payload));
+    const desk = await deskInView(scene);
+    bridge.emitCommand('desks', { desks: [desk] });
+    const camera = scene.cameras.main;
+    const { x, y } = bottomOf(desk);
+    const position = { x: camera.x + (x - camera.worldView.x) * camera.zoom, y: camera.y + (y - camera.worldView.y) * camera.zoom };
+
+    await userEvent.hover(scene.game.canvas, { position });
+    await advanceGameClock(scene, 50);
+    expect(hovers.at(-1)?.deskId).toBe(desk.id);
+
+    const track = {
+      kind: 'video',
+      attach: () => document.createElement('video'),
+      detach: () => [],
+    } as unknown as AttachableTrack;
+    const tiles = createOfficeBridge();
+    render(
+      createElement(VideoTiles, {
+        bridge: tiles,
+        videoTracks: new Map(),
+        speakers: new Set<string>(),
+        localVideoTrack: null,
+        screenShareTracks: new Map([['ana', track]]),
+        localScreenShareTrack: null,
+        activeScreenSharer: 'ana',
+        stageMinimized: false,
+        onMinimizeStage: () => undefined,
+        onRestoreStage: () => undefined,
+        stageFocus: null,
+        onStageFocusChange: () => undefined,
+      }),
+    );
+    act(() => tiles.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: [], spaceId: 'sala' }));
+    // Over the whole test canvas: it is smaller than the side column the stage leaves free.
+    const stage = screen.getByTestId('screen-share-stage');
+    const canvas = scene.game.canvas.getBoundingClientRect();
+    stage.style.cssText = `top: ${canvas.top}px; left: ${canvas.left}px; width: ${canvas.width}px; height: ${canvas.height}px; right: auto; bottom: auto;`;
+
+    // `force`: without it Playwright waits for a target that takes the pointer, which is what is being tested.
+    await userEvent.hover(within(stage).getByRole('button'), { position, force: true });
+    await advanceGameClock(scene, 50);
+
+    expect(hovers.at(-1)).toBeNull();
+    cleanup();
   });
 
   it('says null once the pointer leaves the desk, and only once', async () => {
