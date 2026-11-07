@@ -811,13 +811,14 @@ export async function connectLivekitRoom({
   // sana, suscripcion concedida y silencio.
   room.on(
     RoomEvent.TrackSubscribed,
-    (track: RemoteTrack, _publication: unknown, participant: RemoteParticipant) => {
+    (track: RemoteTrack, publication: TrackPublication | undefined, participant: RemoteParticipant) => {
       sink.add(track, participant.identity);
       // D3 (#17): el video NUNCA se adjunta aqui -- solo se reporta. Adjuntar
       // vive en React (la unica pieza con un renderer para video).
       if (track.source === Track.Source.ScreenShare) {
         onScreenShareTrackSubscribed?.(participant.identity, track);
-      } else if (track.kind === Track.Kind.Video) {
+      } else if (track.kind === Track.Kind.Video && !publication?.isMuted) {
+        // A camera already off has nothing to show until `TrackUnmuted` (#304).
         onVideoTrackSubscribed?.(participant.identity, track);
       }
     },
@@ -870,15 +871,18 @@ export async function connectLivekitRoom({
     onMicrophoneMutedRemotely?.();
   });
 
-  // `setCameraEnabled(false)` only mutes the publication, whose track stays: for
-  // the UI there is no camera then, or its tile would stay up, black (#304).
+  // `setCameraEnabled(false)` only mutes the publication, whose track stays, on
+  // both ends: for the UI there is no camera then, or the tile would show a dark
+  // video instead of the person's character (#304).
   room.on(RoomEvent.TrackMuted, (publication: TrackPublication, participant: Participant) => {
-    if (participant !== room.localParticipant || publication.source !== Track.Source.Camera) return;
-    onLocalVideoTrackChanged?.(null);
+    if (publication?.source !== Track.Source.Camera) return;
+    if (participant === room.localParticipant) onLocalVideoTrackChanged?.(null);
+    else if (publication.track) onVideoTrackUnsubscribed?.(participant.identity, publication.track);
   });
   room.on(RoomEvent.TrackUnmuted, (publication: TrackPublication, participant: Participant) => {
-    if (participant !== room.localParticipant || publication.source !== Track.Source.Camera) return;
-    onLocalVideoTrackChanged?.(publication.track ?? null);
+    if (publication?.source !== Track.Source.Camera) return;
+    if (participant === room.localParticipant) onLocalVideoTrackChanged?.(publication.track ?? null);
+    else if (publication.track) onVideoTrackSubscribed?.(participant.identity, publication.track);
   });
 
   // D7: unica fuente de habla. No lee `micOn` ni ningun umbral de audioLevel

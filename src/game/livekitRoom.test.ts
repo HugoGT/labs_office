@@ -399,6 +399,69 @@ describe('video, camara local y habla llegan hacia afuera (issue #17, D3/D7): li
     expect(onLocalVideoTrackChanged).not.toHaveBeenCalled();
   });
 
+  it("a peer's camera going off reports no track, and coming back reports it again: never a dark tile (#304)", async () => {
+    const room = fakeRoom();
+    const onVideoTrackSubscribed = vi.fn();
+    const onVideoTrackUnsubscribed = vi.fn();
+    await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onVideoTrackSubscribed,
+      onVideoTrackUnsubscribed,
+    });
+    const videoTrack = fakeTrack('video');
+    const camera = { kind: 'video', source: 'camera', track: videoTrack };
+
+    room.emit(RoomEvent.TrackMuted, camera, { identity: 'p1' });
+    expect(onVideoTrackUnsubscribed).toHaveBeenCalledExactlyOnceWith('p1', videoTrack);
+
+    room.emit(RoomEvent.TrackUnmuted, camera, { identity: 'p1' });
+    expect(onVideoTrackSubscribed).toHaveBeenCalledExactlyOnceWith('p1', videoTrack);
+  });
+
+  it('subscribing to a camera already off reports nothing until it comes back (#304)', async () => {
+    const room = fakeRoom();
+    const onVideoTrackSubscribed = vi.fn();
+    await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onVideoTrackSubscribed,
+    });
+    const videoTrack = fakeTrack('video');
+    const camera = { kind: 'video', source: 'camera', track: videoTrack, isMuted: true };
+
+    room.emit(RoomEvent.TrackSubscribed, videoTrack, camera, { identity: 'p1' });
+    expect(onVideoTrackSubscribed).not.toHaveBeenCalled();
+
+    room.emit(RoomEvent.TrackUnmuted, { ...camera, isMuted: false }, { identity: 'p1' });
+    expect(onVideoTrackSubscribed).toHaveBeenCalledExactlyOnceWith('p1', videoTrack);
+  });
+
+  it("a peer's mute with no track yet, or of something else, says nothing about their camera", async () => {
+    const room = fakeRoom();
+    const onVideoTrackSubscribed = vi.fn();
+    const onVideoTrackUnsubscribed = vi.fn();
+    await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onVideoTrackSubscribed,
+      onVideoTrackUnsubscribed,
+    });
+    const notSubscribed = { kind: 'video', source: 'camera', track: undefined };
+    const microphone = { kind: 'audio', source: 'microphone', track: fakeTrack('audio') };
+
+    for (const publication of [notSubscribed, microphone]) {
+      room.emit(RoomEvent.TrackMuted, publication, { identity: 'p1' });
+      room.emit(RoomEvent.TrackUnmuted, publication, { identity: 'p1' });
+    }
+
+    expect(onVideoTrackSubscribed).not.toHaveBeenCalled();
+    expect(onVideoTrackUnsubscribed).not.toHaveBeenCalled();
+  });
+
   it('publicar/despublicar audio local nunca dispara onLocalVideoTrackChanged: el gate es por kind, no por "es local"', async () => {
     const room = fakeRoom();
     const onLocalVideoTrackChanged = vi.fn();
