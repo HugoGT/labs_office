@@ -12,7 +12,6 @@ import type { OfficeDesk } from '../game/desksPort';
 import type { OfficeBridge } from '../game/officeBridge';
 import { BUILT_IN_SPACES_VERSION } from '../game/mapData';
 import { fetchSpacesConfig } from '../game/spacesConfig';
-import { zoomView, type ZoomAction } from '../game/mapZoom';
 import { DEFAULT_NAME } from '../game/officeProtocol';
 import { NO_DEVICES } from '../game/mediaDevices';
 import { RecordingError, getRecordingUrl, startRecording, stopRecording } from '../game/recordingClient';
@@ -1546,38 +1545,10 @@ describe('OfficeShell: exit controls (#66)', () => {
   });
 });
 
-describe('OfficeShell: map zoom control (map-zoom)', () => {
-  it('shows the zoom the scene announces, whichever input changed it', () => {
+describe('OfficeShell: map zoom', () => {
+  it('has no zoom control on screen: the wheel and the keys are the way to zoom', () => {
     render(<OfficeShell />);
-    const bridge = createGameMock.mock.calls[0][1];
-    const group = screen.getByRole('group', { name: 'Zoom del mapa' });
-    expect(group).toHaveTextContent('2x');
-
-    act(() => bridge.emit('zoomchanged', zoomView(0.5)));
-
-    expect(group).toHaveTextContent('0.5x');
-    expect(screen.getByRole('button', { name: 'Alejar' })).toBeDisabled();
-  });
-
-  it('sends each click to the scene as a zoom command, and the label resets to 2x', async () => {
-    const user = userEvent.setup();
-    render(<OfficeShell />);
-    const bridge = createGameMock.mock.calls[0][1];
-    const actions: ZoomAction[] = [];
-    // Stands in for the scene: confirms a reset with the stop it landed on.
-    bridge.onCommand('zoom', ({ action }) => {
-      actions.push(action);
-      if (action === 'reset') bridge.emit('zoomchanged', zoomView(2));
-    });
-    // The limits each disable one button: 0.5x has no zoom out, 4x no zoom in.
-    act(() => bridge.emit('zoomchanged', zoomView(0.5)));
-    await user.click(screen.getByRole('button', { name: 'Acercar' }));
-    act(() => bridge.emit('zoomchanged', zoomView(4)));
-    await user.click(screen.getByRole('button', { name: 'Alejar' }));
-    await user.click(screen.getByRole('button', { name: 'Restablecer zoom a 2x (ahora 4x)' }));
-
-    expect(actions).toEqual(['in', 'out', 'reset']);
-    expect(screen.getByRole('group', { name: 'Zoom del mapa' })).toHaveTextContent('2x');
+    expect(screen.queryByRole('group', { name: 'Zoom del mapa', hidden: true })).not.toBeInTheDocument();
   });
 });
 
@@ -1855,7 +1826,6 @@ describe('OfficeShell: right rail while painting terrain', () => {
     const bridge = createGameMock.mock.calls[0][1];
     const rail = () => [
       screen.getByRole('complementary', { name: 'Personas', hidden: true }),
-      screen.getByRole('group', { name: 'Zoom del mapa', hidden: true }),
       screen.getByRole('button', { name: 'Salir', hidden: true }),
     ];
     rail().forEach((element) => expect(element).toBeVisible());
@@ -1918,7 +1888,7 @@ describe('OfficeShell: while sharing the screen (#304)', () => {
     expect(sidebar()).toBeVisible();
   });
 
-  it('keeps the bottom bar, with its stop button, and the zoom and exit controls', async () => {
+  it('keeps the bottom bar, with its stop button, and the exit controls', async () => {
     const onToggleScreenShare = vi.fn();
     useProximityAudioMock.mockReturnValue(
       proximityAudio({ audioAvailable: true, screenShareAvailable: true, screenShareOn: true, toggleScreenShare: onToggleScreenShare }),
@@ -1931,7 +1901,6 @@ describe('OfficeShell: while sharing the screen (#304)', () => {
     await userEvent.click(stop);
     expect(onToggleScreenShare).toHaveBeenCalledTimes(1);
 
-    expect(screen.getByRole('group', { name: 'Zoom del mapa' })).toBeVisible();
     expect(screen.getByRole('button', { name: 'Salir' })).toBeVisible();
   });
 

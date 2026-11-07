@@ -265,7 +265,7 @@ export interface OfficeEventMap {
   collisionpick: { pieceId: string; rotation: CollisionRotation; rects: readonly CollisionRect[]; saved: boolean; defaults: readonly CollisionRect[] };
   /** A rectangle was drawn, moved or resized on the map: the whole new draft, and the rectangle it touched. */
   collisiondraft: { rects: readonly CollisionRect[]; selectedRect: number | null };
-  /** The map zoom: the TARGET stop and what the zoom control may still do, never the animated value. */
+  /** The map zoom: the TARGET stop and what the zoom may still do, never the animated value. */
   zoomchanged: ZoomView;
 }
 

@@ -41,7 +41,6 @@ import { useCallInvitations } from '../hooks/useCallInvitations';
 import { useDeskHover } from '../hooks/useDeskHover';
 import { useDesks } from '../hooks/useDesks';
 import { useInstallPrompt } from '../hooks/useInstallPrompt';
-import { useMapZoom } from '../hooks/useMapZoom';
 import { useOfficeAdminRole } from '../hooks/useOfficeAdminRole';
 import { useOfficeBridge } from '../hooks/useOfficeBridge';
 import { useProximityAudio, type MeetingNotice } from '../hooks/useProximityAudio';
@@ -65,7 +64,6 @@ import { PhoneIcon } from './PhoneIcon';
 import { RecordingReadyStack, type RecordingReadyNotice } from './RecordingReadyStack';
 import { Toast } from './Toast';
 import { VideoTiles } from './VideoTiles';
-import { ZoomControls } from './ZoomControls';
 
 /** Duracion del toast antes de auto-ocultarse (`app.js:525`, `ms || 3200`). */
 const TOAST_TIMEOUT_MS = 3200;
@@ -167,7 +165,6 @@ export function OfficeShell({
   // "Instalar app" in the exit controls (#13): null while installed or not installable.
   const installOffer = useInstallPrompt();
   // Map zoom (map-zoom): subscribes in the commit that starts the game, before the scene announces it.
-  const mapZoom = useMapZoom(bridge);
   // Se resuelve una sola vez: cambiarlo remontaria Phaser entero.
   const [endpoint] = useState(() =>
     resolveOfficeEndpoint({
@@ -285,7 +282,7 @@ export function OfficeShell({
   const [layoutEditing, setLayoutEditing] = useState(false);
   /**
    * A terrain brush (floor or wall) or a picked decor piece (#208; a mere selection does not) hides the right
-   * rail (minimap, zoom, sidebar, exit buttons) so the map can be edited
+   * rail (minimap, sidebar, exit buttons) so the map can be edited
    * under it; Escape unpicks it and brings the rail back. Read from the same
    * `terrainedit` and `decoredit` commands the scene follows, so the sidebar
    * stays mounted (only hidden) and keeps the editor's state.
@@ -907,7 +904,7 @@ export function OfficeShell({
   // `contents` keeps the fixed children placed and stacked as if unwrapped.
   const rightRailStyle = { display: hudHidden ? 'none' : 'contents' } as const;
   // Sharing hides only the sidebar and the minimap (#304): not `hudHidden`, which also takes
-  // the zoom and exit controls and the desk banner, and means an editor holds the map.
+  // the exit controls and the desk banner, and means an editor holds the map.
   const sidebarStyle = { display: hudHidden || ownShareOnStage ? 'none' : 'contents' } as const;
 
   return (
@@ -1001,7 +998,6 @@ export function OfficeShell({
           onLeaveOffice={onLeaveOffice ?? null}
           install={installOffer}
         />
-        <ZoomControls view={mapZoom.view} onZoomIn={mapZoom.zoomIn} onZoomOut={mapZoom.zoomOut} onReset={mapZoom.reset} />
       </div>
       <NoticeStack>
         {/* Inside a locked space its notice stays up, under any passing toast. */}
