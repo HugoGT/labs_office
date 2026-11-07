@@ -2,11 +2,9 @@ import Phaser from 'phaser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitForSceneRunning } from '../test/phaserScene';
 import { CameraZoomLayer, type CameraZoomLayerOptions } from './CameraZoomLayer';
-import { createOfficeBridge, type OfficeBridge } from './officeBridge';
-import { zoomView, type ZoomView } from './mapZoom';
 
 /**
- * `CameraZoomLayer` turns real wheel, key and bridge input into a zoom target
+ * `CameraZoomLayer` turns real wheel and key input into a zoom target
  * and eases the main camera to it: it needs a real `Phaser.Game`, hosted by a
  * minimal scene like `CameraPanLayer.browser.test.ts`.
  */
@@ -55,18 +53,16 @@ async function bootHostScene(): Promise<HostScene> {
 
 interface Fixture {
   scene: HostScene;
-  bridge: OfficeBridge;
   minimap: Phaser.Cameras.Scene2D.Camera;
   layer: CameraZoomLayer;
-  views: ZoomView[];
+  /** Every stop the layer settled on, in order; empty while the target has not moved. */
+  saved: number[];
   clock: { now: number };
 }
 
 async function fixture(overrides: Partial<CameraZoomLayerOptions> = {}, startZoom = 2): Promise<Fixture> {
   const scene = await bootHostScene();
-  const bridge = createOfficeBridge();
-  const views: ZoomView[] = [];
-  bridge.on('zoomchanged', (view) => views.push(view));
+  const saved: number[] = [];
   scene.cameras.main.setZoom(startZoom);
   const minimap = scene.cameras.add(200, 0, 100, 100);
   const clock = { now: 1000 };
@@ -74,12 +70,12 @@ async function fixture(overrides: Partial<CameraZoomLayerOptions> = {}, startZoo
     scene,
     camera: scene.cameras.main,
     minimap,
-    bridge,
+    store: { load: () => startZoom, save: (zoom) => saved.push(zoom) },
     now: () => clock.now,
     isEditableFocused: () => false,
     ...overrides,
   });
-  return { scene, bridge, minimap, layer, views, clock };
+  return { scene, minimap, layer, saved, clock };
 }
 
 function renderFrames(scene: Phaser.Scene, count = 60): void {
@@ -121,13 +117,13 @@ function key(scene: Phaser.Scene, keyName: string, extra: Partial<KeyboardEvent>
 describe('CameraZoomLayer: wheel', () => {
   it('two notches over the main camera step the target and ease the main camera only, landing exactly on it', async () => {
     const f = await fixture();
-    const { scene, minimap, views } = f;
+    const { scene, minimap, saved } = f;
     const minimapZoom = minimap.zoom;
 
     notches(f, -100, 1);
-    expect(views).toEqual([zoomView(2)]);
+    expect(saved).toEqual([]);
     notches(f, -100, 1);
-    expect(views.at(-1)).toEqual(zoomView(3));
+    expect(saved.at(-1)).toBe(3);
     expect(scene.cameras.main.zoom).toBe(2);
 
     renderFrames(scene, 1);
@@ -145,7 +141,7 @@ describe('CameraZoomLayer: wheel', () => {
 
     notches(f, 100);
 
-    expect(f.views.at(-1)).toEqual(zoomView(1));
+    expect(f.saved.at(-1)).toBe(1);
   });
 
   it('a single notch, however strong, does not zoom', async () => {
@@ -154,7 +150,7 @@ describe('CameraZoomLayer: wheel', () => {
     notches(f, -100, 1);
     renderFrames(f.scene, 3);
 
-    expect(f.views).toEqual([zoomView(2)]);
+    expect(f.saved).toEqual([]);
     expect(f.scene.cameras.main.zoom).toBe(2);
   });
 
@@ -165,45 +161,45 @@ describe('CameraZoomLayer: wheel', () => {
     f.clock.now += 1000;
     notches(f, -100, 1);
 
-    expect(f.views).toEqual([zoomView(2)]);
+    expect(f.saved).toEqual([]);
   });
 
   it('ignores a wheel from the minimap camera and one inside the minimap rect, even if Phaser says main', async () => {
     const f = await fixture();
-    const initial = f.views.length;
+    const initial = f.saved.length;
 
     notches(f, -100, 2, { camera: f.minimap, x: 250, y: 50 });
     notches(f, -100, 2, { camera: f.scene.cameras.main, x: 250, y: 50 });
 
-    expect(f.views).toHaveLength(initial);
+    expect(f.saved).toHaveLength(initial);
   });
 
   it('zooms with a wheel inside the minimap rect while the minimap is hidden (terrain editor)', async () => {
     const f = await fixture();
-    const initial = f.views.length;
+    const initial = f.saved.length;
     f.minimap.setVisible(false);
 
     notches(f, -100, 2, { camera: f.scene.cameras.main, x: 250, y: 50 });
 
-    expect(f.views).toHaveLength(initial + 1);
+    expect(f.saved).toHaveLength(initial + 1);
   });
 
   it('does not zoom while the wheel is suppressed (a rotatable decor piece is picked, #207), and zooms again after', async () => {
     let suppressed = true;
     const f = await fixture({ wheelSuppressed: () => suppressed });
-    const initial = f.views.length;
+    const initial = f.saved.length;
 
     notches(f, -100, 4);
     renderFrames(f.scene, 3);
-    expect(f.views).toHaveLength(initial);
+    expect(f.saved).toHaveLength(initial);
     expect(f.scene.cameras.main.zoom).toBe(2);
 
     suppressed = false;
     // The notches turned while suppressed do not count toward the next zoom step.
     notches(f, -100, 1);
-    expect(f.views).toHaveLength(initial);
+    expect(f.saved).toHaveLength(initial);
     notches(f, -100, 1);
-    expect(f.views.at(-1)).toEqual(zoomView(3));
+    expect(f.saved.at(-1)).toBe(3);
   });
 
   it('keeps zooming with the keys while the wheel is suppressed', async () => {
@@ -211,7 +207,7 @@ describe('CameraZoomLayer: wheel', () => {
 
     key(f.scene, '+');
 
-    expect(f.views.at(-1)).toEqual(zoomView(3));
+    expect(f.saved.at(-1)).toBe(3);
   });
 
   it('tolerates a pointer with no camera yet', async () => {
@@ -219,7 +215,7 @@ describe('CameraZoomLayer: wheel', () => {
 
     expect(() => notches(f, -100, 2, { camera: null })).not.toThrow();
 
-    expect(f.views.at(-1)).toEqual(zoomView(3));
+    expect(f.saved.at(-1)).toBe(3);
   });
 
   it('ctrl+wheel (pinch) zooms with small deltas that plain wheel would ignore', async () => {
@@ -227,91 +223,69 @@ describe('CameraZoomLayer: wheel', () => {
 
     notches(f, -10, 3, { ctrlKey: true });
 
-    expect(f.views.at(-1)).toEqual(zoomView(3));
+    expect(f.saved.at(-1)).toBe(3);
   });
 
   it('two notches of a wheel that reports under 100 px (Chrome on Linux, 53) are one step', async () => {
     const f = await fixture();
 
     notches(f, -53, 1);
-    expect(f.views).toEqual([zoomView(2)]);
+    expect(f.saved).toEqual([]);
     notches(f, -53, 1);
 
-    expect(f.views.at(-1)).toEqual(zoomView(3));
+    expect(f.saved.at(-1)).toBe(3);
   });
 
   it('normalizes line-mode deltas: two Firefox notches are one step', async () => {
     const f = await fixture();
 
     notches(f, -3, 1, { deltaMode: 1 });
-    expect(f.views).toEqual([zoomView(2)]);
+    expect(f.saved).toEqual([]);
     notches(f, -3, 1, { deltaMode: 1 });
 
-    expect(f.views.at(-1)).toEqual(zoomView(3));
+    expect(f.saved.at(-1)).toBe(3);
   });
 });
 
 describe('CameraZoomLayer: keyboard', () => {
   it('+ and - step, 0 resets', async () => {
-    const { scene, views } = await fixture();
+    const { scene, saved } = await fixture();
 
     key(scene, '+');
-    expect(views.at(-1)).toEqual(zoomView(3));
+    expect(saved.at(-1)).toBe(3);
     key(scene, '0');
-    expect(views.at(-1)).toEqual(zoomView(2));
+    expect(saved.at(-1)).toBe(2);
     key(scene, '-');
-    expect(views.at(-1)).toEqual(zoomView(1));
+    expect(saved.at(-1)).toBe(1);
     key(scene, '0');
-    expect(views.at(-1)).toEqual(zoomView(2));
+    expect(saved.at(-1)).toBe(2);
   });
 
   it('is ignored while an editable element is focused, with ctrl held or on a held key', async () => {
     let editable = true;
-    const { scene, views } = await fixture({ isEditableFocused: () => editable });
-    const initial = views.length;
+    const { scene, saved } = await fixture({ isEditableFocused: () => editable });
+    const initial = saved.length;
 
     key(scene, '+');
     editable = false;
     key(scene, '+', { ctrlKey: true });
     key(scene, '+', { repeat: true });
 
-    expect(views).toHaveLength(initial);
+    expect(saved).toHaveLength(initial);
     key(scene, '+');
-    expect(views.at(-1)).toEqual(zoomView(3));
+    expect(saved.at(-1)).toBe(3);
   });
 });
 
-describe('CameraZoomLayer: bridge command, event and store', () => {
-  it('announces the starting stop once, taken from the camera zoom', async () => {
-    const { views } = await fixture({}, 1);
-
-    expect(views).toEqual([zoomView(1)]);
-  });
-
-  it('the zoom command steps from the target: in, out and reset', async () => {
-    const { bridge, views } = await fixture();
-
-    bridge.emitCommand('zoom', { action: 'in' });
-    bridge.emitCommand('zoom', { action: 'in' });
-    expect(views.at(-1)).toEqual(zoomView(4));
-    bridge.emitCommand('zoom', { action: 'out' });
-    bridge.emitCommand('zoom', { action: 'out' });
-    bridge.emitCommand('zoom', { action: 'out' });
-    expect(views.at(-1)).toEqual(zoomView(1));
-    bridge.emitCommand('zoom', { action: 'reset' });
-    expect(views.at(-1)).toEqual(zoomView(2));
-  });
-
+describe('CameraZoomLayer: store', () => {
   it('saves every change to the store, and nothing when the target does not move', async () => {
     const store = { load: () => 2, save: vi.fn() };
-    const { bridge, views } = await fixture({ store }, 4);
-    const initial = views.length;
+    const { scene } = await fixture({ store }, 4);
 
-    bridge.emitCommand('zoom', { action: 'in' });
+    key(scene, '+');
     expect(store.save).not.toHaveBeenCalled();
-    expect(views).toHaveLength(initial);
 
-    bridge.emitCommand('zoom', { action: 'out' });
+    key(scene, '-');
     expect(store.save).toHaveBeenCalledExactlyOnceWith(3);
   });
 });
@@ -342,11 +316,11 @@ describe('CameraZoomLayer: pixel-exact rendering', () => {
   });
 
   it('while easing between stops it does not round, so the zoom animation stays smooth', async () => {
-    const { scene, bridge } = await fixture({}, 1);
+    const { scene } = await fixture({}, 1);
     const camera = scene.cameras.main;
     camera.roundPixels = true;
 
-    bridge.emitCommand('zoom', { action: 'out' });
+    key(scene, '-');
     camera.setScroll(101, 57);
     renderFrames(scene, 1);
 
@@ -384,16 +358,15 @@ describe('CameraZoomLayer: pixel-exact rendering', () => {
 describe('CameraZoomLayer: destroy', () => {
   it('releases wheel, keys, update and the bridge subscription, and is idempotent', async () => {
     const f = await fixture();
-    const { scene, bridge, layer, views } = f;
+    const { scene, layer, saved } = f;
     layer.destroy();
-    const initial = views.length;
+    const initial = saved.length;
 
     notches(f, -100);
     key(scene, '+');
-    bridge.emitCommand('zoom', { action: 'in' });
     renderFrames(scene, 3);
 
-    expect(views).toHaveLength(initial);
+    expect(saved).toHaveLength(initial);
     expect(scene.cameras.main.zoom).toBe(2);
     expect(() => layer.destroy()).not.toThrow();
   });

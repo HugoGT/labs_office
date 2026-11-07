@@ -1,6 +1,6 @@
 /**
- * Phaser layer of the map zoom (map-zoom). It turns real wheel, key and bridge
- * input into a zoom TARGET (one of `ZOOM_STOPS`, via the pure rules of
+ * Phaser layer of the map zoom (map-zoom). It turns real wheel and key input
+ * into a zoom TARGET (one of `ZOOM_STOPS`, via the pure rules of
  * `mapZoom.ts`) and eases the main camera to it a little each frame. Same
  * pattern as `CameraPanLayer`: the layer listens and moves the camera, the
  * pure module decides.
@@ -26,12 +26,10 @@ import {
   snapScrollToScreenPixels,
   zoomKeyAction,
   zoomStep,
-  zoomView,
   type WheelState,
   type ZoomAction,
   type ZoomStore,
 } from './mapZoom';
-import type { OfficeBridge } from './officeBridge';
 
 export interface CameraZoomLayerOptions {
   scene: Phaser.Scene;
@@ -39,7 +37,6 @@ export interface CameraZoomLayerOptions {
   camera: Phaser.Cameras.Scene2D.Camera;
   /** Its wheel never zooms the map. */
   minimap?: Phaser.Cameras.Scene2D.Camera;
-  bridge: OfficeBridge;
   /** Remembers the chosen stop; absent means nothing is persisted. */
   store?: ZoomStore;
   /** Clock for wheel accumulation; injectable so tests do not wait on real time. */
@@ -48,8 +45,8 @@ export interface CameraZoomLayerOptions {
   isEditableFocused?: () => boolean;
   /**
    * While it says so, the wheel belongs to someone else and never zooms: the
-   * decor editor turns a picked chair or desk table with it (#207). The keys,
-   * the bridge command and the zoom card keep zooming meanwhile.
+   * decor editor turns a picked chair or desk table with it (#207). The keys
+   * keep zooming meanwhile.
    */
   wheelSuppressed?: () => boolean;
 }
@@ -57,7 +54,6 @@ export interface CameraZoomLayerOptions {
 export class CameraZoomLayer {
   private readonly camera: Phaser.Cameras.Scene2D.Camera;
   private readonly minimap?: Phaser.Cameras.Scene2D.Camera;
-  private readonly bridge: OfficeBridge;
   private readonly store?: ZoomStore;
   private readonly now: () => number;
   private readonly isEditableFocused: () => boolean;
@@ -66,7 +62,6 @@ export class CameraZoomLayer {
   private readonly input: Phaser.Input.InputPlugin;
   private readonly keyboard: Phaser.Input.Keyboard.KeyboardPlugin | null;
   private readonly sceneEvents: Phaser.Events.EventEmitter;
-  private readonly unsubscribeCommand: () => void;
   private readonly cameraPreRender: () => void;
   /** The animated zoom the camera has now; `target` is the stop it is heading to. */
   private current: number;
@@ -126,7 +121,6 @@ export class CameraZoomLayer {
   constructor(options: CameraZoomLayerOptions) {
     this.camera = options.camera;
     this.minimap = options.minimap;
-    this.bridge = options.bridge;
     this.store = options.store;
     this.now = options.now ?? (() => performance.now());
     this.isEditableFocused = options.isEditableFocused ?? (() => isEditableElementFocused());
@@ -148,8 +142,6 @@ export class CameraZoomLayer {
     this.input.on('wheel', this.onWheel);
     this.keyboard?.on('keydown', this.onKeyDown);
     this.sceneEvents.on(Phaser.Scenes.Events.UPDATE, this.onUpdate);
-    this.unsubscribeCommand = this.bridge.onCommand('zoom', ({ action }) => this.apply(action));
-    this.bridge.emit('zoomchanged', zoomView(this.target));
   }
 
   /** Idempotent: SHUTDOWN and DESTROY of the scene both call it. */
@@ -159,7 +151,6 @@ export class CameraZoomLayer {
     this.input.off('wheel', this.onWheel);
     this.keyboard?.off('keydown', this.onKeyDown);
     this.sceneEvents.off(Phaser.Scenes.Events.UPDATE, this.onUpdate);
-    this.unsubscribeCommand();
     this.camera.preRender = this.cameraPreRender;
   }
 
@@ -168,7 +159,6 @@ export class CameraZoomLayer {
     if (next === this.target) return;
     this.target = next;
     this.store?.save(next);
-    this.bridge.emit('zoomchanged', zoomView(next));
   }
 
   private isOverMinimap(pointer: Phaser.Input.Pointer): boolean {

@@ -71,6 +71,100 @@ test("back from No molestar: A sees B's camera again", { skip: !AUDIO_E2E_ENABLE
   await waitForPeerVideoPlaying(pageA, peerBId);
 });
 
+test('camera off with real LiveKit: the own tile drops the video, and gets it back (#304)', { skip: !AUDIO_E2E_ENABLED }, async () => {
+  const ownVideo = pageB.locator(`[data-testid="video-tile-bar"] [data-session-id="${peerBId}"] video`);
+  await ownVideo.waitFor();
+
+  await enableCam(pageB);
+  await ownVideo.waitFor({ state: 'detached' });
+  // In company the tile stays, with the portrait.
+  await pageB.locator(`[data-testid="video-tile-bar"] [data-session-id="${peerBId}"]`).waitFor();
+
+  await enableCam(pageB);
+  await ownVideo.waitFor();
+  await waitForPeerVideoPlaying(pageA, peerBId);
+});
+
+const SPAWN = [94, 67];
+// Open floor, ten tiles from the spawn: well past the call radius (170 px, about five tiles).
+const OUT_OF_RADIUS = [104, 67];
+const PEER_TILE = (id) => `[data-testid="video-tile-bar"] [data-session-id="${id}"]`;
+
+/** No `<video>` left for the peer, and the character in its place. */
+async function waitForPeerCharacter(page, id) {
+  await waitForNoPeerVideo(page, id);
+  await page.locator(`${PEER_TILE(id)} img`).waitFor();
+}
+
+test("a peer's camera going off: their character in the tile, and the video back when it returns (#304)", { skip: !AUDIO_E2E_ENABLED }, async () => {
+  await waitForPeerVideoPlaying(pageA, peerBId);
+
+  await enableCam(pageB);
+  await waitForPeerCharacter(pageA, peerBId);
+
+  await enableCam(pageB);
+  await waitForPeerVideoPlaying(pageA, peerBId);
+});
+
+test('a camera in the foreground going off leaves the stage and does not come back by itself (#304)', { skip: !AUDIO_E2E_ENABLED }, async () => {
+  await waitForPeerVideoPlaying(pageA, peerBId);
+  const sidebar = pageA.getByRole('complementary', { name: 'Personas' });
+  const stage = pageA.locator(`[data-testid="camera-stage"][data-session-id="${peerBId}"]`);
+  await pageA.locator(`${PEER_TILE(peerBId)} button`).click();
+  await stage.locator('video').waitFor();
+  await sidebar.waitFor({ state: 'hidden' });
+
+  await enableCam(pageB);
+  await stage.waitFor({ state: 'detached' });
+  await sidebar.waitFor();
+  await waitForPeerCharacter(pageA, peerBId);
+
+  await enableCam(pageB);
+  await waitForPeerVideoPlaying(pageA, peerBId);
+  assert.equal(await stage.count(), 0);
+});
+
+test('reaching a peer whose camera is already off shows their character, never a dark video (#304)', { skip: !AUDIO_E2E_ENABLED }, async () => {
+  await waitForPeerVideoPlaying(pageA, peerBId);
+  await enableCam(pageB);
+  await waitForPeerCharacter(pageA, peerBId);
+
+  await teleportToTile(pageA, ...OUT_OF_RADIUS);
+  await pageA.locator(PEER_TILE(peerBId)).waitFor({ state: 'detached' });
+  await teleportToTile(pageA, ...SPAWN);
+  await pageA.locator(PEER_TILE(peerBId)).waitFor();
+  // Long enough for the subscription to land: a dark video would show up by now.
+  await new Promise((resolve) => setTimeout(resolve, 3000));
+  await waitForPeerCharacter(pageA, peerBId);
+
+  await enableCam(pageB);
+  await waitForPeerVideoPlaying(pageA, peerBId);
+});
+
+test('a peer walking out of the call radius with the camera on leaves no tile behind (#304)', { skip: !AUDIO_E2E_ENABLED }, async () => {
+  await waitForPeerVideoPlaying(pageA, peerBId);
+
+  await teleportToTile(pageB, ...OUT_OF_RADIUS);
+  await pageA.locator(PEER_TILE(peerBId)).waitFor({ state: 'detached' });
+
+  await teleportToTile(pageB, ...SPAWN);
+  await waitForPeerVideoPlaying(pageA, peerBId);
+});
+
+test('a peer leaving the room with the camera on leaves no tile behind (#304)', { skip: !SPACES_ENABLED }, async () => {
+  await teleportToTile(pageA, 58, 20);
+  await teleportToTile(pageB, 59, 20);
+  await waitForRoomIndicator(pageA, 'Cafetería');
+  await waitForRoomIndicator(pageB, 'Cafetería');
+  await waitForPeerVideoPlaying(pageA, peerBId);
+
+  await teleportToTile(pageB, ...SPAWN);
+  await pageA.locator(PEER_TILE(peerBId)).waitFor({ state: 'detached' });
+
+  await teleportToTile(pageA, ...SPAWN);
+  await waitForPeerVideoPlaying(pageA, peerBId);
+});
+
 /**
  * The room dies while "No molestar" is on (#84). Nothing is published or
  * subscribed then, which is why nobody notices until coming back.
@@ -116,7 +210,13 @@ test(
   { skip: !SPACES_ENABLED },
   async () => {
     const sidebarOf = (page) => page.getByRole('complementary', { name: 'Personas' });
+    // The sharer starts with the share in the foreground; whoever watches keeps the right side.
     assert.equal(await sidebarOf(pageA).isVisible(), false);
+    assert.equal(await sidebarOf(pageB).isVisible(), true);
+
+    await pageA.keyboard.press('Escape');
+    await sidebarOf(pageA).waitFor();
+    await waitForScreenShareStage(pageA, peerAId);
 
     await pageA.keyboard.press('Escape');
     await waitForScreenShareThumbnail(pageA);
@@ -130,13 +230,59 @@ test(
 
     await pageA.getByRole('button', { name: 'Ampliar pantalla compartida' }).click();
     await waitForScreenShareStage(pageA, peerAId);
-    assert.equal(await sidebarOf(pageA).isVisible(), false);
 
     await pageA.getByRole('button', { name: /Dejar de compartir/ }).click();
     await pageB.getByTestId('screen-share-thumbnail').waitFor({ state: 'detached' });
     assert.equal(await sidebarOf(pageA).isVisible(), true);
   },
 );
+
+test(
+  'a click brings the screen or a camera to the foreground, for the sharer and for whoever watches (#304)',
+  { skip: !SPACES_ENABLED },
+  async () => {
+    const sidebarOf = (page) => page.getByRole('complementary', { name: 'Personas' });
+    await startScreenShare(pageA);
+    await waitForScreenShareStage(pageB, peerAId);
+
+    await pageB.getByRole('button', { name: 'Ampliar pantalla compartida' }).click();
+    await sidebarOf(pageB).waitFor({ state: 'hidden' });
+    await pageB.getByRole('button', { name: 'Reducir pantalla compartida' }).click();
+    await sidebarOf(pageB).waitFor();
+    await pageB.getByRole('button', { name: 'Ampliar pantalla compartida' }).click();
+    await sidebarOf(pageB).waitFor({ state: 'hidden' });
+    await pageB.keyboard.press('Escape');
+    await sidebarOf(pageB).waitFor();
+    await waitForScreenShareStage(pageB, peerAId);
+
+    await pageA.locator(`[data-testid="video-tile-bar"] [data-session-id="${peerBId}"] button`).click();
+    await pageA.locator(`[data-testid="camera-stage"][data-session-id="${peerBId}"] video`).waitFor();
+    await waitForScreenShareThumbnail(pageA);
+    await pageA.keyboard.press('Escape');
+    await waitForScreenShareStage(pageA, peerAId);
+    await waitForPeerVideoPlaying(pageA, peerBId);
+
+    await pageA.getByRole('button', { name: /Dejar de compartir/ }).click();
+    await pageB.getByTestId('screen-share-stage').waitFor({ state: 'detached' });
+  },
+);
+
+test('camera off once alone in a space: the tile goes away, no black window left (#304)', { skip: !SPACES_ENABLED }, async () => {
+  const ownTile = pageB.locator(`[data-testid="video-tile-bar"] [data-session-id="${peerBId}"]`);
+  await teleportToTile(pageA, 94, 67);
+  await waitForOnlineCount(pageB, 1);
+  await pageB.waitForFunction(() => window.__officeE2E.lastVoice?.().peers.length === 0);
+  await ownTile.locator('video').waitFor();
+
+  await enableCam(pageB);
+  await ownTile.waitFor({ state: 'detached' });
+
+  await enableCam(pageB);
+  await ownTile.locator('video').waitFor();
+  await teleportToTile(pageA, 58, 20);
+  await waitForRoomIndicator(pageA, 'Cafetería');
+  await waitForPeerVideoPlaying(pageA, peerBId);
+});
 
 // Last: A is left out of LiveKit on purpose.
 test(

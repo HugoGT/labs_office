@@ -9,8 +9,8 @@
  */
 
 /**
- * The only zooms the office offers, shown as 0.5x, 1x, 2x, 3x and 4x
- * (`zoomLabel`); the office opens at 2x. Every stop is pixel exact
+ * The only zooms the office offers: 0.5x, 1x, 2x, 3x and 4x; the office
+ * opens at 2x. Every stop is pixel exact
  * (`isPixelExactZoom`): the game renders with `pixelArt` and `roundPixels`,
  * and Phaser only rounds at an integer camera zoom (`renderRoundPixels`), so
  * `CameraZoomLayer` turns the rounding on at 0.5x itself, where two world
@@ -67,13 +67,6 @@ export const WHEEL_IDLE_MS = 250;
 export const WHEEL_COOLDOWN_MS = 180;
 
 export type ZoomAction = 'in' | 'out' | 'reset';
-
-/** What the UI needs to know: the TARGET stop, never the animated value. */
-export interface ZoomView {
-  zoom: number;
-  canZoomIn: boolean;
-  canZoomOut: boolean;
-}
 
 /** Persistence seam of the chosen zoom; `zoomStore.ts` is the adapter. */
 export interface ZoomStore {
@@ -265,16 +258,4 @@ export function zoomKeyAction(event: ZoomKeyInput): ZoomAction | null {
   if (event.key === '-' || event.code === 'NumpadSubtract') return 'out';
   if (event.key === '0' || event.code === 'Numpad0') return 'reset';
   return null;
-}
-
-/**
- * The control's readout: the camera zoom itself, so the stops read 0.5x, 1x,
- * 2x, 3x and 4x. A value between stops keeps at most two decimals.
- */
-export function zoomLabel(zoom: number): string {
-  return `${Number(zoom.toFixed(2))}x`;
-}
-
-export function zoomView(target: number): ZoomView {
-  return { zoom: target, canZoomIn: target < ZOOM_MAX, canZoomOut: target > ZOOM_MIN };
 }

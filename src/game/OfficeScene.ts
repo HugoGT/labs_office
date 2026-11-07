@@ -767,7 +767,6 @@ export class OfficeScene extends Phaser.Scene {
       scene: this,
       camera: this.cameras.main,
       minimap: this.minimapCamera,
-      bridge: this.bridge,
       store: this.options.zoomStore,
       // #207: a picked chair, desk table or room table turns with the wheel instead (`DecorEditLayer`),
       // and so does the rug of a desk being created (`LayoutEditLayer`).

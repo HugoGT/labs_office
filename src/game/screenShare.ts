@@ -71,6 +71,13 @@ export function shouldYieldScreenShare(
   return screenShareWinner(claims) !== identity;
 }
 
+/**
+ * What this client brought to the foreground (#304): the shared screen or
+ * someone's camera, on the stage with the right side out of the way. `null`
+ * leaves the share, if any, on a stage beside the right side.
+ */
+export type StageFocus = { kind: 'screen' } | { kind: 'camera'; sessionId: string } | null;
+
 export interface ScreenShareStageInput {
   /** Winner of the space, as reported by `livekitRoom.ts`. */
   activeSharer: string | null;

@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AttachableTrack } from '../game/attachableTrack';
 import { createOfficeBridge } from '../game/officeBridge';
 import { VideoTiles } from './VideoTiles';
+import type { StageFocus } from '../game/screenShare';
 
 /** Doble estructural minimo de una pista, mismo patron que `VideoTile.test.tsx`. */
 function fakeVideoTrack(): AttachableTrack {
@@ -35,6 +36,8 @@ function renderTiles(overrides: Partial<ComponentProps<typeof VideoTiles>> = {})
     stageMinimized: false,
     onMinimizeStage: vi.fn(),
     onRestoreStage: vi.fn(),
+    stageFocus: null as StageFocus,
+    onStageFocusChange: vi.fn(),
     ...overrides,
   };
   const { rerender } = render(<VideoTiles {...props} />);
@@ -652,5 +655,108 @@ describe('VideoTiles: the stage minimized to a thumbnail (#304)', () => {
 
     window.removeEventListener('keydown', claim, true);
     expect(onMinimizeStage).not.toHaveBeenCalled();
+  });
+});
+
+describe('VideoTiles: what the stage holds in the foreground (#304)', () => {
+  const IN_SPACE = {
+    selfSessionId: 'yo',
+    selfName: 'HugoGT',
+    peers: [{ sessionId: 'ana', name: 'Ana' }],
+    spaceId: 'sala',
+  };
+  const ANA_SHARES = { activeScreenSharer: 'ana', screenShareTracks: new Map([['ana', fakeVideoTrack()]]) };
+  const ANA_CAMERA = { videoTracks: new Map([['ana', fakeVideoTrack()]]) };
+
+  it('a click on the shared screen brings it forward, and another one sends it back', async () => {
+    const onStageFocusChange = vi.fn();
+    const { bridge, rerender } = renderTiles({ ...ANA_SHARES, onStageFocusChange });
+    act(() => bridge.emit('voice', IN_SPACE));
+    expect(screen.getByTestId('screen-share-stage')).toHaveAttribute('data-focused', 'false');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Ampliar pantalla compartida' }));
+    expect(onStageFocusChange).toHaveBeenLastCalledWith({ kind: 'screen' });
+
+    rerender({ stageFocus: { kind: 'screen' } });
+    expect(screen.getByTestId('screen-share-stage')).toHaveAttribute('data-focused', 'true');
+    await userEvent.click(screen.getByRole('button', { name: 'Reducir pantalla compartida' }));
+    expect(onStageFocusChange).toHaveBeenLastCalledWith(null);
+  });
+
+  it('Escape sends a focused screen back and handles the press, without minimizing it', () => {
+    const onStageFocusChange = vi.fn();
+    const onMinimizeStage = vi.fn();
+    const { bridge } = renderTiles({ ...ANA_SHARES, stageFocus: { kind: 'screen' }, onStageFocusChange, onMinimizeStage });
+    act(() => bridge.emit('voice', IN_SPACE));
+
+    expect(fireEvent.keyDown(window, { key: 'Escape' })).toBe(false);
+
+    expect(onStageFocusChange).toHaveBeenCalledExactlyOnceWith(null);
+    expect(onMinimizeStage).not.toHaveBeenCalled();
+  });
+
+  it('only a live camera can be brought forward: a portrait has nothing to show', async () => {
+    const onStageFocusChange = vi.fn();
+    const { bridge } = renderTiles({ ...ANA_CAMERA, onStageFocusChange });
+    act(() => bridge.emit('voice', IN_SPACE));
+
+    expect(screen.queryByRole('button', { name: 'Poner a HugoGT en primer plano' })).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button', { name: 'Poner a Ana en primer plano' }));
+
+    expect(onStageFocusChange).toHaveBeenCalledExactlyOnceWith({ kind: 'camera', sessionId: 'ana' });
+  });
+
+  it('a camera in the foreground takes the stage from its tile, and the share waits as a thumbnail', async () => {
+    const onStageFocusChange = vi.fn();
+    const camera = fakeVideoTrack();
+    const { bridge } = renderTiles({
+      ...ANA_SHARES,
+      activeScreenSharer: 'ana',
+      videoTracks: new Map([['ana', camera]]),
+      stageFocus: { kind: 'camera', sessionId: 'ana' },
+      onStageFocusChange,
+    });
+    act(() => bridge.emit('voice', IN_SPACE));
+
+    const stage = screen.getByTestId('camera-stage');
+    expect(stage).toHaveAttribute('data-focused', 'true');
+    expect(stage).toHaveAttribute('data-session-id', 'ana');
+    expect(stage).toHaveTextContent('Ana');
+    expect(stage.querySelectorAll('video')).toHaveLength(1);
+    expect(screen.queryByTestId('screen-share-stage')).not.toBeInTheDocument();
+    expect(screen.getByTestId('screen-share-thumbnail')).toHaveTextContent('Pantalla de Ana');
+    // Only one tile owns a track's `<video>`: `VideoTile` detaches all of them on cleanup.
+    expect(tileIds().filter(Boolean)).toEqual(['yo']);
+    expect(screen.getByTestId('video-tile-bar')).toHaveAttribute('data-layout', 'column');
+
+    await userEvent.click(screen.getByRole('button', { name: 'Quitar a Ana del primer plano' }));
+    expect(onStageFocusChange).toHaveBeenLastCalledWith(null);
+  });
+
+  it('a camera can take the stage with no share at all, and Escape sends it back', () => {
+    const onStageFocusChange = vi.fn();
+    const onMinimizeStage = vi.fn();
+    const { bridge } = renderTiles({
+      ...ANA_CAMERA,
+      stageFocus: { kind: 'camera', sessionId: 'ana' },
+      onStageFocusChange,
+      onMinimizeStage,
+    });
+    act(() => bridge.emit('voice', IN_SPACE));
+    expect(screen.getByTestId('camera-stage')).toBeInTheDocument();
+    expect(screen.queryByTestId('screen-share-thumbnail')).not.toBeInTheDocument();
+
+    expect(fireEvent.keyDown(window, { key: 'Escape' })).toBe(false);
+
+    expect(onStageFocusChange).toHaveBeenCalledExactlyOnceWith(null);
+    expect(onMinimizeStage).not.toHaveBeenCalled();
+  });
+
+  it('a camera that went off leaves the stage: the person is a tile again', () => {
+    const { bridge } = renderTiles({ stageFocus: { kind: 'camera', sessionId: 'ana' } });
+    act(() => bridge.emit('voice', IN_SPACE));
+
+    expect(screen.queryByTestId('camera-stage')).not.toBeInTheDocument();
+    expect(tileIds().filter(Boolean)).toEqual(['yo', 'ana']);
   });
 });

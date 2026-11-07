@@ -1,8 +1,10 @@
-import { act, cleanup, render, screen } from '@testing-library/react';
+import { act, cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as vitestBrowser from 'vitest/browser';
 import type { AttachableTrack } from '../game/attachableTrack';
+import { RAIL_RIGHT, RAIL_WIDTH } from '../game/hudLayout';
 import { createOfficeBridge } from '../game/officeBridge';
+import type { StageFocus } from '../game/screenShare';
 import { VideoTiles } from './VideoTiles';
 
 const { page } = vitestBrowser as unknown as { page: { viewport(width: number, height: number): Promise<void> } };
@@ -47,6 +49,8 @@ function renderCrowd(sharing: boolean) {
       stageMinimized={false}
       onMinimizeStage={() => undefined}
       onRestoreStage={() => undefined}
+      stageFocus={null}
+      onStageFocusChange={() => undefined}
     />,
   );
   act(() => bridge.emit('voice', { selfSessionId: 'yo', selfName: 'HugoGT', peers: PEERS, spaceId: 'sala' }));
@@ -86,4 +90,49 @@ describe('VideoTiles in a real browser: 50 people (#280)', () => {
       expectFullyVisible(overflow, bar);
     });
   }
+});
+
+describe('VideoTiles in a real browser: the stage and the right rail (#304)', () => {
+  function renderStage(stageFocus: StageFocus) {
+    const bridge = createOfficeBridge();
+    render(
+      <VideoTiles
+        bridge={bridge}
+        videoTracks={new Map()}
+        speakers={new Set()}
+        localVideoTrack={null}
+        screenShareTracks={new Map([['p00', fakeVideoTrack()]])}
+        localScreenShareTrack={null}
+        activeScreenSharer="p00"
+        stageMinimized={false}
+        onMinimizeStage={() => undefined}
+        onRestoreStage={() => undefined}
+        stageFocus={stageFocus}
+        onStageFocusChange={() => undefined}
+      />,
+    );
+    act(() => bridge.emit('voice', { selfSessionId: 'yo', selfName: 'HugoGT', peers: PEERS.slice(0, 1), spaceId: 'sala' }));
+    return screen.getByTestId('screen-share-stage');
+  }
+
+  it('leaves the rail free, so the minimap under it shows; focused it takes that room too', async () => {
+    await page.viewport(1440, 800);
+    const open = renderStage(null).getBoundingClientRect();
+    expect(open.right).toBeLessThanOrEqual(1440 - RAIL_RIGHT - RAIL_WIDTH);
+    cleanup();
+
+    const focused = renderStage({ kind: 'screen' }).getBoundingClientRect();
+    expect(focused.right).toBe(1440 - 12);
+    expect(focused.width).toBeGreaterThan(open.width);
+  });
+
+  it('takes the pointer over its whole box, so the map under it never sees it', async () => {
+    await page.viewport(1440, 800);
+    const stage = renderStage(null);
+    const rect = stage.getBoundingClientRect();
+
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+
+    expect(hit).toBe(within(stage).getByRole('button', { name: 'Ampliar pantalla compartida' }));
+  });
 });
