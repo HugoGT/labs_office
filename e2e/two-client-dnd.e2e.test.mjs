@@ -116,7 +116,13 @@ test(
   { skip: !SPACES_ENABLED },
   async () => {
     const sidebarOf = (page) => page.getByRole('complementary', { name: 'Personas' });
+    // The sharer starts with the share in the foreground; whoever watches keeps the right side.
     assert.equal(await sidebarOf(pageA).isVisible(), false);
+    assert.equal(await sidebarOf(pageB).isVisible(), true);
+
+    await pageA.keyboard.press('Escape');
+    await sidebarOf(pageA).waitFor();
+    await waitForScreenShareStage(pageA, peerAId);
 
     await pageA.keyboard.press('Escape');
     await waitForScreenShareThumbnail(pageA);
@@ -130,11 +136,40 @@ test(
 
     await pageA.getByRole('button', { name: 'Ampliar pantalla compartida' }).click();
     await waitForScreenShareStage(pageA, peerAId);
-    assert.equal(await sidebarOf(pageA).isVisible(), false);
 
     await pageA.getByRole('button', { name: /Dejar de compartir/ }).click();
     await pageB.getByTestId('screen-share-thumbnail').waitFor({ state: 'detached' });
     assert.equal(await sidebarOf(pageA).isVisible(), true);
+  },
+);
+
+test(
+  'a click brings the screen or a camera to the foreground, for the sharer and for whoever watches (#304)',
+  { skip: !SPACES_ENABLED },
+  async () => {
+    const sidebarOf = (page) => page.getByRole('complementary', { name: 'Personas' });
+    await startScreenShare(pageA);
+    await waitForScreenShareStage(pageB, peerAId);
+
+    await pageB.getByRole('button', { name: 'Ampliar pantalla compartida' }).click();
+    await sidebarOf(pageB).waitFor({ state: 'hidden' });
+    await pageB.getByRole('button', { name: 'Reducir pantalla compartida' }).click();
+    await sidebarOf(pageB).waitFor();
+    await pageB.getByRole('button', { name: 'Ampliar pantalla compartida' }).click();
+    await sidebarOf(pageB).waitFor({ state: 'hidden' });
+    await pageB.keyboard.press('Escape');
+    await sidebarOf(pageB).waitFor();
+    await waitForScreenShareStage(pageB, peerAId);
+
+    await pageA.locator(`[data-testid="video-tile-bar"] [data-session-id="${peerBId}"] button`).click();
+    await pageA.locator(`[data-testid="camera-stage"][data-session-id="${peerBId}"] video`).waitFor();
+    await waitForScreenShareThumbnail(pageA);
+    await pageA.keyboard.press('Escape');
+    await waitForScreenShareStage(pageA, peerAId);
+    await waitForPeerVideoPlaying(pageA, peerBId);
+
+    await pageA.getByRole('button', { name: /Dejar de compartir/ }).click();
+    await pageB.getByTestId('screen-share-stage').waitFor({ state: 'detached' });
   },
 );
 

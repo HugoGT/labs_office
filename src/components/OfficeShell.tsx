@@ -37,6 +37,7 @@ import {
   type RecordingRequest,
 } from '../game/recordingClient';
 import type { RosterPeer } from '../game/roster';
+import type { StageFocus } from '../game/screenShare';
 import { useCallInvitations } from '../hooks/useCallInvitations';
 import { useDeskHover } from '../hooks/useDeskHover';
 import { useDesks } from '../hooks/useDesks';
@@ -556,12 +557,32 @@ export function OfficeShell({
     if (sharerSessionId === null) setMinimizedSharer(null);
   }, [sharerSessionId]);
   const stageMinimized = sharerSessionId !== null && minimizedSharer === sharerSessionId;
-  /** The own screen fills the view: the sidebar and the minimap step aside until it is minimized or ends. */
-  const ownShareOnStage = screenShareOn && !stageMinimized;
+
+  /**
+   * What this client brought to the foreground (#304): a click on the shared
+   * screen or on a camera, undone by another click or Escape. The own share
+   * starts there, since what matters then is what is being shared; a screen
+   * in the foreground never outlives its share.
+   */
+  const [stageFocus, setStageFocus] = useState<StageFocus>(null);
+  useEffect(() => {
+    setStageFocus((current) => (screenShareOn ? { kind: 'screen' } : current?.kind === 'screen' ? null : current));
+  }, [screenShareOn, sharerSessionId]);
+  const screenOnStage =
+    !stageMinimized && (screenShareOn || (sharerSessionId !== null && screenShareTracks.has(sharerSessionId)));
+  const focusedCamera = stageFocus?.kind === 'camera' ? stageFocus.sessionId : null;
+  const focusedCameraLive =
+    focusedCamera !== null && (focusedCamera === selfSessionId ? localVideoTrack !== null : videoTracks.has(focusedCamera));
+  // Forgotten, or a camera turned on later would jump to the stage by itself.
+  useEffect(() => {
+    if (focusedCamera !== null && !focusedCameraLive) setStageFocus(null);
+  }, [focusedCamera, focusedCameraLive]);
+  /** Everything on the right steps aside for what is in the foreground. */
+  const stageHidesRail = focusedCameraLive || (stageFocus?.kind === 'screen' && screenOnStage);
   // The minimap is a Phaser camera, so it follows by command.
   useEffect(() => {
-    bridge.emitCommand('hideminimap', { hidden: ownShareOnStage });
-  }, [bridge, ownShareOnStage]);
+    bridge.emitCommand('hideminimap', { hidden: stageHidesRail });
+  }, [bridge, stageHidesRail]);
 
   /**
    * Recording is server-owned (#5): whether this room is being recorded is
@@ -889,9 +910,9 @@ export function OfficeShell({
         deskHover.dismiss();
         callPeer(sessionId, name);
       }}
-      // Both open a section of the sidebar, which the own share on the stage hides (#304).
-      onCharacter={characterPort === null || ownShareOnStage ? undefined : () => openSidebarSection('character')}
-      onDecorate={ownShareOnStage ? undefined : () => openSidebarSection('decor')}
+      // Both open a section of the sidebar, which the foreground of the stage hides (#304).
+      onCharacter={characterPort === null || stageHidesRail ? undefined : () => openSidebarSection('character')}
+      onDecorate={stageHidesRail ? undefined : () => openSidebarSection('decor')}
       onLeave={() => {
         deskHover.dismiss();
         void leaveDesk(hoveredDesk.label);
@@ -902,10 +923,8 @@ export function OfficeShell({
   );
 
   // `contents` keeps the fixed children placed and stacked as if unwrapped.
-  const rightRailStyle = { display: hudHidden ? 'none' : 'contents' } as const;
-  // Sharing hides only the sidebar and the minimap (#304): not `hudHidden`, which also takes
-  // the exit controls and the desk banner, and means an editor holds the map.
-  const sidebarStyle = { display: hudHidden || ownShareOnStage ? 'none' : 'contents' } as const;
+  // Not one more case of `hudHidden`, which also takes the desk banner and means an editor holds the map (#304).
+  const rightRailStyle = { display: hudHidden || stageHidesRail ? 'none' : 'contents' } as const;
 
   return (
     <div id="office-shell">
@@ -920,11 +939,16 @@ export function OfficeShell({
         activeScreenSharer={activeScreenSharer?.sessionId ?? null}
         stageMinimized={stageMinimized}
         onMinimizeStage={() => setMinimizedSharer(sharerSessionId)}
-        onRestoreStage={() => setMinimizedSharer(null)}
+        onRestoreStage={() => {
+          setMinimizedSharer(null);
+          setStageFocus(null);
+        }}
+        stageFocus={stageFocus}
+        onStageFocusChange={setStageFocus}
       />
       <ContextMenu menu={menu} onAction={handleMenuAction} onClose={closeMenu} />
       {deskBanner}
-      <div style={sidebarStyle}>
+      <div style={rightRailStyle}>
         <OfficeSidebar
           self={rosterSelf}
           peers={rosterPeers}
@@ -951,7 +975,7 @@ export function OfficeShell({
           onCallPeer={callPeer}
           moderation={moderation}
           openRequest={sidebarRequest}
-          escapeSuspended={ownShareOnStage}
+          escapeSuspended={stageHidesRail}
         />
       </div>
       <BottomBar

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { AttachableTrack } from '../game/attachableTrack';
 import { useEscapeStep } from '../hooks/useEscapeStep';
 import type { OfficeBridge, OfficeEventMap } from '../game/officeBridge';
-import { selectScreenShareStage } from '../game/screenShare';
+import { selectScreenShareStage, type StageFocus } from '../game/screenShare';
 import { selectVideoTiles, videoTileCapacity } from '../game/videoTileSelection';
 import { VideoTile } from './VideoTile';
 import styles from './VideoTiles.module.css';
@@ -27,6 +27,10 @@ export interface VideoTilesProps {
   onMinimizeStage: () => void;
   /** A click on the thumbnail. */
   onRestoreStage: () => void;
+  /** What this client brought to the foreground (#304); a camera without a track is ignored. */
+  stageFocus: StageFocus;
+  /** A click on the stage or on a camera, and Escape while something is in the foreground. */
+  onStageFocusChange: (focus: StageFocus) => void;
 }
 
 const INITIAL_VOICE: OfficeEventMap['voice'] = {
@@ -81,6 +85,8 @@ export function VideoTiles({
   stageMinimized,
   onMinimizeStage,
   onRestoreStage,
+  stageFocus,
+  onStageFocusChange,
 }: VideoTilesProps) {
   const [voice, setVoice] = useState<OfficeEventMap['voice']>(INITIAL_VOICE);
   const [portraits, setPortraits] = useState<Record<string, string> | null>(null);
@@ -135,17 +141,25 @@ export function VideoTiles({
     // Screen share stays space-only: the open floor never shares (#20).
     remoteTracks: voice.spaceId !== null ? screenShareTracks : new Map(),
   });
-  const thumbnail = stage && stageMinimized ? stage : null;
-  const openStage = stage && !stageMinimized ? stage : null;
-  useEscapeStep(openStage !== null, () => {
-    onMinimizeStage();
+  const focusedCamera =
+    stageFocus?.kind === 'camera'
+      ? (entries.find((entry) => entry.sessionId === stageFocus.sessionId && entry.track !== null) ?? null)
+      : null;
+  // A camera in the foreground displaces the share to the thumbnail, the way back to it.
+  const thumbnail = stage && (stageMinimized || focusedCamera) ? stage : null;
+  const openStage = stage && !stageMinimized && !focusedCamera ? stage : null;
+  const screenFocused = openStage !== null && stageFocus?.kind === 'screen';
+  useEscapeStep(openStage !== null || focusedCamera !== null, () => {
+    if (focusedCamera !== null || screenFocused) onStageFocusChange(null);
+    else onMinimizeStage();
     return true;
   });
-  const layout = openStage ? 'column' : 'row';
+  const layout = openStage || focusedCamera ? 'column' : 'row';
   const capacity = videoTileCapacity({ layout, viewportWidth: viewport.width, viewportHeight: viewport.height });
   // Cameras and speakers first, within what fits the layout (#280).
   const selection = selectVideoTiles(
-    entries.map((entry) => ({
+    // On the stage it has no tile too: `VideoTile` detaches every element of its track on cleanup.
+    entries.filter((entry) => entry !== focusedCamera).map((entry) => ({
       sessionId: entry.sessionId,
       hasVideo: entry.track !== null,
       speaking: speakers.has(entry.sessionId),
@@ -183,6 +197,7 @@ export function VideoTiles({
           className={styles.stage}
           data-testid="screen-share-stage"
           data-session-id={openStage.sessionId}
+          data-focused={screenFocused}
         >
           <VideoTile
             sessionId={openStage.sessionId}
@@ -193,6 +208,37 @@ export function VideoTiles({
             speaking={false}
             fit="contain"
           />
+          <button
+            type="button"
+            className={styles.overlayAction}
+            aria-label={screenFocused ? 'Reducir pantalla compartida' : 'Ampliar pantalla compartida'}
+            onClick={() => onStageFocusChange(screenFocused ? null : { kind: 'screen' })}
+          />
+        </div>
+      )}
+      {focusedCamera && (
+        <div
+          key={`${focusedCamera.sessionId}:camera`}
+          className={styles.stage}
+          data-testid="camera-stage"
+          data-session-id={focusedCamera.sessionId}
+          data-focused
+        >
+          <VideoTile
+            sessionId={focusedCamera.sessionId}
+            name={focusedCamera.name}
+            portraits={portraits}
+            characterPortraits={characterPortraits}
+            track={focusedCamera.track}
+            speaking={speakers.has(focusedCamera.sessionId)}
+            fit="contain"
+          />
+          <button
+            type="button"
+            className={styles.overlayAction}
+            aria-label={`Quitar a ${focusedCamera.name} del primer plano`}
+            onClick={() => onStageFocusChange(null)}
+          />
         </div>
       )}
       {(entries.length > 0 || thumbnail) && (
@@ -201,7 +247,7 @@ export function VideoTiles({
           {thumbnail && (
             <div
               key={`${thumbnail.sessionId}:screen_share`}
-              className={`${styles.tile} ${styles.stageThumbnail}`}
+              className={`${styles.tile} ${styles.clickableTile}`}
               data-testid="screen-share-thumbnail"
             >
               <VideoTile
@@ -215,7 +261,7 @@ export function VideoTiles({
               />
               <button
                 type="button"
-                className={styles.stageRestore}
+                className={styles.overlayAction}
                 aria-label="Ampliar pantalla compartida"
                 title="Ampliar pantalla compartida"
                 onClick={onRestoreStage}
@@ -223,7 +269,11 @@ export function VideoTiles({
             </div>
           )}
           {visibleEntries.map((entry) => (
-            <div key={entry.sessionId} className={styles.tile} data-session-id={entry.sessionId}>
+            <div
+              key={entry.sessionId}
+              className={entry.track ? `${styles.tile} ${styles.clickableTile}` : styles.tile}
+              data-session-id={entry.sessionId}
+            >
               <VideoTile
                 sessionId={entry.sessionId}
                 name={entry.name}
@@ -232,6 +282,14 @@ export function VideoTiles({
                 track={entry.track}
                 speaking={speakers.has(entry.sessionId)}
               />
+              {entry.track && (
+                <button
+                  type="button"
+                  className={styles.overlayAction}
+                  aria-label={`Poner a ${entry.name} en primer plano`}
+                  onClick={() => onStageFocusChange({ kind: 'camera', sessionId: entry.sessionId })}
+                />
+              )}
             </div>
           ))}
           {selection.hiddenCount > 0 && (
