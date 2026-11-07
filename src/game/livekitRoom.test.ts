@@ -360,6 +360,45 @@ describe('video, camara local y habla llegan hacia afuera (issue #17, D3/D7): li
     expect(onLocalVideoTrackChanged).toHaveBeenLastCalledWith(null);
   });
 
+  it('turning the camera off only mutes it (livekit-client), and that reports no camera: nothing is left dark (#304)', async () => {
+    const room = fakeRoom();
+    const onLocalVideoTrackChanged = vi.fn();
+    await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onLocalVideoTrackChanged,
+    });
+    const localTrack = fakeTrack('video');
+    const camera = { kind: 'video', source: 'camera', track: localTrack };
+
+    room.emit(RoomEvent.TrackMuted, camera, room.localParticipant);
+    expect(onLocalVideoTrackChanged).toHaveBeenLastCalledWith(null);
+
+    room.emit(RoomEvent.TrackUnmuted, camera, room.localParticipant);
+    expect(onLocalVideoTrackChanged).toHaveBeenLastCalledWith(localTrack);
+  });
+
+  it('a mute that is not the own camera says nothing about it: a peer, or the own microphone', async () => {
+    const room = fakeRoom();
+    const onLocalVideoTrackChanged = vi.fn();
+    await connectLivekitRoom({
+      url: 'ws://localhost:7880',
+      token: 'jwt',
+      createRoom: () => room as unknown as Room,
+      onLocalVideoTrackChanged,
+    });
+    const peerCamera = { kind: 'video', source: 'camera', track: fakeTrack('video') };
+    const microphone = { kind: 'audio', source: 'microphone', track: fakeTrack('audio') };
+
+    room.emit(RoomEvent.TrackMuted, peerCamera, { identity: 'p1' });
+    room.emit(RoomEvent.TrackUnmuted, peerCamera, { identity: 'p1' });
+    room.emit(RoomEvent.TrackMuted, microphone, room.localParticipant);
+    room.emit(RoomEvent.TrackUnmuted, microphone, room.localParticipant);
+
+    expect(onLocalVideoTrackChanged).not.toHaveBeenCalled();
+  });
+
   it('publicar/despublicar audio local nunca dispara onLocalVideoTrackChanged: el gate es por kind, no por "es local"', async () => {
     const room = fakeRoom();
     const onLocalVideoTrackChanged = vi.fn();

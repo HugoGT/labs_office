@@ -71,6 +71,20 @@ test("back from No molestar: A sees B's camera again", { skip: !AUDIO_E2E_ENABLE
   await waitForPeerVideoPlaying(pageA, peerBId);
 });
 
+test('camera off with real LiveKit: the own tile drops the video, and gets it back (#304)', { skip: !AUDIO_E2E_ENABLED }, async () => {
+  const ownVideo = pageB.locator(`[data-testid="video-tile-bar"] [data-session-id="${peerBId}"] video`);
+  await ownVideo.waitFor();
+
+  await enableCam(pageB);
+  await ownVideo.waitFor({ state: 'detached' });
+  // In company the tile stays, with the portrait.
+  await pageB.locator(`[data-testid="video-tile-bar"] [data-session-id="${peerBId}"]`).waitFor();
+
+  await enableCam(pageB);
+  await ownVideo.waitFor();
+  await waitForPeerVideoPlaying(pageA, peerBId);
+});
+
 /**
  * The room dies while "No molestar" is on (#84). Nothing is published or
  * subscribed then, which is why nobody notices until coming back.
@@ -172,6 +186,23 @@ test(
     await pageB.getByTestId('screen-share-stage').waitFor({ state: 'detached' });
   },
 );
+
+test('camera off once alone in a space: the tile goes away, no black window left (#304)', { skip: !SPACES_ENABLED }, async () => {
+  const ownTile = pageB.locator(`[data-testid="video-tile-bar"] [data-session-id="${peerBId}"]`);
+  await teleportToTile(pageA, 94, 67);
+  await waitForOnlineCount(pageB, 1);
+  await pageB.waitForFunction(() => window.__officeE2E.lastVoice?.().peers.length === 0);
+  await ownTile.locator('video').waitFor();
+
+  await enableCam(pageB);
+  await ownTile.waitFor({ state: 'detached' });
+
+  await enableCam(pageB);
+  await ownTile.locator('video').waitFor();
+  await teleportToTile(pageA, 58, 20);
+  await waitForRoomIndicator(pageA, 'Cafetería');
+  await waitForPeerVideoPlaying(pageA, peerBId);
+});
 
 // Last: A is left out of LiveKit on purpose.
 test(

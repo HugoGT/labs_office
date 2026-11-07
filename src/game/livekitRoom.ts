@@ -870,6 +870,17 @@ export async function connectLivekitRoom({
     onMicrophoneMutedRemotely?.();
   });
 
+  // `setCameraEnabled(false)` only mutes the publication, whose track stays: for
+  // the UI there is no camera then, or its tile would stay up, black (#304).
+  room.on(RoomEvent.TrackMuted, (publication: TrackPublication, participant: Participant) => {
+    if (participant !== room.localParticipant || publication.source !== Track.Source.Camera) return;
+    onLocalVideoTrackChanged?.(null);
+  });
+  room.on(RoomEvent.TrackUnmuted, (publication: TrackPublication, participant: Participant) => {
+    if (participant !== room.localParticipant || publication.source !== Track.Source.Camera) return;
+    onLocalVideoTrackChanged?.(publication.track ?? null);
+  });
+
   // D7: unica fuente de habla. No lee `micOn` ni ningun umbral de audioLevel
   // propio -- solo lo que LiveKit ya calculo y reporta por este evento.
   room.on(RoomEvent.ActiveSpeakersChanged, (speakers: Participant[]) => {
