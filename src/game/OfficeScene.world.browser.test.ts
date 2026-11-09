@@ -24,7 +24,8 @@ import { decorObjectName, type OfficeSceneOptions } from './OfficeScene';
 import { decorKey } from './officeDecor';
 import type { AutoWalkState } from './autoWalk';
 import { regionBounds } from './cameraBounds';
-import { zoomView, type ZoomStore, type ZoomView } from './mapZoom';
+import { CameraZoomLayer } from './CameraZoomLayer';
+import type { ZoomStore } from './mapZoom';
 import {
   destroyOfficeGames,
   games,
@@ -1117,11 +1118,9 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
 
   async function zoomScene(zoomStore?: ZoomStore) {
     const bridge = createOfficeBridge();
-    const views: ZoomView[] = [];
-    bridge.on('zoomchanged', (view) => views.push(view));
     const { scene } = await bootOfficeScene(bridge, { ...offline, zoomStore });
     scene.game.loop.stop();
-    return { scene, bridge, views, cam: scene.cameras.main, minimap: scene.cameras.cameras[1] };
+    return { scene, bridge, cam: scene.cameras.main, minimap: scene.cameras.cameras[1] };
   }
 
   function frames(scene: Phaser.Scene, count = 60): void {
@@ -1137,14 +1136,13 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
     }));
   }
 
-  it('starts at the stored zoom with the terrain region bounds, announces it once and does not save it back', async () => {
+  it('starts at the stored zoom with the terrain region bounds and does not save it back', async () => {
     const store = memoryStore(1);
-    const { scene, views, cam } = await zoomScene(store);
+    const { scene, cam } = await zoomScene(store);
     frames(scene, 2);
 
     expect(cam.zoom).toBe(1);
     expect(cam.getBounds()).toMatchObject(regionBounds(REGION, cam, 1));
-    expect(views).toEqual([zoomView(1)]);
     expect(store.save).not.toHaveBeenCalled();
   });
 
@@ -1154,20 +1152,18 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
     ['the retired 1.5 stop', memoryStore(1.5)],
     ['zero', memoryStore(0)],
   ])('starts at the default with %s', async (_name, store) => {
-    const { scene, views, cam } = await zoomScene(store);
+    const { scene, cam } = await zoomScene(store);
     frames(scene, 2);
 
     expect(cam.zoom).toBe(2);
     expect(cam.getBounds()).toMatchObject(regionBounds(REGION, cam, 2));
-    expect(views).toEqual([zoomView(2)]);
   });
 
   it('without a store the office starts at the default zoom 2 (2x)', async () => {
-    const { scene, views, cam } = await zoomScene();
+    const { scene, cam } = await zoomScene();
     frames(scene, 2);
 
     expect(cam.zoom).toBe(2);
-    expect(views).toEqual([zoomView(2)]);
   });
 
   it.each([
@@ -1175,13 +1171,13 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
     ['the layout editor', (b: ReturnType<typeof createOfficeBridge>) => b.emitCommand('layoutedit', { pickable: [], selectedId: null, placing: null })],
     ['the terrain editor', (b: ReturnType<typeof createOfficeBridge>) => b.emitCommand('terrainedit', { brush: null })],
     ['the collision editor', (b: ReturnType<typeof createOfficeBridge>) => b.emitCommand('collisionedit', { pieceId: null, draft: [], selectedRect: null, snap: 1 })],
-  ])('the zoom command eases the main camera only and saves the stop, with %s open', async (_name, open) => {
+  ])('the zoom keys ease the main camera only and save the stop, with %s open', async (_name, open) => {
     const store = memoryStore(2);
     const { scene, bridge, cam, minimap } = await zoomScene(store);
     open(bridge);
     const minimapView = { zoom: minimap.zoom, x: minimap.scrollX, y: minimap.scrollY };
 
-    bridge.emitCommand('zoom', { action: 'in' });
+    scene.input.keyboard!.emit('keydown', { key: '+', code: '' });
     frames(scene);
 
     expect(cam.zoom).toBe(3);
@@ -1190,7 +1186,8 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
   });
 
   it('a real ctrl+wheel over the map zooms it and is default-prevented, so the page does not zoom', async () => {
-    const { scene, views } = await zoomScene();
+    const store = memoryStore(2);
+    const { scene } = await zoomScene(store);
     const rect = scene.game.canvas.getBoundingClientRect();
     // Below the minimap, which covers the top of this small canvas.
     const wheel = new WheelEvent('wheel', {
@@ -1200,11 +1197,12 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
     scene.game.canvas.dispatchEvent(wheel);
 
     expect(wheel.defaultPrevented).toBe(true);
-    expect(views.at(-1)).toEqual(zoomView(3));
+    expect(store.save).toHaveBeenLastCalledWith(3);
   });
 
   it('with a chair picked in the decor editor the wheel turns it and does not zoom; with a tree it zooms again (#207)', async () => {
-    const { scene, bridge, views } = await zoomScene();
+    const store = memoryStore(2);
+    const { scene, bridge } = await zoomScene(store);
     const turns: number[] = [];
     bridge.on('decorrotate', ({ step }) => turns.push(step));
     const rect = scene.game.canvas.getBoundingClientRect();
@@ -1220,16 +1218,17 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
     bridge.emitCommand('decoredit', { brush: { kind: 'piece', piece: 'chair-wood', info: chair, rotation: 0 }, area: null });
     spin();
     expect(turns).toEqual([-1]);
-    expect(views).toEqual([zoomView(2)]);
+    expect(store.save).not.toHaveBeenCalled();
 
     bridge.emitCommand('decoredit', { brush: { kind: 'piece', piece: 'tree-oak', info: tree, rotation: 0 }, area: null });
     spin();
     expect(turns).toEqual([-1]);
-    expect(views.at(-1)).toEqual(zoomView(3));
+    expect(store.save).toHaveBeenLastCalledWith(3);
   });
 
   it('with a room table picked the wheel turns it too and does not zoom (#207, #208)', async () => {
-    const { scene, bridge, views } = await zoomScene();
+    const store = memoryStore(2);
+    const { scene, bridge } = await zoomScene(store);
     const turns: number[] = [];
     bridge.on('decorrotate', ({ step }) => turns.push(step));
     const rect = scene.game.canvas.getBoundingClientRect();
@@ -1242,7 +1241,7 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
     bridge.emitCommand('decoredit', { brush: { kind: 'piece', piece: 'table-meeting', info: { kind: 'table', footprint: { w: 7, h: 5 } }, rotation: 0 }, area: null });
     spin();
     expect(turns).toEqual([-1]);
-    expect(views).toEqual([zoomView(2)]);
+    expect(store.save).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -1270,10 +1269,9 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
     expect({ tx: Math.floor(goal!.x / TILE), ty: Math.floor(goal!.y / TILE) }).toEqual(tile);
   });
 
-  it.each(['SHUTDOWN', 'game.destroy'])('%s releases the zoom subscription', async (how) => {
-    const { scene, bridge, views } = await zoomScene();
-    bridge.emitCommand('zoom', { action: 'in' });
-    expect(views.at(-1)).toEqual(zoomView(3));
+  it.each(['SHUTDOWN', 'game.destroy'])('%s destroys the zoom layer', async (how) => {
+    const destroy = vi.spyOn(CameraZoomLayer.prototype, 'destroy');
+    const { scene } = await zoomScene();
 
     if (how === 'SHUTDOWN') {
       scene.scene.stop();
@@ -1283,9 +1281,9 @@ describe('OfficeScene: map zoom (map-zoom)', () => {
       scene.game.step(0, 0);
       games.splice(games.indexOf(scene.game), 1);
     }
-    bridge.emitCommand('zoom', { action: 'out' });
 
-    expect(views.at(-1)).toEqual(zoomView(3));
+    expect(destroy).toHaveBeenCalled();
+    destroy.mockRestore();
   });
 });
 

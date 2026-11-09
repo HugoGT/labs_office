@@ -12,7 +12,6 @@ import type { OfficeDesk } from '../game/desksPort';
 import type { OfficeBridge } from '../game/officeBridge';
 import { BUILT_IN_SPACES_VERSION } from '../game/mapData';
 import { fetchSpacesConfig } from '../game/spacesConfig';
-import { zoomView, type ZoomAction } from '../game/mapZoom';
 import { DEFAULT_NAME } from '../game/officeProtocol';
 import { NO_DEVICES } from '../game/mediaDevices';
 import { RecordingError, getRecordingUrl, startRecording, stopRecording } from '../game/recordingClient';
@@ -1546,38 +1545,10 @@ describe('OfficeShell: exit controls (#66)', () => {
   });
 });
 
-describe('OfficeShell: map zoom control (map-zoom)', () => {
-  it('shows the zoom the scene announces, whichever input changed it', () => {
+describe('OfficeShell: map zoom', () => {
+  it('has no zoom control on screen: the wheel and the keys are the way to zoom', () => {
     render(<OfficeShell />);
-    const bridge = createGameMock.mock.calls[0][1];
-    const group = screen.getByRole('group', { name: 'Zoom del mapa' });
-    expect(group).toHaveTextContent('2x');
-
-    act(() => bridge.emit('zoomchanged', zoomView(0.5)));
-
-    expect(group).toHaveTextContent('0.5x');
-    expect(screen.getByRole('button', { name: 'Alejar' })).toBeDisabled();
-  });
-
-  it('sends each click to the scene as a zoom command, and the label resets to 2x', async () => {
-    const user = userEvent.setup();
-    render(<OfficeShell />);
-    const bridge = createGameMock.mock.calls[0][1];
-    const actions: ZoomAction[] = [];
-    // Stands in for the scene: confirms a reset with the stop it landed on.
-    bridge.onCommand('zoom', ({ action }) => {
-      actions.push(action);
-      if (action === 'reset') bridge.emit('zoomchanged', zoomView(2));
-    });
-    // The limits each disable one button: 0.5x has no zoom out, 4x no zoom in.
-    act(() => bridge.emit('zoomchanged', zoomView(0.5)));
-    await user.click(screen.getByRole('button', { name: 'Acercar' }));
-    act(() => bridge.emit('zoomchanged', zoomView(4)));
-    await user.click(screen.getByRole('button', { name: 'Alejar' }));
-    await user.click(screen.getByRole('button', { name: 'Restablecer zoom a 2x (ahora 4x)' }));
-
-    expect(actions).toEqual(['in', 'out', 'reset']);
-    expect(screen.getByRole('group', { name: 'Zoom del mapa' })).toHaveTextContent('2x');
+    expect(screen.queryByRole('group', { name: 'Zoom del mapa', hidden: true })).not.toBeInTheDocument();
   });
 });
 
@@ -1855,7 +1826,6 @@ describe('OfficeShell: right rail while painting terrain', () => {
     const bridge = createGameMock.mock.calls[0][1];
     const rail = () => [
       screen.getByRole('complementary', { name: 'Personas', hidden: true }),
-      screen.getByRole('group', { name: 'Zoom del mapa', hidden: true }),
       screen.getByRole('button', { name: 'Salir', hidden: true }),
     ];
     rail().forEach((element) => expect(element).toBeVisible());
@@ -1918,7 +1888,7 @@ describe('OfficeShell: while sharing the screen (#304)', () => {
     expect(sidebar()).toBeVisible();
   });
 
-  it('keeps the bottom bar, with its stop button, and the zoom and exit controls', async () => {
+  it('keeps the bottom bar with its stop button, as the rest of the right side steps aside', async () => {
     const onToggleScreenShare = vi.fn();
     useProximityAudioMock.mockReturnValue(
       proximityAudio({ audioAvailable: true, screenShareAvailable: true, screenShareOn: true, toggleScreenShare: onToggleScreenShare }),
@@ -1931,8 +1901,7 @@ describe('OfficeShell: while sharing the screen (#304)', () => {
     await userEvent.click(stop);
     expect(onToggleScreenShare).toHaveBeenCalledTimes(1);
 
-    expect(screen.getByRole('group', { name: 'Zoom del mapa' })).toBeVisible();
-    expect(screen.getByRole('button', { name: 'Salir' })).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Salir', hidden: true })).not.toBeVisible();
   });
 
   it('leaves the sidebar hidden for an editor that still holds the map when the share ends', () => {
@@ -2019,17 +1988,18 @@ describe('OfficeShell: Escape minimizes the shared screen (#304)', () => {
   }
 
   function renderInSpace(session?: { displayName: string; getIdToken: () => Promise<string> }) {
-    const rendered = render(<OfficeShell session={session} />);
+    const onLeaveOffice = vi.fn();
+    const rendered = render(<OfficeShell session={session} onLeaveOffice={onLeaveOffice} />);
     const bridge = createGameMock.mock.calls[0][1];
     const peers = [
       { sessionId: 'ses-ana', name: 'Ana' },
       { sessionId: 'ses-luis', name: 'Luis' },
     ];
     act(() => bridge.emit('voice', { selfSessionId: SELF, selfName: 'Yo', peers, spaceId: 'space-stub' }));
-    return { bridge, rerender: () => rendered.rerender(<OfficeShell session={session} />) };
+    return { bridge, rerender: () => rendered.rerender(<OfficeShell session={session} onLeaveOffice={onLeaveOffice} />) };
   }
 
-  it('puts the own share up as a thumbnail with the sidebar and minimap back, and a click restores it', async () => {
+  it('the own share opens in the foreground: Escape brings the rail back, a second one makes it a thumbnail, and a click restores it', async () => {
     const toggleScreenShare = vi.fn();
     ownShare(toggleScreenShare);
     const { bridge } = renderInSpace();
@@ -2040,10 +2010,15 @@ describe('OfficeShell: Escape minimizes the shared screen (#304)', () => {
 
     act(() => void escape());
 
+    expect(stage()).toBeInTheDocument();
+    expect(sidebar()).toBeVisible();
+    expect(commands.at(-1)).toEqual({ hidden: false });
+
+    act(() => void escape());
+
     expect(stage()).not.toBeInTheDocument();
     expect(thumbnail()).toBeInTheDocument();
     expect(sidebar()).toBeVisible();
-    expect(commands.at(-1)).toEqual({ hidden: false });
     // It only moved: the share keeps going and the bar can still stop it.
     expect(toggleScreenShare).not.toHaveBeenCalled();
     expect(screen.getByRole('button', { name: '🖥️ Dejar de compartir' })).toBeEnabled();
@@ -2052,8 +2027,86 @@ describe('OfficeShell: Escape minimizes the shared screen (#304)', () => {
 
     expect(stage()).toBeInTheDocument();
     expect(thumbnail()).not.toBeInTheDocument();
+    expect(sidebar()).toBeVisible();
+    expect(commands.at(-1)).toEqual({ hidden: false });
+  });
+
+  it('someone watching keeps the right side, until a click on the screen brings it forward', async () => {
+    peerShare('ses-ana', 'Ana');
+    const { bridge } = renderInSpace();
+    const commands: { hidden: boolean }[] = [];
+    bridge.onCommand('hideminimap', (command) => commands.push(command));
+    const exit = () => screen.getByRole('button', { name: 'Salir', hidden: true });
+    expect(sidebar()).toBeVisible();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Ampliar pantalla compartida' }));
     expect(sidebar()).not.toBeVisible();
+    expect(exit()).not.toBeVisible();
     expect(commands.at(-1)).toEqual({ hidden: true });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Reducir pantalla compartida' }));
+    expect(sidebar()).toBeVisible();
+    expect(exit()).toBeVisible();
+    expect(commands.at(-1)).toEqual({ hidden: false });
+
+    await userEvent.click(screen.getByRole('button', { name: 'Ampliar pantalla compartida' }));
+    act(() => void escape());
+    expect(sidebar()).toBeVisible();
+    expect(stage()).toBeInTheDocument();
+  });
+
+  it('a camera clicked comes to the foreground over the share, and Escape gives the stage back to it', async () => {
+    useProximityAudioMock.mockReturnValue(
+      proximityAudio({
+        screenShareTracks: new Map([['ses-ana', fakeTrack()]]),
+        activeScreenSharer: { sessionId: 'ses-ana', name: 'Ana' },
+        videoTracks: new Map([['ses-luis', fakeTrack()]]),
+      }),
+    );
+    renderInSpace();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Poner a Luis en primer plano' }));
+    expect(screen.getByTestId('camera-stage')).toHaveAttribute('data-session-id', 'ses-luis');
+    expect(thumbnail()).toBeInTheDocument();
+    expect(sidebar()).not.toBeVisible();
+
+    act(() => void escape());
+    expect(screen.queryByTestId('camera-stage')).not.toBeInTheDocument();
+    expect(stage()).toBeInTheDocument();
+    expect(sidebar()).toBeVisible();
+  });
+
+  it('the rail comes back when the camera in the foreground goes off, and it stays off the stage if it returns', async () => {
+    const withCamera = () =>
+      useProximityAudioMock.mockReturnValue(proximityAudio({ videoTracks: new Map([['ses-luis', fakeTrack()]]) }));
+    withCamera();
+    const { rerender } = renderInSpace();
+    await userEvent.click(screen.getByRole('button', { name: 'Poner a Luis en primer plano' }));
+    expect(sidebar()).not.toBeVisible();
+
+    useProximityAudioMock.mockReturnValue(proximityAudio({}));
+    rerender();
+    expect(screen.queryByTestId('camera-stage')).not.toBeInTheDocument();
+    expect(sidebar()).toBeVisible();
+
+    withCamera();
+    rerender();
+    expect(screen.queryByTestId('camera-stage')).not.toBeInTheDocument();
+  });
+
+  it('a share ending gives back the rail it took', async () => {
+    peerShare('ses-ana', 'Ana');
+    const { rerender } = renderInSpace();
+    await userEvent.click(screen.getByRole('button', { name: 'Ampliar pantalla compartida' }));
+    expect(sidebar()).not.toBeVisible();
+
+    noShare();
+    rerender();
+    expect(sidebar()).toBeVisible();
+
+    peerShare('ses-ana', 'Ana');
+    rerender();
+    expect(sidebar()).toBeVisible();
   });
 
   it('keeps a sidebar panel open behind the stage just as it was', async () => {
@@ -2067,13 +2120,14 @@ describe('OfficeShell: Escape minimizes the shared screen (#304)', () => {
     rerender();
     act(() => void escape());
 
-    expect(thumbnail()).toBeInTheDocument();
+    expect(stage()).toBeInTheDocument();
     expect(people()).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('the stage opens again for a new share of the same person', () => {
     ownShare();
     const { rerender } = renderInSpace();
+    act(() => void escape());
     act(() => void escape());
     expect(thumbnail()).toBeInTheDocument();
 
@@ -2084,6 +2138,7 @@ describe('OfficeShell: Escape minimizes the shared screen (#304)', () => {
 
     expect(stage()).toBeInTheDocument();
     expect(thumbnail()).not.toBeInTheDocument();
+    expect(sidebar()).not.toBeVisible();
   });
 
   it('someone watching can minimize too, and a takeover opens the stage again', () => {

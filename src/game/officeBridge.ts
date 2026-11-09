@@ -24,7 +24,6 @@ import type { DecorItem, DecorRotation } from './officeDecor';
 import type { CollisionEditCommand } from './collisionEditor';
 import type { CollisionRect, CollisionRotation } from './pieceCollisions';
 import type { ActiveRecordingSnapshot, OfficeConnectionState } from './officeRoomClient';
-import type { ZoomAction, ZoomView } from './mapZoom';
 
 export interface OfficeEventMap {
   /** Current entrance art has rendered, or cannot be loaded. */
@@ -265,8 +264,6 @@ export interface OfficeEventMap {
   collisionpick: { pieceId: string; rotation: CollisionRotation; rects: readonly CollisionRect[]; saved: boolean; defaults: readonly CollisionRect[] };
   /** A rectangle was drawn, moved or resized on the map: the whole new draft, and the rectangle it touched. */
   collisiondraft: { rects: readonly CollisionRect[]; selectedRect: number | null };
-  /** The map zoom: the TARGET stop and what the zoom control may still do, never the animated value. */
-  zoomchanged: ZoomView;
 }
 
 export interface OfficeCommandMap {
@@ -401,11 +398,6 @@ export interface OfficeCommandMap {
    * `CollisionEditLayer`; the colliders change only when the room says so.
    */
   collisionedit: CollisionEditCommand | null;
-  /**
-   * Step or reset the map zoom (map-zoom). An action, not state: it is not in
-   * `STATE_COMMANDS`, so a late subscriber never replays an old press.
-   */
-  zoom: { action: ZoomAction };
 }
 
 export interface OfficeBridge {

@@ -36,9 +36,10 @@
 }
 
 /*
- * Screen share stage (#20): everything between the top edge, the side column
- * and the bottom bar. Informative only, like the bar: `pointer-events: none`
- * keeps the office underneath clickable.
+ * Stage (#20): everything between the top edge, the side column, the bottom
+ * bar and the right rail, whose minimap is a Phaser camera a stage on top
+ * would hide. It takes the pointer (#304): a click brings it to the foreground,
+ * and the map under it must not react to a pointer over the stage.
  */
 .stage {
   position: fixed;
@@ -46,10 +47,21 @@
   /* 12px (bar left) + 264px (tile width) + 12px gap: keeps pace with `.tile`
      below so an enlarged column never overlaps the stage next to it. */
   left: 288px;
-  right: 12px;
+  right: calc(var(--hud-rail-right) + var(--hud-rail-width) + 12px);
   bottom: 137px;
-  pointer-events: none;
   z-index: 5;
+}
+
+/* In the foreground it takes the rail's room too, which steps aside (#304). */
+.stage[data-focused='true'] {
+  right: 12px;
+}
+
+/* Too narrow for a stage beside the rail: it goes over it, as with no room it would vanish. */
+@media (max-width: 899px) {
+  .stage {
+    right: 12px;
+  }
 }
 
 /*
@@ -143,15 +155,15 @@
 }
 
 /*
- * The stage minimized (#304). Unlike the rest of the bar it takes the pointer,
- * only over its own box, because it is the way back to the stage.
+ * The minimized stage and a live camera (#304). Unlike the rest of the bar they
+ * take the pointer, only over their own box, because a click puts them on the stage.
  */
-.stageThumbnail {
+.clickableTile {
   position: relative;
   pointer-events: auto;
 }
 
-.stageRestore {
+.overlayAction {
   position: absolute;
   inset: 0;
   padding: 0;
@@ -161,8 +173,21 @@
   cursor: pointer;
 }
 
-.stageRestore:hover {
+.overlayAction:hover {
   background: #ffffff14;
+}
+
+/* A tint over the whole of what someone is reading would only get in the way. */
+.stage .overlayAction {
+  cursor: zoom-in;
+}
+
+.stage .overlayAction:hover {
+  background: transparent;
+}
+
+.stage[data-focused='true'] .overlayAction {
+  cursor: zoom-out;
 }
 
 /*
