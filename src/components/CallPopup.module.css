@@ -54,36 +54,86 @@
   color: #e5e7eb;
 }
 
-/* Shared screen on top, the faces under it: what does not fit is clipped, never wrapped. */
-.column {
+/*
+ * The tiles scroll if the window is shorter than they are (`callPopupLayout.ts`
+ * shrinks them first), so the pill and the controls under it stay in view.
+ */
+.scroll {
   flex: 1 1 auto;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 8px;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 
-.faces {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+/*
+ * One grid draws the three modes; `callPopupLayout.ts` decides the sizes, set
+ * inline on each tile. Column and grid: the strip alone. Stage: the
+ * foreground big, with the strip on its left or, in a window too narrow for
+ * that, below it. The strip comes after the foreground in the document, so
+ * the areas, not the order, place it.
+ */
+.tiles {
+  display: grid;
+  gap: 8px;
+  justify-content: center;
+  align-content: start;
+  grid-template-areas:
+    'strip'
+    'overflow';
+}
+
+.tiles[data-mode='stage'][data-placement='left'] {
+  grid-template-columns: max-content 1fr;
+  grid-template-areas:
+    'strip foreground'
+    'overflow foreground';
+}
+
+.tiles[data-mode='stage'][data-placement='below'] {
+  grid-template-areas:
+    'foreground'
+    'strip'
+    'overflow';
+}
+
+.foreground {
+  grid-area: foreground;
+}
+
+.strip {
+  grid-area: strip;
+  display: grid;
+  grid-template-columns: repeat(var(--columns, 1), max-content);
+  justify-content: center;
+  align-content: start;
   gap: 8px;
 }
 
-/* The same 16:9 as the tiles in the tab, at the width the column keeps. */
-.face {
-  flex: none;
-  width: 160px;
-  height: 90px;
+.tile {
+  position: relative;
+}
+
+/* The whole tile is the click: a face to the foreground, the screen back to it. */
+.hit {
+  position: absolute;
+  inset: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: var(--radius-control);
+  cursor: pointer;
+}
+
+.hit:focus-visible {
+  outline: 2px solid #22c55e;
+  outline-offset: -2px;
 }
 
 .overflow {
+  grid-area: overflow;
   display: flex;
   justify-content: center;
   align-items: center;
-  height: 32px;
   background: #1f2937;
   border: 2px solid #2b3444;
   border-radius: var(--radius-control);

@@ -9,6 +9,7 @@ import { createGame } from '../game/createGame';
 import { createOfficeDecorClient } from '../game/officeDecorClient';
 import { claimDesk, fetchOfficeDesks, releaseDesk } from '../game/desksClient';
 import type { OfficeDesk } from '../game/desksPort';
+import type { AttachableTrack } from '../game/attachableTrack';
 import type { OfficeBridge } from '../game/officeBridge';
 import { BUILT_IN_SPACES_VERSION } from '../game/mapData';
 import { fetchSpacesConfig } from '../game/spacesConfig';
@@ -2328,8 +2329,11 @@ describe('OfficeShell: floating call popup (#320)', () => {
       addEventListener: events.addEventListener.bind(events),
       removeEventListener: events.removeEventListener.bind(events),
       close: () => events.dispatchEvent(new Event('pagehide')),
-    } as unknown as Window;
-    return { popupWindow, popup: within(popupWindow.document.body) };
+      innerWidth: 200,
+      innerHeight: 300,
+      resizeBy: vi.fn(),
+    };
+    return { popupWindow: popupWindow as unknown as Window, resizeBy: popupWindow.resizeBy, popup: within(popupWindow.document.body) };
   }
 
   function installPictureInPicture() {
@@ -2441,7 +2445,12 @@ describe('OfficeShell: floating call popup (#320)', () => {
 
   it('shows what is being shared as a thumbnail', async () => {
     const pip = installPictureInPicture();
-    const screenTrack = { kind: 'video', attach: () => document.createElement('video'), detach: () => [] };
+    // LiveKit's shape: `detach()` returns every element, `detach(element)` that one element.
+    const screenTrack = {
+      kind: 'video',
+      attach: () => document.createElement('video'),
+      detach: ((element?: HTMLMediaElement) => (element ?? [])) as AttachableTrack['detach'],
+    };
     useProximityAudioMock.mockReturnValue(
       proximityAudio({
         audioAvailable: true,
@@ -2455,6 +2464,31 @@ describe('OfficeShell: floating call popup (#320)', () => {
     fireEvent.click(openButton());
 
     expect(await pip.popup.findByTestId('popup-screen-share')).toBeInTheDocument();
+  });
+
+  it('asks the window to grow as people join the room, and swallows a refusal', async () => {
+    const pip = installPictureInPicture();
+    pip.resizeBy.mockImplementation(() => {
+      throw new DOMException('needs a user gesture', 'NotAllowedError');
+    });
+    useProximityAudioMock.mockReturnValue(proximityAudio({ audioAvailable: true }));
+    render(<OfficeShell />);
+    const bridge = enterRoom();
+    fireEvent.click(openButton());
+    await pip.popup.findByRole('button', { name: 'Micrófono' });
+
+    act(() =>
+      bridge.emit('voice', {
+        selfSessionId: 'yo',
+        selfName: 'Yo',
+        peers: ['a', 'b', 'c', 'd'].map((id) => ({ sessionId: id, name: id })),
+        spaceId: 'space-stub',
+      }),
+    );
+
+    expect(pip.resizeBy).toHaveBeenCalledWith(0, expect.any(Number));
+    expect(pip.resizeBy.mock.lastCall![1]).toBeGreaterThan(0);
+    expect(pip.popup.getAllByTestId('tile-name')).toHaveLength(5);
   });
 
   it('is not offered in the open floor, where calls are by proximity', () => {

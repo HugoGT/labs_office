@@ -1,8 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-/** A narrow column: faces and the shared screen stacked, the controls under them. */
-const POPUP_WIDTH = 240;
-const POPUP_HEIGHT = 560;
+export interface PopupSize {
+  width: number;
+  height: number;
+}
+
+/**
+ * What the window opens at until the content says otherwise: a narrow column
+ * for two people. `CallPopup` keeps the real size up to date as people come
+ * and go (`callPopupLayout.ts`), so this is only the first frame.
+ */
+export const DEFAULT_POPUP_SIZE: PopupSize = { width: 200, height: 330 };
 const POPUP_NAME = 'labs-call-popup';
 const POPUP_TITLE = 'Labs · llamada';
 /**
@@ -28,6 +36,17 @@ export interface CallPopupControl {
   /** Opens the window. A click is the user gesture that lets the browser allow it. */
   open: () => Promise<void>;
   close: () => void;
+  /**
+   * The size the content asks for: used when the window opens, and, if it is
+   * open already, to try to resize it (see `applySize`).
+   */
+  setSize: (size: PopupSize) => void;
+  /**
+   * Retries a resize that was refused. Call it from a user gesture inside the
+   * window (a pointer down): `resizeBy` on a Document PiP window throws a
+   * `NotAllowedError` without transient activation of that window.
+   */
+  applySize: () => void;
 }
 
 interface OpenedWindow {
@@ -36,11 +55,11 @@ interface OpenedWindow {
 }
 
 /** Document PiP, or `null` where the browser lacks it (Firefox, Safari) or refuses (no user gesture). */
-async function openDocumentPip(): Promise<OpenedWindow | null> {
+async function openDocumentPip(size: PopupSize): Promise<OpenedWindow | null> {
   const api = window.documentPictureInPicture;
   if (api === undefined) return null;
   try {
-    return { window: await api.requestWindow({ width: POPUP_WIDTH, height: POPUP_HEIGHT }), variant: 'pip' };
+    return { window: await api.requestWindow({ width: size.width, height: size.height }), variant: 'pip' };
   } catch {
     return null;
   }
@@ -51,9 +70,9 @@ async function openDocumentPip(): Promise<OpenedWindow | null> {
  * browsers, offers the user to allow popups for the site: `null` then, and
  * the next hide or click tries again.
  */
-function openPlainPopup(): OpenedWindow | null {
+function openPlainPopup(size: PopupSize): OpenedWindow | null {
   try {
-    const opened = window.open('', POPUP_NAME, `popup=yes,width=${POPUP_WIDTH},height=${POPUP_HEIGHT}`);
+    const opened = window.open('', POPUP_NAME, `popup=yes,width=${size.width},height=${size.height}`);
     return opened === null ? null : { window: opened, variant: 'popup' };
   } catch {
     return null;
@@ -76,6 +95,24 @@ export function copyStylesheets(source: Document, target: Document): void {
     } else {
       target.head.appendChild(target.importNode(element, true));
     }
+  }
+}
+
+/**
+ * Moves the window's height to the wanted one, never its width (the user
+ * widens it) and never its position (`moveTo` is disabled for Document PiP).
+ * Chrome's docs and the spec say `resizeBy`/`resizeTo` on a Document PiP window
+ * need transient user activation of that window, so without a gesture this
+ * throws `NotAllowedError`; it is swallowed and reported as `false`.
+ */
+function resizeHeightTo(target: Window, height: number): boolean {
+  const delta = height - target.innerHeight;
+  if (delta === 0) return true;
+  try {
+    target.resizeBy(0, delta);
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -103,6 +140,9 @@ export function useCallPopup({ active }: UseCallPopupOptions): CallPopupControl 
   const [opened, setOpened] = useState<OpenedWindow | null>(null);
   const openedRef = useRef<OpenedWindow | null>(null);
   const openingRef = useRef(false);
+  const sizeRef = useRef<PopupSize>(DEFAULT_POPUP_SIZE);
+  // A resize that was refused and waits for a gesture; a size the user chose is never retried.
+  const resizePendingRef = useRef(false);
   // Read after an await: the call may have ended while the browser was opening the window.
   const wantedRef = useRef(active);
 
@@ -123,7 +163,7 @@ export function useCallPopup({ active }: UseCallPopupOptions): CallPopupControl 
     if (openedRef.current !== null || openingRef.current) return;
     openingRef.current = true;
     try {
-      const result = (await openDocumentPip()) ?? openPlainPopup();
+      const result = (await openDocumentPip(sizeRef.current)) ?? openPlainPopup(sizeRef.current);
       if (result === null) return;
       if (!wantedRef.current) {
         result.window.close();
@@ -134,11 +174,30 @@ export function useCallPopup({ active }: UseCallPopupOptions): CallPopupControl 
       // The user can close it from the window itself; closing it here fires this too.
       result.window.addEventListener('pagehide', () => forget(result.window));
       openedRef.current = result;
+      // It opened at the wanted size: nothing to retry until the content changes.
+      resizePendingRef.current = false;
       setOpened(result);
     } finally {
       openingRef.current = false;
     }
   }, [forget]);
+
+  const applySize = useCallback(() => {
+    const current = openedRef.current;
+    if (current === null || !resizePendingRef.current) return;
+    resizePendingRef.current = !resizeHeightTo(current.window, sizeRef.current.height);
+  }, []);
+
+  const setSize = useCallback(
+    (size: PopupSize) => {
+      const changed = size.width !== sizeRef.current.width || size.height !== sizeRef.current.height;
+      sizeRef.current = size;
+      if (!changed) return;
+      resizePendingRef.current = true;
+      applySize();
+    },
+    [applySize],
+  );
 
   useEffect(() => {
     wantedRef.current = active;
@@ -204,5 +263,5 @@ export function useCallPopup({ active }: UseCallPopupOptions): CallPopupControl 
     };
   }, [active, open]);
 
-  return { popupWindow: opened?.window ?? null, variant: opened?.variant ?? null, open, close };
+  return { popupWindow: opened?.window ?? null, variant: opened?.variant ?? null, open, close, setSize, applySize };
 }

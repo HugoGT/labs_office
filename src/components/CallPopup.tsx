@@ -1,17 +1,32 @@
-import { type ReactNode, useEffect, useState } from 'react';
+import { type CSSProperties, type ReactNode, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { AttachableTrack } from '../game/attachableTrack';
 import type { OfficeBridge, OfficeEventMap } from '../game/officeBridge';
 import { selectScreenShareStage } from '../game/screenShare';
-import { selectVideoTiles } from '../game/videoTileSelection';
 import type { CallPopupControl } from '../hooks/useCallPopup';
+import { OVERFLOW_HEIGHT, SCREEN_TILE_ID, desiredPopupSize, layoutCallPopup, type TileSize } from './callPopupLayout';
 import styles from './CallPopup.module.css';
 import { VideoTile } from './VideoTile';
 
-/** Faces that fit the column, counting the "+N" counter as one of them. */
-const MAX_FACES = 4;
-
 const INITIAL_VOICE: OfficeEventMap['voice'] = { selfSessionId: null, selfName: '', peers: [], spaceId: null };
+
+/** Inner size of the popup window, kept up to date on its own `resize`: it is not the tab's. */
+function useWindowSize(target: Window | null): { width: number; height: number } {
+  const [size, setSize] = useState({ width: 0, height: 0 });
+  useEffect(() => {
+    if (target === null) {
+      setSize({ width: 0, height: 0 });
+      return undefined;
+    }
+    const read = () => setSize({ width: target.innerWidth || 0, height: target.innerHeight || 0 });
+    read();
+    target.addEventListener('resize', read);
+    return () => target.removeEventListener('resize', read);
+  }, [target]);
+  return size;
+}
+
+const sized = ({ width, height }: TileSize): CSSProperties => ({ width, height });
 
 export interface CallPopupProps {
   popup: CallPopupControl;
@@ -78,6 +93,10 @@ export function CallPopup({
   const [voice, setVoice] = useState<OfficeEventMap['voice']>(INITIAL_VOICE);
   const [portraits, setPortraits] = useState<Record<string, string> | null>(null);
   const [characterPortraits, setCharacterPortraits] = useState<Record<string, string> | null>(null);
+  // The face this popup brought to the foreground. Its own: the tab's `stageFocus` is not touched.
+  const [focusedId, setFocusedId] = useState<string | null>(null);
+  const { popupWindow, variant, setSize } = popup;
+  const windowSize = useWindowSize(popupWindow);
 
   useEffect(() => {
     const offVoice = bridge.on('voice', setVoice);
@@ -94,31 +113,105 @@ export function CallPopup({
     ...(voice.selfSessionId === null ? [] : [{ sessionId: voice.selfSessionId, name: voice.selfName }]),
     ...voice.peers,
   ];
-  const trackOf = (sessionId: string) => (sessionId === voice.selfSessionId ? localVideoTrack : (videoTracks.get(sessionId) ?? null));
-  // Whoever speaks gets a slot before anyone else; the rest keep the order of the tiles.
-  const selection = selectVideoTiles(
-    people.map((person) => ({ sessionId: person.sessionId, hasVideo: false, speaking: speakers.has(person.sessionId) })),
-    MAX_FACES,
-    [],
-  );
-  const faces = selection.visible
-    .map((sessionId) => people.find((person) => person.sessionId === sessionId)!)
-    .sort((a, b) => Number(speakers.has(b.sessionId)) - Number(speakers.has(a.sessionId)));
+  // Someone who left takes the focus with them: coming back does not bring it back.
+  const focusedPresent = focusedId !== null && people.some((person) => person.sessionId === focusedId);
+  useEffect(() => {
+    if (focusedId !== null && !focusedPresent) setFocusedId(null);
+  }, [focusedId, focusedPresent]);
 
-  // Unlike the tab's stage, nothing is "minimized" here: the share is always the thumbnail.
+  const nameOf = (sessionId: string) => people.find((person) => person.sessionId === sessionId)?.name ?? '';
+  const trackOf = (sessionId: string) => (sessionId === voice.selfSessionId ? localVideoTrack : (videoTracks.get(sessionId) ?? null));
+
+  // Unlike the tab's stage, a share is always shown here: it is the first thing the popup is for.
   const share = selectScreenShareStage({
     activeSharer: activeScreenSharer,
     selfSessionId: voice.selfSessionId,
     localTrack: localScreenShareTrack,
     remoteTracks: screenShareTracks,
   });
-  const sharer = share && people.find((person) => person.sessionId === share.sessionId);
   const shareLabel =
-    share?.sessionId === voice.selfSessionId ? 'Tu pantalla' : sharer ? `Pantalla de ${sharer.name}` : 'Pantalla compartida';
+    share?.sessionId === voice.selfSessionId ? 'Tu pantalla' : share && nameOf(share.sessionId) ? `Pantalla de ${nameOf(share.sessionId)}` : 'Pantalla compartida';
 
-  const open = popup.popupWindow !== null;
+  // Only the installed app's window has the status pill; a window not open yet is asked for it.
+  const hasPill = variant !== 'popup' && placeLabel !== null;
+  const layoutPeople = people.map((person) => ({ sessionId: person.sessionId, speaking: speakers.has(person.sessionId) }));
+  const layout = layoutCallPopup({
+    width: windowSize.width,
+    height: windowSize.height,
+    people: layoutPeople,
+    hasShare: share !== null,
+    hasPill,
+    focusedId: focusedPresent ? focusedId : null,
+  });
+
+  // The window is kept the size of its content: the first frame when it opens, a resize while it is open.
+  const desired = desiredPopupSize({
+    width: popupWindow !== null && windowSize.width > 0 ? windowSize.width : null,
+    people: layoutPeople,
+    hasShare: share !== null,
+    hasPill,
+    focusedId: layout.focusedId,
+  });
+  useEffect(() => {
+    setSize({ width: desired.width, height: desired.height });
+  }, [setSize, desired.width, desired.height]);
+
+  const open = popupWindow !== null;
   const toggleLabel = open ? 'Cerrar ventana flotante de la llamada' : 'Abrir ventana flotante de la llamada';
   const shareDisabled = controlsDisabled || !screenShareAvailable;
+
+  /** A tile of a face or of the screen, `fit` and click included. */
+  const tile = (id: string, size: TileSize, inForeground: boolean) => {
+    const isScreen = id === SCREEN_TILE_ID;
+    if (isScreen && share === null) return null;
+    const label = isScreen ? shareLabel : nameOf(id);
+    const pressLabel = isScreen
+      ? 'Poner la pantalla compartida en primer plano'
+      : inForeground
+        ? `Quitar a ${label} del primer plano`
+        : `Poner a ${label} en primer plano`;
+    return (
+      <div key={id} className={styles.tile} style={sized(size)} data-testid={isScreen ? 'popup-screen-share' : 'popup-tile'}>
+        <VideoTile
+          sessionId={isScreen ? share!.sessionId : id}
+          name={label}
+          portraits={portraits}
+          characterPortraits={characterPortraits}
+          track={isScreen ? share!.track : trackOf(id)}
+          speaking={!isScreen && speakers.has(id)}
+          fit={isScreen || inForeground ? 'contain' : 'cover'}
+        />
+        {/* The screen in the foreground has nothing to click: it is where a click on a face leaves from. */}
+        {!(isScreen && inForeground) && (
+          <button
+            type="button"
+            className={styles.hit}
+            aria-label={pressLabel}
+            title={pressLabel}
+            onClick={() => setFocusedId(isScreen || layout.foreground === id ? null : id)}
+          />
+        )}
+      </div>
+    );
+  };
+
+  const overflow =
+    layout.hiddenCount > 0 ? (
+      <div className={styles.overflow} style={{ height: OVERFLOW_HEIGHT }}>
+        {layout.hiddenCount === 1 ? '+1 persona' : `+${layout.hiddenCount} personas`}
+      </div>
+    ) : null;
+  const strip = (
+    <div
+      className={styles.strip}
+      data-testid="popup-strip"
+      role="group"
+      aria-label="Personas en la sala"
+      style={{ '--columns': layout.columns } as CSSProperties}
+    >
+      {layout.tiles.map((id) => tile(id, layout.tileSize, false))}
+    </div>
+  );
 
   return (
     <>
@@ -134,44 +227,28 @@ export function CallPopup({
           <span aria-hidden="true">🗗</span>
         </button>
       )}
-      {popup.popupWindow &&
+      {popupWindow &&
         createPortal(
-          <div className={styles.popup} data-variant={popup.variant}>
-            <div className={styles.column}>
-              {share && (
-                <div className={styles.face} data-testid="popup-screen-share">
-                  <VideoTile
-                    sessionId={share.sessionId}
-                    name={shareLabel}
-                    portraits={portraits}
-                    characterPortraits={characterPortraits}
-                    track={share.track}
-                    speaking={false}
-                    fit="contain"
-                  />
-                </div>
-              )}
-              <div className={styles.faces} role="group" aria-label="Personas en la sala">
-                {faces.map((person) => (
-                  <div key={person.sessionId} className={styles.face}>
-                    <VideoTile
-                      sessionId={person.sessionId}
-                      name={person.name}
-                      portraits={portraits}
-                      characterPortraits={characterPortraits}
-                      track={trackOf(person.sessionId)}
-                      speaking={speakers.has(person.sessionId)}
-                    />
-                  </div>
-                ))}
-                {selection.hiddenCount > 0 && (
-                  <div className={`${styles.face} ${styles.overflow}`}>
-                    {selection.hiddenCount === 1 ? '+1 persona' : `+${selection.hiddenCount} personas`}
+          // A pointer down is the user gesture a refused resize of the window waits for.
+          <div className={styles.popup} data-variant={variant} onPointerDown={popup.applySize}>
+            <div className={styles.scroll}>
+              <div
+                className={styles.tiles}
+                data-testid="popup-tiles"
+                data-mode={layout.mode}
+                data-placement={layout.stripPlacement ?? undefined}
+                style={{ '--columns': layout.columns } as CSSProperties}
+              >
+                {layout.foreground !== null && layout.foregroundSize !== null && (
+                  <div className={styles.foreground} data-testid="popup-foreground" style={sized(layout.foregroundSize)}>
+                    {tile(layout.foreground, layout.foregroundSize, true)}
                   </div>
                 )}
+                {strip}
+                {overflow}
               </div>
             </div>
-            {popup.variant === 'pip' && placeLabel !== null && (
+            {hasPill && (
               <p className={styles.pill} role="status" data-testid="popup-status-pill">
                 <span className={styles.pillDot} aria-hidden="true" />
                 {placeLabel}
@@ -189,7 +266,7 @@ export function CallPopup({
               </ControlButton>
             </div>
           </div>,
-          popup.popupWindow.document.body,
+          popupWindow.document.body,
         )}
     </>
   );
