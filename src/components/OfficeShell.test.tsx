@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createDeskAdminClient } from '../dashboard/deskAdminClient';
@@ -2310,5 +2310,281 @@ describe('OfficeShell: devices (#284)', () => {
     await user.click(screen.getByRole('menuitemradio', { name: 'Headset USB' }));
 
     expect(selectDevice).toHaveBeenCalledExactlyOnceWith('audioinput', 'headset');
+  });
+});
+
+describe('OfficeShell: floating call popup (#320)', () => {
+  /**
+   * A Document Picture-in-Picture double. Its document is an iframe's, so it
+   * is a real one; its `close()` only fires `pagehide`, since jsdom really
+   * tears down an iframe window it is asked to close.
+   */
+  function fakePopupWindow() {
+    const frame = document.createElement('iframe');
+    document.body.append(frame);
+    const events = new EventTarget();
+    const popupWindow = {
+      document: frame.contentDocument!,
+      addEventListener: events.addEventListener.bind(events),
+      removeEventListener: events.removeEventListener.bind(events),
+      close: () => events.dispatchEvent(new Event('pagehide')),
+    } as unknown as Window;
+    return { popupWindow, popup: within(popupWindow.document.body) };
+  }
+
+  function installPictureInPicture() {
+    const window_ = fakePopupWindow();
+    const requestWindow = vi.fn(async () => window_.popupWindow);
+    Object.defineProperty(window, 'documentPictureInPicture', { configurable: true, value: { requestWindow, window: null } });
+    return { ...window_, requestWindow };
+  }
+
+  /** Inside a room, with a call: the one case the popup exists in. */
+  function enterRoom(name = 'Sala de Juntas') {
+    const bridge = createGameMock.mock.calls[0][1];
+    act(() => bridge.emit('room', { spaceId: 'space-stub', name }));
+    return bridge;
+  }
+
+  afterEach(() => {
+    cleanup();
+    document.querySelectorAll('iframe').forEach((frame) => frame.remove());
+    Reflect.deleteProperty(window, 'documentPictureInPicture');
+    Reflect.deleteProperty(document, 'visibilityState');
+    vi.restoreAllMocks();
+  });
+
+  const openButton = () => screen.getByRole('button', { name: 'Abrir ventana flotante de la llamada' });
+  const openButtonOrNull = () => screen.queryByRole('button', { name: /ventana flotante/ });
+
+  it('opens by hand in a room, with the same mic, camera and share state as the bar', async () => {
+    const pip = installPictureInPicture();
+    useProximityAudioMock.mockReturnValue(
+      proximityAudio({ audioAvailable: true, micOn: true, camOn: false, screenShareOn: true, screenShareAvailable: true }),
+    );
+    render(<OfficeShell />);
+    enterRoom();
+
+    fireEvent.click(openButton());
+
+    expect(await pip.popup.findByRole('button', { name: 'Micrófono' })).toHaveAttribute('aria-pressed', 'true');
+    expect(pip.popup.getByRole('button', { name: 'Cámara' })).toHaveAttribute('aria-pressed', 'false');
+    expect(pip.popup.getByRole('button', { name: 'Compartir pantalla' })).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByRole('button', { name: /Mic/ })).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('follows the hook when the state changes, so the popup and the bar never disagree', async () => {
+    const pip = installPictureInPicture();
+    useProximityAudioMock.mockReturnValue(proximityAudio({ audioAvailable: true, micOn: true }));
+    const { rerender } = render(<OfficeShell />);
+    enterRoom();
+    fireEvent.click(openButton());
+    await pip.popup.findByRole('button', { name: 'Micrófono' });
+
+    useProximityAudioMock.mockReturnValue(proximityAudio({ audioAvailable: true, micOn: false }));
+    rerender(<OfficeShell />);
+
+    expect(pip.popup.getByRole('button', { name: 'Micrófono' })).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.getByRole('button', { name: /Mic/ })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('mutes, turns the camera off and shares through the same toggles as the bar', async () => {
+    const pip = installPictureInPicture();
+    const toggleMic = vi.fn();
+    const toggleCam = vi.fn();
+    const toggleScreenShare = vi.fn();
+    useProximityAudioMock.mockReturnValue(
+      proximityAudio({ audioAvailable: true, screenShareAvailable: true, toggleMic, toggleCam, toggleScreenShare }),
+    );
+    render(<OfficeShell />);
+    enterRoom();
+    fireEvent.click(openButton());
+
+    fireEvent.click(await pip.popup.findByRole('button', { name: 'Micrófono' }));
+    fireEvent.click(pip.popup.getByRole('button', { name: 'Cámara' }));
+    fireEvent.click(pip.popup.getByRole('button', { name: 'Compartir pantalla' }));
+
+    expect(toggleMic).toHaveBeenCalledOnce();
+    expect(toggleCam).toHaveBeenCalledOnce();
+    expect(toggleScreenShare).toHaveBeenCalledOnce();
+  });
+
+  it('has no hang up: closing the window is the way out of it', async () => {
+    const pip = installPictureInPicture();
+    useProximityAudioMock.mockReturnValue(proximityAudio({ audioAvailable: true }));
+    render(<OfficeShell onLeaveOffice={vi.fn()} />);
+    enterRoom();
+    fireEvent.click(openButton());
+    await pip.popup.findByRole('button', { name: 'Micrófono' });
+
+    expect(pip.popup.queryByRole('button', { name: /Colgar/ })).toBeNull();
+  });
+
+  it('shows the people in the room, and the place in the status pill', async () => {
+    const pip = installPictureInPicture();
+    useProximityAudioMock.mockReturnValue(proximityAudio({ audioAvailable: true, speakers: new Set(['ana']) }));
+    render(<OfficeShell />);
+    const bridge = enterRoom('Sala de Juntas');
+    act(() =>
+      bridge.emit('voice', {
+        selfSessionId: 'yo',
+        selfName: 'Yo',
+        peers: [{ sessionId: 'ana', name: 'Ana' }],
+        spaceId: 'space-stub',
+      }),
+    );
+    fireEvent.click(openButton());
+
+    expect(await pip.popup.findByText('Ana')).toBeInTheDocument();
+    expect(pip.popup.getByTestId('popup-status-pill')).toHaveTextContent('Sala de Juntas');
+  });
+
+  it('shows what is being shared as a thumbnail', async () => {
+    const pip = installPictureInPicture();
+    const screenTrack = { kind: 'video', attach: () => document.createElement('video'), detach: () => [] };
+    useProximityAudioMock.mockReturnValue(
+      proximityAudio({
+        audioAvailable: true,
+        activeScreenSharer: { sessionId: 'ana', name: 'Ana' },
+        screenShareTracks: new Map([['ana', screenTrack]]),
+      }),
+    );
+    render(<OfficeShell />);
+    const bridge = enterRoom();
+    act(() => bridge.emit('voice', { selfSessionId: 'yo', selfName: 'Yo', peers: [{ sessionId: 'ana', name: 'Ana' }], spaceId: 'space-stub' }));
+    fireEvent.click(openButton());
+
+    expect(await pip.popup.findByTestId('popup-screen-share')).toBeInTheDocument();
+  });
+
+  it('is not offered in the open floor, where calls are by proximity', () => {
+    installPictureInPicture();
+    useProximityAudioMock.mockReturnValue(proximityAudio({ audioAvailable: true }));
+
+    render(<OfficeShell />);
+
+    expect(openButtonOrNull()).toBeNull();
+  });
+
+  it('does not open when the tab is left in the open floor', async () => {
+    vi.useFakeTimers();
+    const pip = installPictureInPicture();
+    const open = vi.spyOn(window, 'open').mockImplementation(() => null);
+    useProximityAudioMock.mockReturnValue(proximityAudio({ audioAvailable: true }));
+    render(<OfficeShell />);
+
+    act(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await act(async () => { vi.advanceTimersByTime(2000); });
+
+    expect(pip.requestWindow).not.toHaveBeenCalled();
+    expect(open).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  it('closes when the player leaves the room', async () => {
+    const pip = installPictureInPicture();
+    useProximityAudioMock.mockReturnValue(proximityAudio({ audioAvailable: true }));
+    render(<OfficeShell />);
+    const bridge = enterRoom();
+    fireEvent.click(openButton());
+    await pip.popup.findByRole('button', { name: 'Micrófono' });
+
+    act(() => bridge.emit('room', { spaceId: null, name: null }));
+
+    expect(pip.popup.queryByRole('button', { name: 'Micrófono' })).toBeNull();
+    expect(openButtonOrNull()).toBeNull();
+  });
+
+  it('opens by itself when the browser fires enterpictureinpicture as the tab is left', async () => {
+    const pip = installPictureInPicture();
+    const handlers = new Map<string, (() => void) | null>();
+    Object.defineProperty(navigator, 'mediaSession', {
+      configurable: true,
+      value: { setActionHandler: (action: string, handler: (() => void) | null) => handlers.set(action, handler) },
+    });
+    useProximityAudioMock.mockReturnValue(proximityAudio({ audioAvailable: true }));
+    render(<OfficeShell />);
+    enterRoom();
+
+    await act(async () => handlers.get('enterpictureinpicture')?.());
+
+    expect(pip.requestWindow).toHaveBeenCalledOnce();
+    expect(await pip.popup.findByRole('button', { name: 'Micrófono' })).toBeInTheDocument();
+    Reflect.deleteProperty(navigator, 'mediaSession');
+  });
+
+  it('opens a plain popup when the tab is hidden and Document Picture-in-Picture is not there', async () => {
+    vi.useFakeTimers();
+    const { popupWindow, popup } = fakePopupWindow();
+    const open = vi.spyOn(window, 'open').mockImplementation(() => popupWindow);
+    useProximityAudioMock.mockReturnValue(proximityAudio({ audioAvailable: true }));
+    render(<OfficeShell />);
+    enterRoom();
+
+    act(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    await act(async () => { vi.advanceTimersByTime(2000); });
+
+    expect(open).toHaveBeenCalledOnce();
+    expect(popup.getByRole('button', { name: 'Micrófono' })).toBeInTheDocument();
+    // The plain popup has no status pill.
+    expect(popup.queryByTestId('popup-status-pill')).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it('closes when the user comes back to the tab', async () => {
+    const pip = installPictureInPicture();
+    useProximityAudioMock.mockReturnValue(proximityAudio({ audioAvailable: true }));
+    render(<OfficeShell />);
+    enterRoom();
+    fireEvent.click(openButton());
+    await pip.popup.findByRole('button', { name: 'Micrófono' });
+
+    act(() => {
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+
+    expect(pip.popup.queryByRole('button', { name: 'Micrófono' })).toBeNull();
+    expect(openButton()).toBeInTheDocument();
+  });
+
+  it('closes when the call ends', async () => {
+    const pip = installPictureInPicture();
+    useProximityAudioMock.mockReturnValue(proximityAudio({ audioAvailable: true }));
+    const { rerender } = render(<OfficeShell />);
+    enterRoom();
+    fireEvent.click(openButton());
+    await pip.popup.findByRole('button', { name: 'Micrófono' });
+
+    useProximityAudioMock.mockReturnValue(proximityAudio({ audioAvailable: false }));
+    rerender(<OfficeShell />);
+
+    expect(pip.popup.queryByRole('button', { name: 'Micrófono' })).toBeNull();
+    expect(openButtonOrNull()).toBeNull();
+  });
+
+  it('offers no popup without a call', () => {
+    installPictureInPicture();
+    useProximityAudioMock.mockReturnValue(proximityAudio({ audioAvailable: false }));
+
+    render(<OfficeShell />);
+    enterRoom();
+
+    expect(openButtonOrNull()).toBeNull();
+  });
+
+  it('keeps the bottom bar as it was where the popup is offered', () => {
+    useProximityAudioMock.mockReturnValue(proximityAudio({ audioAvailable: true, micOn: true }));
+
+    render(<OfficeShell />);
+    enterRoom();
+
+    expect(screen.getByRole('button', { name: /Mic/ })).toHaveAttribute('aria-pressed', 'true');
   });
 });

@@ -283,3 +283,52 @@ describe('VideoTile: pack character portrait (art migration, step 6)', () => {
     expect(img).toHaveAttribute('width', String(PORTRAIT_SOURCE_WIDTH * PORTRAIT_SCALE));
   });
 });
+
+/**
+ * A track that lives in several tiles at once (the call popup shows the same
+ * camera as the tab, #320). Like LiveKit's, `detach(element)` lets go of that
+ * element only and `detach()` of all of them.
+ */
+function sharedVideoTrack(): AttachableTrack {
+  const elements: HTMLMediaElement[] = [];
+  // LiveKit's contract, which a plain array return here once hid: `detach()`
+  // returns every element, `detach(element)` returns that one element, not a list.
+  const detach = (element?: HTMLMediaElement) => {
+    if (!element) return elements.splice(0);
+    elements.splice(elements.indexOf(element), 1);
+    return element;
+  };
+  return {
+    kind: 'video',
+    attach() {
+      const element = document.createElement('video');
+      elements.push(element);
+      return element;
+    },
+    detach: detach as AttachableTrack['detach'],
+  };
+}
+
+describe('VideoTile: the video element it attaches', () => {
+  it('shows the camera and removes it again when the tile goes away', () => {
+    const { container, unmount } = render(
+      <VideoTile sessionId="par-1" name="Par Uno" portraits={null} track={sharedVideoTrack()} speaking={false} />,
+    );
+    expect(container.querySelector('video')).not.toBeNull();
+
+    unmount();
+
+    expect(container.querySelector('video')).toBeNull();
+  });
+
+  it('leaves the other tiles of the same track playing when one goes away', () => {
+    const track = sharedVideoTrack();
+    const props = { name: 'Par Uno', portraits: null, track, speaking: false } as const;
+    const first = render(<VideoTile sessionId="par-1" {...props} />);
+    const second = render(<VideoTile sessionId="par-1" {...props} />);
+
+    second.unmount();
+
+    expect(first.container.querySelector('video')).not.toBeNull();
+  });
+});

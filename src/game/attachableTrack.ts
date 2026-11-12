@@ -15,5 +15,13 @@
 export interface AttachableTrack {
   readonly kind: string;
   attach(): HTMLMediaElement;
+  /**
+   * Without an element, lets go of every one the track is attached to and
+   * returns them all. With one, lets go of that element only; LiveKit returns
+   * that single element (not a list), so the result is `unknown` here and
+   * callers rely on the effect, never on the value. The same track can play in
+   * several windows at once, the tab and the call popup (#320).
+   */
   detach(): HTMLMediaElement[];
+  detach(element: HTMLMediaElement): unknown;
 }

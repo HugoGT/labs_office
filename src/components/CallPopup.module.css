@@ -1,0 +1,157 @@
+/*
+ * The button in the tab that opens the floating call window (#320). Bottom
+ * left: the bottom bar is centered and the exit controls sit on the right.
+ */
+.opener {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 10;
+  width: 36px;
+  height: 36px;
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  background: #111827f2;
+  color: #e5e7eb;
+  border: 1px solid #2b3444;
+  border-radius: var(--radius-control);
+  font-size: 16px;
+  font-family: inherit;
+  cursor: pointer;
+  box-shadow: 0 8px 30px #0009;
+}
+
+.opener:hover {
+  border-color: #4b5563;
+}
+
+.opener[aria-pressed='true'] {
+  border-color: #22c55e;
+}
+
+/* Under 720px the bar takes the whole width: sit above it, like the exit controls (index.css, #86). */
+@media (max-width: 719px) {
+  .opener {
+    bottom: calc(16px + var(--hud-bar-height, 0px) + 8px);
+  }
+}
+
+/*
+ * Everything below lives in the other window (Document Picture-in-Picture or
+ * a plain popup), whose document gets a copy of the app's stylesheets
+ * (`copyStylesheets`), so the tokens of index.css and `VideoTile`'s own
+ * classes apply there too. The window is a narrow column the OS lets the
+ * user move and place on any side of the screen, so nothing here drags.
+ */
+.popup {
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+  background: #0d1117;
+  color: #e5e7eb;
+}
+
+/* Shared screen on top, the faces under it: what does not fit is clipped, never wrapped. */
+.column {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  overflow: hidden;
+}
+
+.faces {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The same 16:9 as the tiles in the tab, at the width the column keeps. */
+.face {
+  flex: none;
+  width: 160px;
+  height: 90px;
+}
+
+.overflow {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 32px;
+  background: #1f2937;
+  border: 2px solid #2b3444;
+  border-radius: var(--radius-control);
+  font-size: 13px;
+}
+
+/* The status of the installed app's window: where the player is. */
+.pill {
+  flex: none;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 100%;
+  padding: 4px 10px;
+  background: #14532d;
+  color: #dcfce7;
+  border-radius: var(--radius-tag);
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pillDot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  background: #22c55e;
+  border-radius: 50%;
+}
+
+.controls {
+  flex: none;
+  display: flex;
+  gap: 8px;
+}
+
+.btn {
+  flex: 1 1 0;
+  height: 36px;
+  background: #1f2937;
+  color: #e5e7eb;
+  border: 1px solid #374151;
+  border-radius: var(--radius-control);
+  font-size: 16px;
+  font-family: inherit;
+  cursor: pointer;
+}
+
+.btn:hover:not(:disabled) {
+  border-color: #4b5563;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* A muted mic or an off camera is the state worth seeing at a glance; a share is the opposite. */
+.btn[aria-pressed='false'] {
+  color: #fca5a5;
+}
+
+.btn[aria-label='Compartir pantalla'][aria-pressed='false'] {
+  color: inherit;
+}
+
+.btn[aria-label='Compartir pantalla'][aria-pressed='true'] {
+  border-color: #22c55e;
+}
