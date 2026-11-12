@@ -27,7 +27,7 @@ import type { OfficeDecorPort } from '../game/officeDecorPort';
 import type { OfficeDesk } from '../game/desksPort';
 import { createOfficeBridge, type OfficeEventMap } from '../game/officeBridge';
 import { resolveOfficeEndpoint } from '../game/officeEndpoint';
-import { DEFAULT_NAME, DEFAULT_STATUS, type AccessDeniedReason, type PresenceStatus } from '../game/officeProtocol';
+import { DEFAULT_NAME, DEFAULT_STATUS, DO_NOT_DISTURB, type AccessDeniedReason, type PresenceStatus } from '../game/officeProtocol';
 import {
   RecordingError,
   getRecordingUrl,
@@ -40,6 +40,7 @@ import type { RosterPeer } from '../game/roster';
 import type { StageFocus } from '../game/screenShare';
 import { useCallInvitations } from '../hooks/useCallInvitations';
 import { useDeskHover } from '../hooks/useDeskHover';
+import { useCallPopup } from '../hooks/useCallPopup';
 import { useDesks } from '../hooks/useDesks';
 import { useInstallPrompt } from '../hooks/useInstallPrompt';
 import { useOfficeAdminRole } from '../hooks/useOfficeAdminRole';
@@ -52,6 +53,7 @@ import { placeLabel, placeOf } from './roomPlace';
 import { NoticeStack } from './NoticeStack';
 import { AudioUnblockPrompt } from './AudioUnblockPrompt';
 import { BottomBar } from './BottomBar';
+import { CallPopup } from './CallPopup';
 import { deviceNoticeMessage } from './deviceNotices';
 import { CallInvitationStack } from './CallInvitationStack';
 import { ContextMenu, type PeerMenuAction } from './ContextMenu';
@@ -451,6 +453,12 @@ export function OfficeShell({
     onMeetingNotice: (notice: MeetingNotice) => setToastMessage(MEETING_NOTICES[notice]),
     onDeviceNotice: (notice) => setDeviceNotice(deviceNoticeMessage(notice)),
   });
+
+  // The floating window of #320 lives while there is a live connection in a
+  // room or desk: calls on the open floor are by proximity and have no popup.
+  // Its controls are this component's toggles, not copies of them.
+  const callPopupActive = audioAvailable && spaceId !== null;
+  const callPopup = useCallPopup({ active: callPopupActive });
 
   /**
    * Mismo patron que `setStatus` (D7): React es el dueno del `Set` de
@@ -945,6 +953,26 @@ export function OfficeShell({
         }}
         stageFocus={stageFocus}
         onStageFocusChange={setStageFocus}
+      />
+      <CallPopup
+        popup={callPopup}
+        bridge={bridge}
+        available={callPopupActive}
+        placeLabel={place === null ? null : placeLabel(place)}
+        speakers={speakers}
+        videoTracks={videoTracks}
+        localVideoTrack={localVideoTrack}
+        screenShareTracks={screenShareTracks}
+        localScreenShareTrack={localScreenShareTrack}
+        activeScreenSharer={activeScreenSharer?.sessionId ?? null}
+        micOn={micOn}
+        camOn={camOn}
+        screenShareOn={screenShareOn}
+        screenShareAvailable={screenShareAvailable}
+        controlsDisabled={!audioAvailable || status === DO_NOT_DISTURB}
+        onToggleMic={toggleMic}
+        onToggleCam={toggleCam}
+        onToggleScreenShare={toggleScreenShare}
       />
       <ContextMenu menu={menu} onAction={handleMenuAction} onClose={closeMenu} />
       {deskBanner}

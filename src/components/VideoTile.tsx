@@ -84,7 +84,11 @@ export function VideoTile({
       // Igual que `remoteAudioSink.ts`: `detach()` desvincula la pista de sus
       // elementos pero no los saca del documento -- retirarlos es tarea de
       // quien adjunto, y aqui esa dueña es la tile, nunca un sink aparte.
-      for (const detached of track.detach()) detached.remove();
+      // Only this element: the same track can also play in the call popup (#320),
+      // and a bare `detach()` would black out the one in the other window.
+      // `detach(element)` returns that one element, not a list: iterating it
+      // threw on cleanup and took the whole app down (#320).
+      track.detach(element);
       element.remove();
     };
   }, [track, fit]);
